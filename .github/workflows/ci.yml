@@ -30,7 +30,12 @@ jobs:
         with:
           go-version: '1.22'
       - run: cd compilers/go && go build ./...
+      - run: cd compilers/go && go build -o tsop-go .
       - run: cd compilers/go && go test -race -v ./...
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tsop-go
+          path: compilers/go/tsop-go
 
   rust:
     name: Rust Compiler
@@ -38,8 +43,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cd compilers/rust && cargo build
+      - run: cd compilers/rust && cargo build --release
       - run: cd compilers/rust && cargo test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tsop-rust
+          path: compilers/rust/target/release/tsop-compiler-rust
 
   conformance:
     name: Conformance Tests
@@ -47,21 +56,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/download-artifact@v4
         with:
-          node-version: 22
-          cache: pnpm
-      - uses: actions/setup-go@v5
+          name: tsop-go
+      - uses: actions/download-artifact@v4
         with:
-          go-version: '1.22'
-      - uses: dtolnay/rust-toolchain@stable
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run build
-      - name: Build Go compiler
-        run: cd compilers/go && go build -o ../../tsop-go .
-      - name: Build Rust compiler
-        run: cd compilers/rust && cargo build --release && cp target/release/tsop-compiler-rust ../../tsop-rust
+          name: tsop-rust
+      - run: chmod +x tsop-go tsop-compiler-rust
       - name: Run conformance tests
         run: |
           fail=0
@@ -70,7 +71,7 @@ jobs:
             name=$(basename "$dir")
             echo "=== $name ==="
             go_hex=$(./tsop-go --ir "$test" --hex)
-            rust_hex=$(./tsop-rust --ir "$test" --hex)
+            rust_hex=$(./tsop-compiler-rust --ir "$test" --hex)
             echo "  Go:   $go_hex"
             echo "  Rust: $rust_hex"
             if [ "$go_hex" != "$rust_hex" ]; then
