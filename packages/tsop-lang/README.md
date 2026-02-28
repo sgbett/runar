@@ -182,20 +182,35 @@ Supported lengths: 0-16 have direct tuple definitions. Lengths >16 use a recursi
 
 ---
 
-## Preimage Utilities for Stateful Contracts
+## Stateful Contracts
 
-For contracts that use the OP_PUSH_TX pattern:
+Extend `StatefulSmartContract` for contracts with mutable state. The compiler automatically handles preimage verification and state continuation:
+
+```typescript
+import { StatefulSmartContract, assert, extractLocktime } from 'tsop-lang';
+
+class Counter extends StatefulSmartContract {
+  count: bigint;
+  constructor(count: bigint) { super(count); this.count = count; }
+
+  public increment() {
+    this.count++;
+  }
+}
+```
+
+Access preimage fields via `this.txPreimage`:
 
 | Function | Signature | Description |
 |---|---|---|
-| `checkPreimage` | `(preimage: SigHashPreimage) => boolean` | Verify sighash preimage matches transaction |
 | `extractOutputHash` | `(preimage: SigHashPreimage) => Sha256` | Extract the output hash from preimage |
 | `extractLocktime` | `(preimage: SigHashPreimage) => bigint` | Extract locktime from preimage |
-
-Import from the main module:
+| `extractAmount` | `(preimage: SigHashPreimage) => bigint` | Extract input amount from preimage |
+| `extractVersion` | `(preimage: SigHashPreimage) => bigint` | Extract tx version from preimage |
 
 ```typescript
-import { checkPreimage, extractOutputHash } from 'tsop-lang';
+// Example: enforce a deadline
+assert(extractLocktime(this.txPreimage) >= this.deadline);
 ```
 
 ---

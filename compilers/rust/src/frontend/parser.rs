@@ -67,19 +67,21 @@ pub fn parse(source: &str, file_name: Option<&str>) -> ParseResult {
         errors.push(format!("Parse error: {:?}", e));
     }
 
-    // Find the class that extends SmartContract
+    // Find the class that extends SmartContract or StatefulSmartContract
     let mut contract_class: Option<&ClassDecl> = None;
+    let mut detected_parent_class: &str = "SmartContract";
 
     for item in &module.body {
         if let ModuleItem::Stmt(Stmt::Decl(Decl::Class(class_decl))) = item {
             if let Some(super_class) = &class_decl.class.super_class {
-                if is_smart_contract_base(super_class) {
+                if let Some(base_name) = get_base_class_name(super_class) {
                     if contract_class.is_some() {
                         errors.push(
                             "Only one SmartContract subclass is allowed per file".to_string(),
                         );
                     }
                     contract_class = Some(class_decl);
+                    detected_parent_class = base_name;
                 }
             }
         }
@@ -90,13 +92,14 @@ pub fn parse(source: &str, file_name: Option<&str>) -> ParseResult {
         if let ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export_decl)) = item {
             if let Decl::Class(class_decl) = &export_decl.decl {
                 if let Some(super_class) = &class_decl.class.super_class {
-                    if is_smart_contract_base(super_class) {
+                    if let Some(base_name) = get_base_class_name(super_class) {
                         if contract_class.is_some() {
                             errors.push(
                                 "Only one SmartContract subclass is allowed per file".to_string(),
                             );
                         }
                         contract_class = Some(class_decl);
+                        detected_parent_class = base_name;
                     }
                 }
             }
@@ -106,7 +109,7 @@ pub fn parse(source: &str, file_name: Option<&str>) -> ParseResult {
     let class_decl = match contract_class {
         Some(c) => c,
         None => {
-            errors.push("No class extending SmartContract found".to_string());
+            errors.push("No class extending SmartContract or StatefulSmartContract found".to_string());
             return ParseResult {
                 contract: None,
                 errors,
@@ -128,6 +131,7 @@ pub fn parse(source: &str, file_name: Option<&str>) -> ParseResult {
 
     let contract = ContractNode {
         name: contract_name,
+        parent_class: detected_parent_class.to_string(),
         properties,
         constructor: constructor_node,
         methods,
@@ -144,10 +148,17 @@ pub fn parse(source: &str, file_name: Option<&str>) -> ParseResult {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn is_smart_contract_base(expr: &Expr) -> bool {
+fn get_base_class_name(expr: &Expr) -> Option<&str> {
     match expr {
-        Expr::Ident(ident) => ident.sym.as_ref() == "SmartContract",
-        _ => false,
+        Expr::Ident(ident) => {
+            let name = ident.sym.as_ref();
+            if name == "SmartContract" || name == "StatefulSmartContract" {
+                Some(name)
+            } else {
+                None
+            }
+        }
+        _ => None,
     }
 }
 

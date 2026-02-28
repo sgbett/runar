@@ -317,10 +317,10 @@ class Escrow extends SmartContract {
 
 ### Stateful Contracts (OP_PUSH_TX)
 
-Stateful contracts have non-`readonly` properties. State is carried across transactions using the OP_PUSH_TX pattern: the contract verifies a sighash preimage to inspect its own transaction outputs and enforce that the new state is correctly propagated.
+Stateful contracts extend `StatefulSmartContract` and have non-`readonly` properties. State is carried across transactions using the OP_PUSH_TX pattern. The compiler automatically handles preimage verification and state continuation — you just write the business logic:
 
 ```typescript
-class Counter extends SmartContract {
+class Counter extends StatefulSmartContract {
   count: bigint;  // mutable = stateful
 
   constructor(count: bigint) {
@@ -328,20 +328,20 @@ class Counter extends SmartContract {
     this.count = count;
   }
 
-  public increment(txPreimage: SigHashPreimage) {
-    assert(checkPreimage(txPreimage));
+  public increment() {
     this.count++;
-    assert(hash256(this.getStateScript()) === extractOutputHash(txPreimage));
   }
 }
 ```
+
+The compiler auto-injects `checkPreimage` at method entry and state continuation at method exit for any method that modifies state. Access preimage fields via `this.txPreimage` when needed (e.g. `extractLocktime(this.txPreimage)`).
 
 ### Token Contracts
 
 **Fungible Token:**
 
 ```typescript
-class SimpleFungibleToken extends SmartContract {
+class SimpleFungibleToken extends StatefulSmartContract {
   owner: PubKey;
   readonly supply: bigint;
 
@@ -351,11 +351,9 @@ class SimpleFungibleToken extends SmartContract {
     this.supply = supply;
   }
 
-  public transfer(sig: Sig, newOwner: PubKey, txPreimage: SigHashPreimage) {
+  public transfer(sig: Sig, newOwner: PubKey) {
     assert(checkSig(sig, this.owner));
-    assert(checkPreimage(txPreimage));
     this.owner = newOwner;
-    assert(hash256(this.getStateScript()) === extractOutputHash(txPreimage));
   }
 }
 ```

@@ -147,11 +147,20 @@ function extractABI(contract: ContractNode): ABI {
   const constructorParams: ABIParam[] = contract.constructor.params.map(paramToABI);
 
   // Methods
-  const methods: ABIMethod[] = contract.methods.map(method => ({
-    name: method.name,
-    params: method.params.map(paramToABI),
-    isPublic: method.visibility === 'public',
-  }));
+  const methods: ABIMethod[] = contract.methods.map(method => {
+    const params = method.params.map(paramToABI);
+
+    // For StatefulSmartContract, public methods have an implicit txPreimage param
+    if (contract.parentClass === 'StatefulSmartContract' && method.visibility === 'public') {
+      params.push({ name: 'txPreimage', type: 'SigHashPreimage' });
+    }
+
+    return {
+      name: method.name,
+      params,
+      isPublic: method.visibility === 'public',
+    };
+  });
 
   return {
     constructor: { params: constructorParams },

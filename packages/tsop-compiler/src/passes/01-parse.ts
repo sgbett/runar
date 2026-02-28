@@ -65,15 +65,17 @@ export function parse(source: string, fileName?: string): ParseResult {
 
   const sourceFile = project.createSourceFile(file, source);
 
-  // Find the class that extends SmartContract
+  // Find the class that extends SmartContract or StatefulSmartContract
+  const VALID_BASE_CLASSES = new Set(['SmartContract', 'StatefulSmartContract']);
   const classes = sourceFile.getClasses();
   let contractClass: ClassDeclaration | undefined;
+  let detectedParentClass: 'SmartContract' | 'StatefulSmartContract' = 'SmartContract';
 
   for (const cls of classes) {
     const ext = cls.getExtends();
     if (ext) {
       const baseText = ext.getExpression().getText();
-      if (baseText === 'SmartContract') {
+      if (VALID_BASE_CLASSES.has(baseText)) {
         if (contractClass) {
           errors.push(makeDiagnostic(
             'Only one SmartContract subclass is allowed per file',
@@ -82,13 +84,14 @@ export function parse(source: string, fileName?: string): ParseResult {
           ));
         }
         contractClass = cls;
+        detectedParentClass = baseText as 'SmartContract' | 'StatefulSmartContract';
       }
     }
   }
 
   if (!contractClass) {
     errors.push(makeDiagnostic(
-      'No class extending SmartContract found',
+      'No class extending SmartContract or StatefulSmartContract found',
       'error',
       { file, line: 1, column: 0 },
     ));
@@ -127,6 +130,7 @@ export function parse(source: string, fileName?: string): ParseResult {
   const contract: ContractNode = {
     kind: 'contract',
     name: contractName,
+    parentClass: detectedParentClass,
     properties,
     constructor: constructorNode,
     methods,

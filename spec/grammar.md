@@ -58,18 +58,24 @@ ImportSpecifier
 
 ```ebnf
 ContractDeclaration
-    = [ 'export' ] 'class' Identifier 'extends' 'SmartContract' '{'
+    = [ 'export' ] 'class' Identifier 'extends' BaseClass '{'
           { PropertyDeclaration }
           ConstructorDeclaration
           { MethodDeclaration }
       '}'
+    ;
+
+BaseClass
+    = 'SmartContract'
+    | 'StatefulSmartContract'
     ;
 ```
 
 ### Rules
 
 - Exactly one class per file.
-- The class MUST extend `SmartContract` directly (no intermediate base classes).
+- The class MUST extend `SmartContract` (stateless) or `StatefulSmartContract` (stateful).
+- `StatefulSmartContract` automatically handles preimage verification and state continuation for public methods.
 - Decorators are **disallowed**.
 - Generic type parameters on the class are **disallowed**.
 
@@ -86,7 +92,7 @@ PropertyDeclaration
 ### Semantics
 
 - **`readonly`** properties are immutable. They are set in the constructor and cannot be reassigned. They are embedded in the locking script at deployment time.
-- **Non-`readonly`** properties are stateful. They can be modified within public methods and their new values are propagated across transactions via `OP_PUSH_TX`.
+- **Non-`readonly`** properties are stateful. They can be modified within public methods and their new values are propagated across transactions via `OP_PUSH_TX`. Contracts with mutable properties should extend `StatefulSmartContract`, which automatically handles preimage verification and state continuation.
 - Properties MUST NOT have initializers at the declaration site; all initialization happens in the constructor.
 - Access modifiers (`public`, `private`, `protected`) on properties are **optional** but have no semantic effect in TSOP -- all properties are accessible within the contract.
 

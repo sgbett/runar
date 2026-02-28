@@ -83,12 +83,9 @@ Because this contract has two public methods, the compiler generates a dispatch 
 A contract whose state persists across transactions. The counter can be incremented or decremented, and the updated value is carried to the next UTXO.
 
 ```typescript
-import {
-  SmartContract, assert, SigHashPreimage,
-  checkPreimage, hash256, extractOutputHash
-} from 'tsop-lang';
+import { StatefulSmartContract, assert } from 'tsop-lang';
 
-class Counter extends SmartContract {
+class Counter extends StatefulSmartContract {
   count: bigint; // non-readonly = stateful
 
   constructor(count: bigint) {
@@ -96,17 +93,13 @@ class Counter extends SmartContract {
     this.count = count;
   }
 
-  public increment(txPreimage: SigHashPreimage) {
-    assert(checkPreimage(txPreimage));
+  public increment() {
     this.count++;
-    assert(hash256(this.getStateScript()) === extractOutputHash(txPreimage));
   }
 
-  public decrement(txPreimage: SigHashPreimage) {
+  public decrement() {
     assert(this.count > 0n);
-    assert(checkPreimage(txPreimage));
     this.count--;
-    assert(hash256(this.getStateScript()) === extractOutputHash(txPreimage));
   }
 }
 ```
@@ -114,11 +107,9 @@ class Counter extends SmartContract {
 **How it works:**
 
 1. The `count` property is mutable (no `readonly`), making this a stateful contract.
-2. `checkPreimage(txPreimage)` verifies the sighash preimage matches the current transaction. This is the OP_PUSH_TX pattern -- it lets the contract inspect its own transaction.
-3. `this.count++` updates the in-memory state.
-4. `this.getStateScript()` serializes the updated state. `hash256(...)` computes a double-SHA-256 of the new locking script.
-5. `extractOutputHash(txPreimage)` reads the `hashOutputs` field from the preimage.
-6. The final assert verifies the transaction output contains the updated contract state. If someone tries to spend this UTXO without propagating the correct new state, the transaction is invalid.
+2. Extending `StatefulSmartContract` tells the compiler to automatically handle the OP_PUSH_TX pattern. For every public method, the compiler injects a preimage check at entry.
+3. `this.count++` / `this.count--` updates the in-memory state.
+4. Because these methods mutate state, the compiler automatically appends a state continuation assertion at the end — it serializes the updated state, hashes it, and verifies the transaction output carries the new state forward.
 
 **State lifecycle:**
 
@@ -136,12 +127,10 @@ Decrement: Spend UTXO, create new UTXO with count=1
 A simple fungible token where ownership can be transferred. The total supply is immutable; the owner is mutable state.
 
 ```typescript
-import {
-  SmartContract, assert, PubKey, Sig, SigHashPreimage,
-  checkSig, checkPreimage, hash256, extractOutputHash
-} from 'tsop-lang';
+import { StatefulSmartContract, assert, checkSig } from 'tsop-lang';
+import type { PubKey, Sig } from 'tsop-lang';
 
-class SimpleFungibleToken extends SmartContract {
+class SimpleFungibleToken extends StatefulSmartContract {
   owner: PubKey;           // stateful: current token owner
   readonly supply: bigint; // immutable: total supply
 
@@ -151,11 +140,9 @@ class SimpleFungibleToken extends SmartContract {
     this.supply = supply;
   }
 
-  public transfer(sig: Sig, newOwner: PubKey, txPreimage: SigHashPreimage) {
+  public transfer(sig: Sig, newOwner: PubKey) {
     assert(checkSig(sig, this.owner));
-    assert(checkPreimage(txPreimage));
     this.owner = newOwner;
-    assert(hash256(this.getStateScript()) === extractOutputHash(txPreimage));
   }
 }
 ```
@@ -163,9 +150,8 @@ class SimpleFungibleToken extends SmartContract {
 **How it works:**
 
 1. Only the current `owner` can transfer the token (verified by `checkSig`).
-2. The preimage check ensures the transaction is valid and self-referential.
-3. `this.owner = newOwner` updates the state.
-4. The final assertion enforces that the output UTXO carries the updated state (new owner).
+2. `this.owner = newOwner` updates the state.
+3. The compiler auto-injects preimage verification and state continuation, ensuring the output UTXO carries the updated state (new owner).
 
 The `supply` is `readonly` and baked into the locking script at deploy time -- it cannot change across transfers.
 
@@ -176,12 +162,10 @@ The `supply` is `readonly` and baked into the locking script at deploy time -- i
 An NFT with a unique token ID, metadata, and a burn function.
 
 ```typescript
-import {
-  SmartContract, assert, PubKey, Sig, SigHashPreimage, ByteString,
-  checkSig, checkPreimage, hash256, extractOutputHash
-} from 'tsop-lang';
+import { StatefulSmartContract, assert, checkSig } from 'tsop-lang';
+import type { PubKey, Sig, ByteString } from 'tsop-lang';
 
-class SimpleNFT extends SmartContract {
+class SimpleNFT extends StatefulSmartContract {
   owner: PubKey;                   // stateful
   readonly tokenId: ByteString;    // immutable: unique identifier
   readonly metadata: ByteString;   // immutable: metadata URI/hash
@@ -193,21 +177,19 @@ class SimpleNFT extends SmartContract {
     this.metadata = metadata;
   }
 
-  public transfer(sig: Sig, newOwner: PubKey, txPreimage: SigHashPreimage) {
+  public transfer(sig: Sig, newOwner: PubKey) {
     assert(checkSig(sig, this.owner));
-    assert(checkPreimage(txPreimage));
     this.owner = newOwner;
-    assert(hash256(this.getStateScript()) === extractOutputHash(txPreimage));
   }
 
   public burn(sig: Sig) {
     assert(checkSig(sig, this.owner));
-    // No state continuation = token is destroyed
+    // No state mutation = token is destroyed
   }
 }
 ```
 
-**Key difference from FT:** The `burn` method has no state propagation. When it executes successfully, the UTXO is spent without creating a new contract UTXO. The token ceases to exist.
+**Key difference from FT:** The `burn` method does not modify any state. The compiler detects this and only injects the preimage check — no state continuation. The UTXO is spent without creating a new contract UTXO. The token ceases to exist.
 
 ---
 

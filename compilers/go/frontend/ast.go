@@ -51,6 +51,7 @@ func (CustomType) typeNodeMarker() {}
 // ContractNode is the parsed representation of a TSOP smart contract class.
 type ContractNode struct {
 	Name        string
+	ParentClass string // "SmartContract" or "StatefulSmartContract"
 	Properties  []PropertyNode
 	Constructor MethodNode
 	Methods     []MethodNode

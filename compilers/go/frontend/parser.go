@@ -39,7 +39,7 @@ func Parse(source []byte, fileName string) *ParseResult {
 
 	contract := p.findContract(root)
 	if contract == nil {
-		return &ParseResult{Errors: append(p.errors, "no class extending SmartContract found")}
+		return &ParseResult{Errors: append(p.errors, "no class extending SmartContract or StatefulSmartContract found")}
 	}
 
 	return &ParseResult{
@@ -128,9 +128,14 @@ func (p *parseContext) tryParseContractClass(node *sitter.Node) *ContractNode {
 		return nil
 	}
 
-	// The heritage clause should contain "SmartContract"
+	// The heritage clause should contain "SmartContract" or "StatefulSmartContract"
 	heritageText := p.nodeText(heritage)
-	if !strings.Contains(heritageText, "SmartContract") {
+	parentClass := ""
+	if strings.Contains(heritageText, "StatefulSmartContract") {
+		parentClass = "StatefulSmartContract"
+	} else if strings.Contains(heritageText, "SmartContract") {
+		parentClass = "SmartContract"
+	} else {
 		return nil
 	}
 
@@ -188,6 +193,7 @@ func (p *parseContext) tryParseContractClass(node *sitter.Node) *ContractNode {
 
 	return &ContractNode{
 		Name:        className,
+		ParentClass: parentClass,
 		Properties:  properties,
 		Constructor: *constructor,
 		Methods:     methods,

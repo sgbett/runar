@@ -10,14 +10,13 @@ Represents a fungible token with a fixed supply and a transferable owner. The cu
 
 ## Design pattern
 
-**Stateful ownership transfer** -- combines signature-based authorization (`checkSig`) with the OP_PUSH_TX pattern to enforce state transitions. The `owner` field is mutable (non-`readonly`), while `supply` is immutable (`readonly`). Each transfer produces a new UTXO with the updated owner.
+**Stateful ownership transfer** -- extends `StatefulSmartContract` and combines signature-based authorization (`checkSig`) with automatic state management. The `owner` field is mutable (non-`readonly`), while `supply` is immutable (`readonly`). Each transfer produces a new UTXO with the updated owner.
 
 ## TSOP features demonstrated
 
+- `StatefulSmartContract` for automatic preimage verification and state continuation
 - Mix of `readonly` (immutable) and mutable (stateful) properties
 - Owner-authorized state transitions via `checkSig()`
-- OP_PUSH_TX pattern for state continuity
-- `this.getStateScript()` for serializing updated contract state
 
 ## Compile and use
 

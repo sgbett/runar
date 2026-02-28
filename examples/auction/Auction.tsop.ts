@@ -1,6 +1,7 @@
-import { SmartContract, assert, PubKey, Sig, SigHashPreimage, ByteString, checkSig, checkPreimage, hash256, extractOutputHash, extractLocktime } from 'tsop-lang';
+import { StatefulSmartContract, assert, checkSig, extractLocktime } from 'tsop-lang';
+import type { PubKey, Sig } from 'tsop-lang';
 
-class Auction extends SmartContract {
+class Auction extends StatefulSmartContract {
   readonly auctioneer: PubKey;
   highestBidder: PubKey;     // stateful
   highestBid: bigint;         // stateful
@@ -14,31 +15,25 @@ class Auction extends SmartContract {
     this.deadline = deadline;
   }
 
-  public bid(bidder: PubKey, bidAmount: bigint, txPreimage: SigHashPreimage) {
-    assert(checkPreimage(txPreimage));
-
+  // State-mutating: compiler auto-injects checkPreimage + state continuation
+  public bid(bidder: PubKey, bidAmount: bigint) {
     // Bid must be higher than current highest
     assert(bidAmount > this.highestBid);
 
     // Auction must not have ended
-    assert(extractLocktime(txPreimage) < this.deadline);
+    assert(extractLocktime(this.txPreimage) < this.deadline);
 
     // Update state
     this.highestBidder = bidder;
     this.highestBid = bidAmount;
-
-    assert(hash256(this.getStateScript()) === extractOutputHash(txPreimage));
   }
 
-  public close(sig: Sig, txPreimage: SigHashPreimage) {
-    assert(checkPreimage(txPreimage));
-
+  // Non-mutating: compiler auto-injects checkPreimage only (no state continuation)
+  public close(sig: Sig) {
     // Only auctioneer can close
     assert(checkSig(sig, this.auctioneer));
 
     // Auction must have ended
-    assert(extractLocktime(txPreimage) >= this.deadline);
-
-    // No state continuation - auction is done
+    assert(extractLocktime(this.txPreimage) >= this.deadline);
   }
 }

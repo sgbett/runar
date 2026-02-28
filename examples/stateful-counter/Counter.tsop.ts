@@ -1,6 +1,6 @@
-import { SmartContract, assert, SigHashPreimage, checkPreimage, hash256, extractOutputHash } from 'tsop-lang';
+import { StatefulSmartContract, assert } from 'tsop-lang';
 
-class Counter extends SmartContract {
+class Counter extends StatefulSmartContract {
   count: bigint; // non-readonly = stateful
 
   constructor(count: bigint) {
@@ -8,16 +8,12 @@ class Counter extends SmartContract {
     this.count = count;
   }
 
-  public increment(txPreimage: SigHashPreimage) {
-    assert(checkPreimage(txPreimage));
+  public increment() {
     this.count++;
-    assert(hash256(this.getStateScript()) === extractOutputHash(txPreimage));
   }
 
-  public decrement(txPreimage: SigHashPreimage) {
+  public decrement() {
     assert(this.count > 0n);
-    assert(checkPreimage(txPreimage));
     this.count--;
-    assert(hash256(this.getStateScript()) === extractOutputHash(txPreimage));
   }
 }

@@ -491,4 +491,93 @@ describe('Pass 2: Validate', () => {
       expect(hasError(result, "Recursion detected")).toBe(false);
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // StatefulSmartContract validation
+  // ---------------------------------------------------------------------------
+
+  describe('StatefulSmartContract', () => {
+    it('does not require public methods to end with assert()', () => {
+      const source = `
+        class Counter extends StatefulSmartContract {
+          count: bigint;
+          constructor(count: bigint) { super(count); this.count = count; }
+          public increment() { this.count++; }
+        }
+      `;
+      const result = validateSource(source);
+      expect(hasError(result, "must end with an assert() call")).toBe(false);
+    });
+
+    it('still requires assert-ending for regular SmartContract public methods', () => {
+      const source = `
+        class C extends SmartContract {
+          readonly x: bigint;
+          constructor(x: bigint) { super(x); this.x = x; }
+          public m() {}
+        }
+      `;
+      const result = validateSource(source);
+      expect(hasError(result, "must end with an assert() call")).toBe(true);
+    });
+
+    it('warns when manually calling checkPreimage in StatefulSmartContract', () => {
+      const source = `
+        class Counter extends StatefulSmartContract {
+          count: bigint;
+          constructor(count: bigint) { super(count); this.count = count; }
+          public increment(txPreimage: SigHashPreimage) {
+            assert(checkPreimage(txPreimage));
+            this.count++;
+          }
+        }
+      `;
+      const result = validateSource(source);
+      expect(result.warnings.some(w => w.message.includes('auto-injects checkPreimage'))).toBe(true);
+    });
+
+    it('warns when manually calling getStateScript in StatefulSmartContract', () => {
+      const source = `
+        class Counter extends StatefulSmartContract {
+          count: bigint;
+          constructor(count: bigint) { super(count); this.count = count; }
+          public increment() {
+            this.count++;
+            assert(hash256(this.getStateScript()) === extractOutputHash(this.txPreimage));
+          }
+        }
+      `;
+      const result = validateSource(source);
+      expect(result.warnings.some(w => w.message.includes('auto-injects state continuation'))).toBe(true);
+    });
+
+    it('warns when StatefulSmartContract has no mutable properties', () => {
+      const source = `
+        class C extends StatefulSmartContract {
+          readonly x: bigint;
+          constructor(x: bigint) { super(x); this.x = x; }
+          public m() { assert(true); }
+        }
+      `;
+      const result = validateSource(source);
+      expect(result.warnings.some(w => w.message.includes('no mutable properties'))).toBe(true);
+    });
+
+    it('errors when txPreimage is declared as an explicit property', () => {
+      const source = `
+        class C extends StatefulSmartContract {
+          count: bigint;
+          txPreimage: SigHashPreimage;
+          constructor(count: bigint, txPreimage: SigHashPreimage) {
+            super(count, txPreimage);
+            this.count = count;
+            this.txPreimage = txPreimage;
+          }
+          public m() { this.count++; }
+        }
+      `;
+      const result = validateSource(source);
+      expect(hasError(result, "implicit property")).toBe(true);
+    });
+  });
 });

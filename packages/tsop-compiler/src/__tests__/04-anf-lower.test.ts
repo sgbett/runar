@@ -500,4 +500,158 @@ describe('Pass 4: ANF Lower', () => {
       expect(superCall).toBeDefined();
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // StatefulSmartContract auto-injection
+  // ---------------------------------------------------------------------------
+
+  describe('StatefulSmartContract auto-injection', () => {
+    const COUNTER_STATEFUL = `
+      class Counter extends StatefulSmartContract {
+        count: bigint;
+        constructor(count: bigint) { super(count); this.count = count; }
+        public increment() { this.count++; }
+      }
+    `;
+
+    it('injects check_preimage at the start of public methods', () => {
+      const program = lowerSource(COUNTER_STATEFUL);
+      const method = findMethod(program, 'increment');
+      const checkPreimages = bindingsOfKind(method.body, 'check_preimage');
+      expect(checkPreimages.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('injects state continuation (get_state_script + hash256 + assert) for state-mutating methods', () => {
+      const program = lowerSource(COUNTER_STATEFUL);
+      const method = findMethod(program, 'increment');
+
+      const getStateScripts = bindingsOfKind(method.body, 'get_state_script');
+      expect(getStateScripts.length).toBeGreaterThanOrEqual(1);
+
+      // Check that hash256 is called
+      const calls = bindingsOfKind(method.body, 'call');
+      const hash256Call = calls.find(b => (b.value as { func: string }).func === 'hash256');
+      expect(hash256Call).toBeDefined();
+
+      const extractOutputHashCall = calls.find(b => (b.value as { func: string }).func === 'extractOutputHash');
+      expect(extractOutputHashCall).toBeDefined();
+
+      // Final assert for state continuation
+      const asserts = bindingsOfKind(method.body, 'assert');
+      expect(asserts.length).toBeGreaterThanOrEqual(2); // checkPreimage assert + state continuation assert
+    });
+
+    it('appends txPreimage as an implicit parameter', () => {
+      const program = lowerSource(COUNTER_STATEFUL);
+      const method = findMethod(program, 'increment');
+      const preimageParam = method.params.find(p => p.name === 'txPreimage');
+      expect(preimageParam).toBeDefined();
+      expect(preimageParam!.type).toBe('SigHashPreimage');
+    });
+
+    it('does not inject state continuation for non-mutating methods', () => {
+      const source = `
+        class Auction extends StatefulSmartContract {
+          readonly auctioneer: PubKey;
+          highestBid: bigint;
+          constructor(auctioneer: PubKey, highestBid: bigint) {
+            super(auctioneer, highestBid);
+            this.auctioneer = auctioneer;
+            this.highestBid = highestBid;
+          }
+          public close(sig: Sig) {
+            assert(checkSig(sig, this.auctioneer));
+          }
+        }
+      `;
+      const program = lowerSource(source);
+      const method = findMethod(program, 'close');
+
+      // Should have check_preimage
+      const checkPreimages = bindingsOfKind(method.body, 'check_preimage');
+      expect(checkPreimages.length).toBeGreaterThanOrEqual(1);
+
+      // Should NOT have get_state_script (close does not mutate state)
+      const getStateScripts = bindingsOfKind(method.body, 'get_state_script');
+      expect(getStateScripts).toHaveLength(0);
+    });
+
+    it('injects state continuation for methods that mutate state via assignment', () => {
+      const source = `
+        class Auction extends StatefulSmartContract {
+          readonly auctioneer: PubKey;
+          highestBid: bigint;
+          constructor(auctioneer: PubKey, highestBid: bigint) {
+            super(auctioneer, highestBid);
+            this.auctioneer = auctioneer;
+            this.highestBid = highestBid;
+          }
+          public bid(amount: bigint) {
+            assert(amount > this.highestBid);
+            this.highestBid = amount;
+          }
+        }
+      `;
+      const program = lowerSource(source);
+      const method = findMethod(program, 'bid');
+
+      // Should have get_state_script (bid mutates highestBid)
+      const getStateScripts = bindingsOfKind(method.body, 'get_state_script');
+      expect(getStateScripts.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('lowers this.txPreimage as load_param instead of load_prop', () => {
+      const source = `
+        class Counter extends StatefulSmartContract {
+          count: bigint;
+          readonly deadline: bigint;
+          constructor(count: bigint, deadline: bigint) {
+            super(count, deadline);
+            this.count = count;
+            this.deadline = deadline;
+          }
+          public increment() {
+            assert(extractLocktime(this.txPreimage) < this.deadline);
+            this.count++;
+          }
+        }
+      `;
+      const program = lowerSource(source);
+      const method = findMethod(program, 'increment');
+
+      // this.txPreimage should be lowered as load_param, not load_prop
+      const loadParams = bindingsOfKind(method.body, 'load_param');
+      const txPreimageParams = loadParams.filter(
+        b => (b.value as { name: string }).name === 'txPreimage'
+      );
+      expect(txPreimageParams.length).toBeGreaterThanOrEqual(1);
+
+      // It should NOT appear as load_prop
+      const loadProps = bindingsOfKind(method.body, 'load_prop');
+      const txPreimageProps = loadProps.filter(
+        b => (b.value as { name: string }).name === 'txPreimage'
+      );
+      expect(txPreimageProps).toHaveLength(0);
+    });
+
+    it('does not affect regular SmartContract methods', () => {
+      const source = `
+        class C extends SmartContract {
+          readonly x: bigint;
+          constructor(x: bigint) { super(x); this.x = x; }
+          public m() { assert(true); }
+        }
+      `;
+      const program = lowerSource(source);
+      const method = findMethod(program, 'm');
+
+      // Regular SmartContract: no auto-injected check_preimage
+      const checkPreimages = bindingsOfKind(method.body, 'check_preimage');
+      expect(checkPreimages).toHaveLength(0);
+
+      // No txPreimage param
+      const preimageParam = method.params.find(p => p.name === 'txPreimage');
+      expect(preimageParam).toBeUndefined();
+    });
+  });
 });

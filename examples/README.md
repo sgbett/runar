@@ -12,7 +12,7 @@ Each example is a self-contained directory with a `.tsop.ts` source file and its
 |---|---|---|---|---|
 | **P2PKH** | `p2pkh/` | Stateless | Beginner | Pay-to-Public-Key-Hash. The simplest possible contract: verify a signature against a hashed public key. |
 | **Escrow** | `escrow/` | Stateless, Multi-method | Beginner | Three-party escrow with buyer, seller, and arbiter. Two spending paths: release to seller or refund to buyer. |
-| **Counter** | `stateful-counter/` | Stateful (OP_PUSH_TX) | Intermediate | On-chain counter that persists across transactions. Demonstrates state chaining with `checkPreimage` and `getStateScript`. |
+| **Counter** | `stateful-counter/` | Stateful (OP_PUSH_TX) | Intermediate | On-chain counter that persists across transactions. Uses `StatefulSmartContract` for automatic state management. |
 | **Fungible Token** | `token-ft/` | Stateful, Token | Intermediate | Simple fungible token with transferable ownership. Owner signs to transfer; state tracks current owner. |
 | **Non-Fungible Token** | `token-nft/` | Stateful, Token | Intermediate | NFT with transfer and burn operations. Immutable token ID and metadata, mutable owner. |
 | **Oracle Price Feed** | `oracle-price/` | Oracle (Rabin) | Advanced | Contract that settles based on an oracle-signed price. Uses Rabin signatures for cheap on-chain verification. |
@@ -105,9 +105,9 @@ Start with `p2pkh/` and `escrow/`. These are stateless contracts with straightfo
 
 Move to `stateful-counter/`, `token-ft/`, and `token-nft/`. These add state management:
 
-- Mutable properties
-- `SigHashPreimage` and `checkPreimage`
-- `getStateScript()` and `extractOutputHash()`
+- `StatefulSmartContract` for automatic preimage verification and state continuation
+- Mutable properties for on-chain state
+- `this.txPreimage` for accessing preimage fields (e.g. `extractLocktime`)
 - State chaining across transactions
 
 ### Advanced

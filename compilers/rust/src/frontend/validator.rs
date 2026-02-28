@@ -155,11 +155,11 @@ fn is_super_call(stmt: &Statement) -> bool {
 
 fn validate_methods(contract: &ContractNode, errors: &mut Vec<String>) {
     for method in &contract.methods {
-        validate_method(method, errors);
+        validate_method(method, contract, errors);
     }
 }
 
-fn validate_method(method: &MethodNode, errors: &mut Vec<String>) {
+fn validate_method(method: &MethodNode, contract: &ContractNode, errors: &mut Vec<String>) {
     // All params must have type annotations
     for param in &method.params {
         if let TypeNode::Custom(ref name) = param.param_type {
@@ -172,8 +172,9 @@ fn validate_method(method: &MethodNode, errors: &mut Vec<String>) {
         }
     }
 
-    // Public methods must end with an assert() call
-    if method.visibility == Visibility::Public {
+    // Public methods must end with an assert() call (unless StatefulSmartContract,
+    // where the compiler auto-injects the final assert)
+    if method.visibility == Visibility::Public && contract.parent_class == "SmartContract" {
         if !ends_with_assert(&method.body) {
             errors.push(format!(
                 "Public method '{}' must end with an assert() call",

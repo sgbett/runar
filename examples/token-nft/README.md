@@ -7,19 +7,19 @@ A non-fungible token contract with unique identity, metadata, transfer, and burn
 Represents a unique, non-fungible token identified by a `tokenId` and associated `metadata`. The token has a single owner who can:
 
 - **Transfer** -- transfer ownership to a new public key, updating the on-chain state.
-- **Burn** -- permanently destroy the token. No state continuation occurs, meaning the UTXO is consumed without producing a successor contract output.
+- **Burn** -- permanently destroy the token. Since the burn method does not modify state, the compiler does not inject state continuation -- the UTXO is consumed without producing a successor contract output.
 
 ## Design pattern
 
-**Stateful NFT with burn path** -- the `owner` is mutable state updated via OP_PUSH_TX on transfer, while `tokenId` and `metadata` are immutable (`readonly`). The burn method intentionally omits state continuation, which effectively destroys the token by not propagating the contract to a new UTXO.
+**Stateful NFT with burn path** -- extends `StatefulSmartContract`. The `owner` is mutable state updated on transfer, while `tokenId` and `metadata` are immutable (`readonly`). The burn method intentionally omits any state mutation, so the compiler only injects preimage verification -- no state continuation. This effectively destroys the token.
 
 ## TSOP features demonstrated
 
+- `StatefulSmartContract` for automatic preimage verification and state continuation
 - `ByteString` type for arbitrary binary data (token ID, metadata)
 - Immutable identity fields (`readonly tokenId`, `readonly metadata`)
 - Stateful ownership tracking
-- Burn pattern: a public method with no state continuation
-- OP_PUSH_TX for enforced state transitions on transfer
+- Burn pattern: a public method with no state mutation (compiler auto-detects)
 
 ## Compile and use
 

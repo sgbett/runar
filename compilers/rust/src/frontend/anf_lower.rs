@@ -77,13 +77,72 @@ fn lower_methods(contract: &ContractNode) -> Vec<ANFMethod> {
     // Lower each method (including private methods as separate entries)
     for method in &contract.methods {
         let mut method_ctx = LoweringContext::new(contract);
-        lower_statements(&method.body, &mut method_ctx);
-        result.push(ANFMethod {
-            name: method.name.clone(),
-            params: lower_params(&method.params),
-            body: method_ctx.bindings,
-            is_public: method.visibility == Visibility::Public,
-        });
+
+        if contract.parent_class == "StatefulSmartContract"
+            && method.visibility == Visibility::Public
+        {
+            // Register txPreimage as an implicit parameter
+            method_ctx.add_param("txPreimage");
+
+            // Inject checkPreimage(txPreimage) at the start
+            let preimage_ref = method_ctx.emit(ANFValue::LoadParam {
+                name: "txPreimage".to_string(),
+            });
+            let check_result = method_ctx.emit(ANFValue::CheckPreimage {
+                preimage: preimage_ref,
+            });
+            method_ctx.emit(ANFValue::Assert {
+                value: check_result,
+            });
+
+            // Lower the developer's method body
+            lower_statements(&method.body, &mut method_ctx);
+
+            // If the method mutates state, inject state continuation assertion at the end
+            if method_mutates_state(method, contract) {
+                let state_script_ref = method_ctx.emit(ANFValue::GetStateScript {});
+                let hash_ref = method_ctx.emit(ANFValue::Call {
+                    func: "hash256".to_string(),
+                    args: vec![state_script_ref],
+                });
+                let preimage_ref2 = method_ctx.emit(ANFValue::LoadParam {
+                    name: "txPreimage".to_string(),
+                });
+                let output_hash_ref = method_ctx.emit(ANFValue::Call {
+                    func: "extractOutputHash".to_string(),
+                    args: vec![preimage_ref2],
+                });
+                let eq_ref = method_ctx.emit(ANFValue::BinOp {
+                    op: "===".to_string(),
+                    left: hash_ref,
+                    right: output_hash_ref,
+                    result_type: Some("bytes".to_string()),
+                });
+                method_ctx.emit(ANFValue::Assert { value: eq_ref });
+            }
+
+            // Append implicit txPreimage param to the method's param list
+            let mut augmented_params = lower_params(&method.params);
+            augmented_params.push(ANFParam {
+                name: "txPreimage".to_string(),
+                param_type: "SigHashPreimage".to_string(),
+            });
+
+            result.push(ANFMethod {
+                name: method.name.clone(),
+                params: augmented_params,
+                body: method_ctx.bindings,
+                is_public: true,
+            });
+        } else {
+            lower_statements(&method.body, &mut method_ctx);
+            result.push(ANFMethod {
+                name: method.name.clone(),
+                params: lower_params(&method.params),
+                body: method_ctx.bindings,
+                is_public: method.visibility == Visibility::Public,
+            });
+        }
     }
 
     result
@@ -113,6 +172,7 @@ struct LoweringContext<'a> {
     bindings: Vec<ANFBinding>,
     counter: usize,
     contract: &'a ContractNode,
+    param_names: HashSet<String>,
     local_names: HashSet<String>,
 }
 
@@ -122,6 +182,7 @@ impl<'a> LoweringContext<'a> {
             bindings: Vec::new(),
             counter: 0,
             contract,
+            param_names: HashSet::new(),
             local_names: HashSet::new(),
         }
     }
@@ -151,6 +212,15 @@ impl<'a> LoweringContext<'a> {
         });
     }
 
+    /// Record a parameter name so we know to use load_param for it.
+    fn add_param(&mut self, name: &str) {
+        self.param_names.insert(name.to_string());
+    }
+
+    fn is_param(&self, name: &str) -> bool {
+        self.param_names.contains(name)
+    }
+
     /// Record a local variable name.
     fn add_local(&mut self, name: &str) {
         self.local_names.insert(name.to_string());
@@ -165,10 +235,11 @@ impl<'a> LoweringContext<'a> {
     }
 
     /// Create a sub-context for nested blocks (if/else, loops).
-    /// The counter continues from the parent. Local names are shared.
+    /// The counter continues from the parent. Local names and param names are shared.
     fn sub_context(&self) -> LoweringContext<'a> {
         let mut sub = LoweringContext::new(self.contract);
         sub.counter = self.counter;
+        sub.param_names = self.param_names.clone();
         sub.local_names = self.local_names.clone();
         sub
     }
@@ -396,6 +467,12 @@ fn lower_expr_to_ref(expr: &Expression, ctx: &mut LoweringContext) -> String {
         Expression::Identifier { name } => lower_identifier(name, ctx),
 
         Expression::PropertyAccess { property } => {
+            // this.txPreimage in StatefulSmartContract -> load_param (it's an implicit param, not a stored property)
+            if ctx.is_param(property) {
+                return ctx.emit(ANFValue::LoadParam {
+                    name: property.clone(),
+                });
+            }
             // this.x -> load_prop
             ctx.emit(ANFValue::LoadProp {
                 name: property.clone(),
@@ -442,8 +519,12 @@ fn lower_identifier(name: &str, ctx: &mut LoweringContext) -> String {
         });
     }
 
-    // isParam check: always false since addParam is never called (matching TS)
-    // (no check needed)
+    // Check if it's a registered parameter (e.g. txPreimage for StatefulSmartContract)
+    if ctx.is_param(name) {
+        return ctx.emit(ANFValue::LoadParam {
+            name: name.to_string(),
+        });
+    }
 
     // Check if it's a local variable -- reference it directly
     if ctx.is_local(name) {
@@ -469,9 +550,14 @@ fn lower_member_expr(
     property: &str,
     ctx: &mut LoweringContext,
 ) -> String {
-    // this.x -> load_prop
+    // this.x -> load_prop (or load_param for implicit params like txPreimage)
     if let Expression::Identifier { name } = object {
         if name == "this" {
+            if ctx.is_param(property) {
+                return ctx.emit(ANFValue::LoadParam {
+                    name: property.to_string(),
+                });
+            }
             return ctx.emit(ANFValue::LoadProp {
                 name: property.to_string(),
             });
@@ -879,5 +965,75 @@ fn type_node_to_string(node: &TypeNode) -> String {
             format!("FixedArray<{}, {}>", type_node_to_string(element), length)
         }
         TypeNode::Custom(name) => name.clone(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// State mutation analysis for StatefulSmartContract
+// ---------------------------------------------------------------------------
+
+/// Determine whether a method mutates any mutable (non-readonly) property.
+/// Conservative: if ANY code path can mutate state, returns true.
+fn method_mutates_state(method: &MethodNode, contract: &ContractNode) -> bool {
+    let mutable_prop_names: HashSet<String> = contract
+        .properties
+        .iter()
+        .filter(|p| !p.readonly)
+        .map(|p| p.name.clone())
+        .collect();
+    if mutable_prop_names.is_empty() {
+        return false;
+    }
+    body_mutates_state(&method.body, &mutable_prop_names)
+}
+
+fn body_mutates_state(stmts: &[Statement], mutable_props: &HashSet<String>) -> bool {
+    for stmt in stmts {
+        if stmt_mutates_state(stmt, mutable_props) {
+            return true;
+        }
+    }
+    false
+}
+
+fn stmt_mutates_state(stmt: &Statement, mutable_props: &HashSet<String>) -> bool {
+    match stmt {
+        Statement::Assignment { target, .. } => {
+            if let Expression::PropertyAccess { property } = target {
+                if mutable_props.contains(property) {
+                    return true;
+                }
+            }
+            false
+        }
+        Statement::ExpressionStatement { expression, .. } => {
+            expr_mutates_state(expression, mutable_props)
+        }
+        Statement::IfStatement {
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            body_mutates_state(then_branch, mutable_props)
+                || else_branch
+                    .as_ref()
+                    .map_or(false, |e| body_mutates_state(e, mutable_props))
+        }
+        Statement::ForStatement { body, .. } => body_mutates_state(body, mutable_props),
+        _ => false,
+    }
+}
+
+fn expr_mutates_state(expr: &Expression, mutable_props: &HashSet<String>) -> bool {
+    match expr {
+        Expression::IncrementExpr { operand, .. } | Expression::DecrementExpr { operand, .. } => {
+            if let Expression::PropertyAccess { property } = operand.as_ref() {
+                if mutable_props.contains(property) {
+                    return true;
+                }
+            }
+            false
+        }
+        _ => false,
     }
 }

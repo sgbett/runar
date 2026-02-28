@@ -400,6 +400,100 @@ describe('End-to-end: compile()', () => {
   // Complex expressions
   // ---------------------------------------------------------------------------
 
+  // ---------------------------------------------------------------------------
+  // StatefulSmartContract compilation
+  // ---------------------------------------------------------------------------
+
+  describe('StatefulSmartContract compilation', () => {
+    it('compiles a StatefulSmartContract counter successfully', () => {
+      const source = `
+        class Counter extends StatefulSmartContract {
+          count: bigint;
+          constructor(count: bigint) { super(count); this.count = count; }
+          public increment() { this.count++; }
+          public decrement() {
+            assert(this.count > 0n);
+            this.count--;
+          }
+        }
+      `;
+      const result = compile(source);
+      expect(result.success).toBe(true);
+      expect(result.anf).not.toBeNull();
+      expect(result.contract!.parentClass).toBe('StatefulSmartContract');
+    });
+
+    it('ANF has implicit txPreimage parameter for public methods', () => {
+      const source = `
+        class Counter extends StatefulSmartContract {
+          count: bigint;
+          constructor(count: bigint) { super(count); this.count = count; }
+          public increment() { this.count++; }
+        }
+      `;
+      const result = compile(source);
+      const increment = result.anf!.methods.find(m => m.name === 'increment')!;
+      const preimageParam = increment.params.find(p => p.name === 'txPreimage');
+      expect(preimageParam).toBeDefined();
+      expect(preimageParam!.type).toBe('SigHashPreimage');
+    });
+
+    it('compiles a multi-method StatefulSmartContract with mixed mutation', () => {
+      const source = `
+        class Auction extends StatefulSmartContract {
+          readonly auctioneer: PubKey;
+          highestBidder: PubKey;
+          highestBid: bigint;
+          readonly deadline: bigint;
+
+          constructor(auctioneer: PubKey, highestBidder: PubKey, highestBid: bigint, deadline: bigint) {
+            super(auctioneer, highestBidder, highestBid, deadline);
+            this.auctioneer = auctioneer;
+            this.highestBidder = highestBidder;
+            this.highestBid = highestBid;
+            this.deadline = deadline;
+          }
+
+          public bid(bidder: PubKey, bidAmount: bigint) {
+            assert(bidAmount > this.highestBid);
+            assert(extractLocktime(this.txPreimage) < this.deadline);
+            this.highestBidder = bidder;
+            this.highestBid = bidAmount;
+          }
+
+          public close(sig: Sig) {
+            assert(checkSig(sig, this.auctioneer));
+            assert(extractLocktime(this.txPreimage) >= this.deadline);
+          }
+        }
+      `;
+      const result = compile(source);
+      expect(result.success).toBe(true);
+
+      // Both methods should be in the ANF
+      const bid = result.anf!.methods.find(m => m.name === 'bid')!;
+      const close = result.anf!.methods.find(m => m.name === 'close')!;
+      expect(bid).toBeDefined();
+      expect(close).toBeDefined();
+      expect(bid.isPublic).toBe(true);
+      expect(close.isPublic).toBe(true);
+    });
+
+    it('produces hex script output for StatefulSmartContract', () => {
+      const source = `
+        class Counter extends StatefulSmartContract {
+          count: bigint;
+          constructor(count: bigint) { super(count); this.count = count; }
+          public increment() { this.count++; }
+        }
+      `;
+      const result = compile(source);
+      expect(result.success).toBe(true);
+      expect(result.artifact).toBeDefined();
+      expect(result.artifact!.script.length).toBeGreaterThan(0);
+    });
+  });
+
   describe('complex expression compilation', () => {
     it('compiles nested binary expressions', () => {
       const source = `

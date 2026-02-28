@@ -155,8 +155,9 @@ func (ctx *validationContext) validateMethods() {
 }
 
 func (ctx *validationContext) validateMethod(method MethodNode) {
-	// Public methods must end with assert()
-	if method.Visibility == "public" {
+	// Public methods must end with assert() (unless StatefulSmartContract,
+	// where the compiler auto-injects the final assert)
+	if method.Visibility == "public" && ctx.contract.ParentClass != "StatefulSmartContract" {
 		if !endsWithAssert(method.Body) {
 			ctx.addError(fmt.Sprintf("public method '%s' must end with an assert() call", method.Name))
 		}

@@ -66,6 +66,7 @@ function makeContract(methods: MethodNode[]): ContractNode {
   return {
     kind: 'contract',
     name: 'TestContract',
+    parentClass: 'SmartContract',
     properties: [],
     constructor: makeMethod('constructor', [], [], 'public'),
     methods,

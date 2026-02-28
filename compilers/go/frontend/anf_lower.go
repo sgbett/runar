@@ -133,13 +133,50 @@ func lowerMethods(contract *ContractNode) []ir.ANFMethod {
 	// Lower each method (including private methods as separate entries)
 	for _, method := range contract.Methods {
 		methodCtx := newLowerCtx(contract)
-		methodCtx.lowerStatements(method.Body)
-		result = append(result, ir.ANFMethod{
-			Name:     method.Name,
-			Params:   lowerParams(method.Params),
-			Body:     methodCtx.bindings,
-			IsPublic: method.Visibility == "public",
-		})
+
+		if contract.ParentClass == "StatefulSmartContract" && method.Visibility == "public" {
+			// Register txPreimage as an implicit parameter
+			methodCtx.addParam("txPreimage")
+
+			// Inject checkPreimage(txPreimage) at the start
+			preimageRef := methodCtx.emit(ir.ANFValue{Kind: "load_param", Name: "txPreimage"})
+			checkResult := methodCtx.emit(ir.ANFValue{Kind: "check_preimage", Preimage: preimageRef})
+			methodCtx.emit(makeAssert(checkResult))
+
+			// Lower the developer's method body
+			methodCtx.lowerStatements(method.Body)
+
+			// If the method mutates state, inject state continuation assertion at the end
+			if methodMutatesState(method, contract) {
+				stateScriptRef := methodCtx.emit(ir.ANFValue{Kind: "get_state_script"})
+				hashRef := methodCtx.emit(makeCall("hash256", []string{stateScriptRef}))
+				preimageRef2 := methodCtx.emit(ir.ANFValue{Kind: "load_param", Name: "txPreimage"})
+				outputHashRef := methodCtx.emit(makeCall("extractOutputHash", []string{preimageRef2}))
+				eqRef := methodCtx.emit(ir.ANFValue{Kind: "bin_op", Op: "===", Left: hashRef, Right: outputHashRef, ResultType: "bytes"})
+				methodCtx.emit(makeAssert(eqRef))
+			}
+
+			// Append implicit txPreimage param to the method's param list
+			augmentedParams := append(lowerParams(method.Params), ir.ANFParam{
+				Name: "txPreimage",
+				Type: "SigHashPreimage",
+			})
+
+			result = append(result, ir.ANFMethod{
+				Name:     method.Name,
+				Params:   augmentedParams,
+				Body:     methodCtx.bindings,
+				IsPublic: true,
+			})
+		} else {
+			methodCtx.lowerStatements(method.Body)
+			result = append(result, ir.ANFMethod{
+				Name:     method.Name,
+				Params:   lowerParams(method.Params),
+				Body:     methodCtx.bindings,
+				IsPublic: method.Visibility == "public",
+			})
+		}
 	}
 
 	return result
@@ -171,12 +208,14 @@ type lowerCtx struct {
 	counter    int
 	contract   *ContractNode
 	localNames map[string]bool // tracks variable names registered via addLocal
+	paramNames map[string]bool // tracks parameter names registered via addParam
 }
 
 func newLowerCtx(contract *ContractNode) *lowerCtx {
 	return &lowerCtx{
 		contract:   contract,
 		localNames: make(map[string]bool),
+		paramNames: make(map[string]bool),
 	}
 }
 
@@ -207,6 +246,16 @@ func (ctx *lowerCtx) addLocal(name string) {
 // isLocal checks if a name is a registered local variable.
 func (ctx *lowerCtx) isLocal(name string) bool {
 	return ctx.localNames[name]
+}
+
+// addParam records a parameter name so we know to use load_param for it.
+func (ctx *lowerCtx) addParam(name string) {
+	ctx.paramNames[name] = true
+}
+
+// isParam checks if a name is a registered parameter.
+func (ctx *lowerCtx) isParam(name string) bool {
+	return ctx.paramNames[name]
 }
 
 // isProperty checks if a name is a contract property.
@@ -245,16 +294,21 @@ func (ctx *lowerCtx) getPropertyType(name string) (string, bool) {
 }
 
 // subContext creates a sub-context for nested blocks (if/else, loops).
-// The counter continues from the parent. Local names are shared.
+// The counter continues from the parent. Local names and param names are shared.
 func (ctx *lowerCtx) subContext() *lowerCtx {
 	sub := &lowerCtx{
 		contract:   ctx.contract,
 		counter:    ctx.counter,
 		localNames: make(map[string]bool),
+		paramNames: make(map[string]bool),
 	}
 	// Share local name set
 	for k := range ctx.localNames {
 		sub.localNames[k] = true
+	}
+	// Share param name set
+	for k := range ctx.paramNames {
+		sub.paramNames[k] = true
 	}
 	return sub
 }
@@ -452,6 +506,10 @@ func (ctx *lowerCtx) lowerExprToRef(expr Expression) string {
 		return ctx.lowerIdentifier(e)
 
 	case PropertyAccessExpr:
+		// this.txPreimage in StatefulSmartContract -> load_param (it's an implicit param, not a stored property)
+		if ctx.isParam(e.Property) {
+			return ctx.emit(ir.ANFValue{Kind: "load_param", Name: e.Property})
+		}
 		// this.x -> load_prop
 		return ctx.emit(ir.ANFValue{Kind: "load_prop", Name: e.Property})
 
@@ -508,8 +566,10 @@ func (ctx *lowerCtx) lowerIdentifier(id Identifier) string {
 		return ctx.emit(makeLoadConstString("@this"))
 	}
 
-	// isParam check: always false since addParam is never called (matching TS)
-	// (no check needed)
+	// Check if it's a registered parameter (e.g. txPreimage in StatefulSmartContract)
+	if ctx.isParam(name) {
+		return ctx.emit(ir.ANFValue{Kind: "load_param", Name: name})
+	}
 
 	// Check if it's a local variable -- reference it directly
 	if ctx.isLocal(name) {
@@ -741,4 +801,74 @@ func makeUpdateProp(name, valueRef string) ir.ANFValue {
 		RawValue: raw,
 		ValueRef: valueRef,
 	}
+}
+
+// ---------------------------------------------------------------------------
+// State mutation analysis for StatefulSmartContract
+// ---------------------------------------------------------------------------
+
+// methodMutatesState determines whether a method mutates any mutable
+// (non-readonly) property. Conservative: if ANY code path can mutate state,
+// returns true.
+func methodMutatesState(method MethodNode, contract *ContractNode) bool {
+	mutableProps := make(map[string]bool)
+	for _, p := range contract.Properties {
+		if !p.Readonly {
+			mutableProps[p.Name] = true
+		}
+	}
+	if len(mutableProps) == 0 {
+		return false
+	}
+	return bodyMutatesState(method.Body, mutableProps)
+}
+
+func bodyMutatesState(stmts []Statement, mutableProps map[string]bool) bool {
+	for _, stmt := range stmts {
+		if stmtMutatesState(stmt, mutableProps) {
+			return true
+		}
+	}
+	return false
+}
+
+func stmtMutatesState(stmt Statement, mutableProps map[string]bool) bool {
+	switch s := stmt.(type) {
+	case AssignmentStmt:
+		if pa, ok := s.Target.(PropertyAccessExpr); ok && mutableProps[pa.Property] {
+			return true
+		}
+		return false
+	case ExpressionStmt:
+		return exprMutatesState(s.Expr, mutableProps)
+	case IfStmt:
+		if bodyMutatesState(s.Then, mutableProps) {
+			return true
+		}
+		if len(s.Else) > 0 && bodyMutatesState(s.Else, mutableProps) {
+			return true
+		}
+		return false
+	case ForStmt:
+		if stmtMutatesState(s.Update, mutableProps) {
+			return true
+		}
+		return bodyMutatesState(s.Body, mutableProps)
+	default:
+		return false
+	}
+}
+
+func exprMutatesState(expr Expression, mutableProps map[string]bool) bool {
+	switch e := expr.(type) {
+	case IncrementExpr:
+		if pa, ok := e.Operand.(PropertyAccessExpr); ok && mutableProps[pa.Property] {
+			return true
+		}
+	case DecrementExpr:
+		if pa, ok := e.Operand.(PropertyAccessExpr); ok && mutableProps[pa.Property] {
+			return true
+		}
+	}
+	return false
 }

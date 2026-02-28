@@ -94,6 +94,7 @@ pub enum TypeNode {
 #[derive(Debug, Clone)]
 pub struct ContractNode {
     pub name: String,
+    pub parent_class: String, // "SmartContract" or "StatefulSmartContract"
     pub properties: Vec<PropertyNode>,
     pub constructor: MethodNode,
     pub methods: Vec<MethodNode>,

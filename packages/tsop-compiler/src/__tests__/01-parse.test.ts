@@ -704,4 +704,60 @@ describe('Pass 1: Parse', () => {
       expect(result.errors.filter(e => e.severity === 'error')).toEqual([]);
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // StatefulSmartContract
+  // ---------------------------------------------------------------------------
+
+  describe('StatefulSmartContract', () => {
+    it('parses a class extending StatefulSmartContract', () => {
+      const source = `
+        class Counter extends StatefulSmartContract {
+          count: bigint;
+          constructor(count: bigint) { super(count); this.count = count; }
+          public increment() { this.count++; }
+        }
+      `;
+      const result = parse(source);
+      expect(result.errors.filter(e => e.severity === 'error')).toEqual([]);
+      expect(result.contract).not.toBeNull();
+      expect(result.contract!.name).toBe('Counter');
+    });
+
+    it('sets parentClass to StatefulSmartContract', () => {
+      const source = `
+        class Counter extends StatefulSmartContract {
+          count: bigint;
+          constructor(count: bigint) { super(count); this.count = count; }
+          public increment() { this.count++; }
+        }
+      `;
+      const result = parse(source);
+      expect(result.contract!.parentClass).toBe('StatefulSmartContract');
+    });
+
+    it('sets parentClass to SmartContract for regular contracts', () => {
+      const source = `
+        class P2PKH extends SmartContract {
+          readonly pk: PubKey;
+          constructor(pk: PubKey) { super(pk); this.pk = pk; }
+          public unlock(sig: Sig) { assert(checkSig(sig, this.pk)); }
+        }
+      `;
+      const result = parse(source);
+      expect(result.contract!.parentClass).toBe('SmartContract');
+    });
+
+    it('does not include txPreimage in parsed properties', () => {
+      const source = `
+        class Counter extends StatefulSmartContract {
+          count: bigint;
+          constructor(count: bigint) { super(count); this.count = count; }
+          public increment() { this.count++; }
+        }
+      `;
+      const result = parse(source);
+      expect(result.contract!.properties.map(p => p.name)).toEqual(['count']);
+    });
+  });
 });

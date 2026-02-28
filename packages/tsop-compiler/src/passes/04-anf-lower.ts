@@ -81,13 +81,50 @@ function lowerMethods(contract: ContractNode): ANFMethod[] {
   // Lower each method
   for (const method of contract.methods) {
     const methodCtx = new LoweringContext(contract);
-    lowerStatements(method.body, methodCtx);
-    result.push({
-      name: method.name,
-      params: lowerParams(method.params),
-      body: methodCtx.bindings,
-      isPublic: method.visibility === 'public',
-    });
+
+    if (contract.parentClass === 'StatefulSmartContract' && method.visibility === 'public') {
+      // Register txPreimage as an implicit parameter
+      methodCtx.addParam('txPreimage');
+
+      // Inject checkPreimage(txPreimage) at the start
+      const preimageRef = methodCtx.emit({ kind: 'load_param', name: 'txPreimage' });
+      const checkResult = methodCtx.emit({ kind: 'check_preimage', preimage: preimageRef });
+      methodCtx.emit({ kind: 'assert', value: checkResult });
+
+      // Lower the developer's method body
+      lowerStatements(method.body, methodCtx);
+
+      // If the method mutates state, inject state continuation assertion at the end
+      if (methodMutatesState(method, contract)) {
+        const stateScriptRef = methodCtx.emit({ kind: 'get_state_script' });
+        const hashRef = methodCtx.emit({ kind: 'call', func: 'hash256', args: [stateScriptRef] });
+        const preimageRef2 = methodCtx.emit({ kind: 'load_param', name: 'txPreimage' });
+        const outputHashRef = methodCtx.emit({ kind: 'call', func: 'extractOutputHash', args: [preimageRef2] });
+        const eqRef = methodCtx.emit({ kind: 'bin_op', op: '===', left: hashRef, right: outputHashRef, result_type: 'bytes' });
+        methodCtx.emit({ kind: 'assert', value: eqRef });
+      }
+
+      // Append implicit txPreimage param to the method's param list
+      const augmentedParams: ParamNode[] = [
+        ...method.params,
+        { kind: 'param', name: 'txPreimage', type: { kind: 'primitive_type', name: 'SigHashPreimage' } },
+      ];
+
+      result.push({
+        name: method.name,
+        params: lowerParams(augmentedParams),
+        body: methodCtx.bindings,
+        isPublic: true,
+      });
+    } else {
+      lowerStatements(method.body, methodCtx);
+      result.push({
+        name: method.name,
+        params: lowerParams(method.params),
+        body: methodCtx.bindings,
+        isPublic: method.visibility === 'public',
+      });
+    }
   }
 
   return result;
@@ -400,6 +437,10 @@ function lowerExprToRef(expr: Expression, ctx: LoweringContext): string {
       return lowerIdentifier(expr, ctx);
 
     case 'property_access':
+      // this.txPreimage in StatefulSmartContract -> load_param (it's an implicit param, not a stored property)
+      if (ctx.isParam(expr.property)) {
+        return ctx.emit({ kind: 'load_param', name: expr.property });
+      }
       // this.x -> load_prop
       return ctx.emit({ kind: 'load_prop', name: expr.property });
 
@@ -741,4 +782,59 @@ function typeNodeToString(node: TypeNode): string {
     case 'custom_type':
       return node.name;
   }
+}
+
+// ---------------------------------------------------------------------------
+// State mutation analysis for StatefulSmartContract
+// ---------------------------------------------------------------------------
+
+/**
+ * Determine whether a method mutates any mutable (non-readonly) property.
+ * Conservative: if ANY code path can mutate state, returns true.
+ */
+function methodMutatesState(
+  method: { body: Statement[] },
+  contract: ContractNode,
+): boolean {
+  const mutablePropNames = new Set(
+    contract.properties.filter(p => !p.readonly).map(p => p.name),
+  );
+  if (mutablePropNames.size === 0) return false;
+  return bodyMutatesState(method.body, mutablePropNames);
+}
+
+function bodyMutatesState(stmts: Statement[], mutableProps: Set<string>): boolean {
+  for (const stmt of stmts) {
+    if (stmtMutatesState(stmt, mutableProps)) return true;
+  }
+  return false;
+}
+
+function stmtMutatesState(stmt: Statement, mutableProps: Set<string>): boolean {
+  switch (stmt.kind) {
+    case 'assignment':
+      if (stmt.target.kind === 'property_access' && mutableProps.has(stmt.target.property)) {
+        return true;
+      }
+      return false;
+    case 'expression_statement':
+      return exprMutatesState(stmt.expression, mutableProps);
+    case 'if_statement':
+      return bodyMutatesState(stmt.then, mutableProps) ||
+             (stmt.else ? bodyMutatesState(stmt.else, mutableProps) : false);
+    case 'for_statement':
+      return stmtMutatesState(stmt.update, mutableProps) ||
+             bodyMutatesState(stmt.body, mutableProps);
+    default:
+      return false;
+  }
+}
+
+function exprMutatesState(expr: Expression, mutableProps: Set<string>): boolean {
+  if (expr.kind === 'increment_expr' || expr.kind === 'decrement_expr') {
+    if (expr.operand.kind === 'property_access' && mutableProps.has(expr.operand.property)) {
+      return true;
+    }
+  }
+  return false;
 }

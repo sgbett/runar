@@ -6,39 +6,54 @@ TSOP is a strict subset of TypeScript designed for compilation to Bitcoin SV Scr
 
 ## Contract Structure
 
-A TSOP source file contains exactly one contract class that extends `SmartContract`:
+A TSOP source file contains exactly one contract class that extends `SmartContract` (stateless) or `StatefulSmartContract` (stateful):
+
+**Stateless contract** — all properties are `readonly`:
 
 ```typescript
-import { SmartContract, assert, PubKey, Sig, checkSig } from 'tsop-lang';
+import { SmartContract, assert, checkSig } from 'tsop-lang';
+import type { PubKey, Sig } from 'tsop-lang';
 
-class MyContract extends SmartContract {
-  // Properties (contract state)
-  readonly fixedValue: bigint;
-  mutableValue: bigint;
+class P2PKH extends SmartContract {
+  readonly pubKeyHash: Addr;
 
-  // Constructor (deployment parameters)
-  constructor(fixedValue: bigint, mutableValue: bigint) {
-    super(fixedValue, mutableValue);
-    this.fixedValue = fixedValue;
-    this.mutableValue = mutableValue;
+  constructor(pubKeyHash: Addr) {
+    super(pubKeyHash);
+    this.pubKeyHash = pubKeyHash;
   }
 
-  // Public methods (spending entry points)
-  public spend(sig: Sig, pubKey: PubKey) {
+  public unlock(sig: Sig, pubKey: PubKey) {
+    assert(hash160(pubKey) === this.pubKeyHash);
     assert(checkSig(sig, pubKey));
-  }
-
-  // Private methods (inlined helpers)
-  private helper(x: bigint): bigint {
-    return x * x;
   }
 }
 ```
 
+**Stateful contract** — has mutable properties, state persists across transactions:
+
+```typescript
+import { StatefulSmartContract, assert } from 'tsop-lang';
+
+class Counter extends StatefulSmartContract {
+  count: bigint;  // mutable = stateful
+
+  constructor(count: bigint) {
+    super(count);
+    this.count = count;
+  }
+
+  public increment() {
+    this.count++;
+  }
+}
+```
+
+`StatefulSmartContract` automatically handles the OP_PUSH_TX pattern: preimage verification at method entry and state continuation at exit for any method that modifies state. Access preimage fields via `this.txPreimage`.
+
 ### Rules
 
-- One class per file, extending `SmartContract` directly.
-- No decorators, no generics on the class, no intermediate base classes.
+- One class per file, extending `SmartContract` or `StatefulSmartContract`.
+- No decorators, no generics on the class.
 - Imports are restricted to `tsop-lang` (or `tsop` / `tsop/builtins`).
 
 ---
@@ -65,7 +80,7 @@ count: bigint;
 
 - Initialized in the constructor. Can be reassigned in public methods.
 - Changes are propagated across transactions using the OP_PUSH_TX pattern.
-- Having any mutable property makes the contract **stateful**.
+- Having any mutable property makes the contract **stateful**. Use `StatefulSmartContract` as the base class.
 
 Properties must not have initializers at the declaration site. All initialization happens in the constructor.
 
@@ -85,7 +100,7 @@ public unlock(sig: Sig, pubKey: PubKey) {
 ```
 
 - Must return `void`.
-- Must end with an `assert(...)` call as the final statement.
+- In `SmartContract`, must end with an `assert(...)` call as the final statement. In `StatefulSmartContract`, the compiler auto-injects the final assert.
 - Parameters form part of the unlocking script (scriptSig).
 - When a contract has multiple public methods, a dispatch table is generated. The unlocking script includes a method index.
 
@@ -337,12 +352,21 @@ private helper(x: bigint): bigint {
 
 ### Preimage (Stateful Contracts)
 
+In `StatefulSmartContract`, `checkPreimage` and state continuation are handled automatically by the compiler. The preimage is available via `this.txPreimage`. Use the `extract*` functions to read specific fields:
+
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `checkPreimage` | `(preimage: SigHashPreimage) => boolean` | Verify sighash preimage matches current tx |
-| `this.getStateScript()` | `() => ByteString` | Serialize current mutable state |
+| `this.txPreimage` | `SigHashPreimage` | Implicit preimage property (StatefulSmartContract only) |
 | `extractOutputHash` | `(preimage: SigHashPreimage) => Sha256` | Extract hashOutputs from preimage |
 | `extractLocktime` | `(preimage: SigHashPreimage) => bigint` | Extract nLocktime from preimage |
+| `extractAmount` | `(preimage: SigHashPreimage) => bigint` | Extract input amount from preimage |
+| `extractVersion` | `(preimage: SigHashPreimage) => bigint` | Extract tx version from preimage |
+| `extractSequence` | `(preimage: SigHashPreimage) => bigint` | Extract sequence number from preimage |
+
+### Oracle
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
 | `verifyRabinSig` | `(msg, sig, padding, pubKey) => boolean` | Verify a Rabin signature |
 
 ---

@@ -10,7 +10,7 @@
 // private, readonly, abstract) provide all the expressiveness needed.
 // ---------------------------------------------------------------------------
 
-import type { ByteString, Addr } from './types.js';
+import type { ByteString, Addr, SigHashPreimage as SigHashPreimageType } from './types.js';
 
 // ---------------------------------------------------------------------------
 // Re-exports — types
@@ -184,4 +184,59 @@ export abstract class SmartContract {
       'SmartContract.buildP2PKH() cannot be called at runtime — compile this contract.',
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// StatefulSmartContract base class
+// ---------------------------------------------------------------------------
+
+/**
+ * Base class for stateful TSOP smart contracts.
+ *
+ * Extends {@link SmartContract} with automatic transaction preimage
+ * verification and state continuation. The compiler injects two things
+ * into every public method:
+ *
+ * 1. **Preimage check** — `assert(checkPreimage(txPreimage))` at method
+ *    entry, verifying the sighash preimage is valid for the current
+ *    spending transaction.
+ *
+ * 2. **State continuation** — for methods that modify mutable (non-readonly)
+ *    properties, `assert(hash256(this.getStateScript()) ===
+ *    extractOutputHash(txPreimage))` at method exit, ensuring the
+ *    spending transaction carries the updated state forward.
+ *
+ * Contract methods can access preimage fields via the implicit
+ * `this.txPreimage` property and the `extract*` helpers:
+ *
+ * ```ts
+ * import { StatefulSmartContract, assert, extractLocktime } from 'tsop-lang';
+ * import type { PubKey, Sig } from 'tsop-lang';
+ *
+ * class Counter extends StatefulSmartContract {
+ *   count: bigint;
+ *
+ *   constructor(count: bigint) {
+ *     super(count);
+ *     this.count = count;
+ *   }
+ *
+ *   public increment() {
+ *     this.count++;
+ *   }
+ * }
+ * ```
+ */
+export abstract class StatefulSmartContract extends SmartContract {
+  /**
+   * The sighash preimage for the current spending transaction.
+   *
+   * Automatically verified by the compiler at method entry via
+   * `checkPreimage()`. Use the `extract*` helpers to read fields:
+   *
+   * ```ts
+   * assert(extractLocktime(this.txPreimage) >= this.deadline);
+   * ```
+   */
+  protected readonly txPreimage!: SigHashPreimageType;
 }

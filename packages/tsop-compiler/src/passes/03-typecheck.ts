@@ -231,6 +231,11 @@ class TypeChecker {
       this.propTypes.set(prop.name, typeNodeToTType(prop.type));
     }
 
+    // For StatefulSmartContract, add the implicit txPreimage property
+    if (contract.parentClass === 'StatefulSmartContract') {
+      this.propTypes.set('txPreimage', 'SigHashPreimage');
+    }
+
     // Build method signature map (for this.method() calls)
     this.methodSigs = new Map();
     for (const method of contract.methods) {

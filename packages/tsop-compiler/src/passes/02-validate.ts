@@ -64,6 +64,27 @@ const VALID_PRIMITIVE_TYPES = new Set<string>([
 function validateProperties(ctx: ValidationContext): void {
   for (const prop of ctx.contract.properties) {
     validatePropertyType(prop.type, prop.sourceLocation, ctx);
+
+    // txPreimage is an implicit property of StatefulSmartContract
+    if (ctx.contract.parentClass === 'StatefulSmartContract' && prop.name === 'txPreimage') {
+      ctx.errors.push(makeDiagnostic(
+        `'txPreimage' is an implicit property of StatefulSmartContract and must not be declared`,
+        'error',
+        prop.sourceLocation,
+      ));
+    }
+  }
+
+  // Warn if StatefulSmartContract has no mutable properties
+  if (ctx.contract.parentClass === 'StatefulSmartContract') {
+    const hasMutableProps = ctx.contract.properties.some(p => !p.readonly);
+    if (!hasMutableProps) {
+      ctx.warnings.push(makeDiagnostic(
+        'StatefulSmartContract has no mutable properties; consider using SmartContract instead',
+        'warning',
+        ctx.contract.constructor.sourceLocation,
+      ));
+    }
   }
 }
 
@@ -206,8 +227,9 @@ function validateMethod(method: MethodNode, ctx: ValidationContext): void {
     }
   }
 
-  // Public methods must end with an assert() call
-  if (method.visibility === 'public') {
+  // Public methods must end with an assert() call (unless StatefulSmartContract,
+  // where the compiler auto-injects the final assert)
+  if (method.visibility === 'public' && ctx.contract.parentClass === 'SmartContract') {
     if (!endsWithAssert(method.body)) {
       ctx.errors.push(makeDiagnostic(
         `Public method '${method.name}' must end with an assert() call`,
@@ -215,6 +237,11 @@ function validateMethod(method: MethodNode, ctx: ValidationContext): void {
         method.sourceLocation,
       ));
     }
+  }
+
+  // Warn on manual preimage boilerplate in StatefulSmartContract
+  if (ctx.contract.parentClass === 'StatefulSmartContract' && method.visibility === 'public') {
+    warnManualPreimageUsage(method, ctx);
   }
 
   // Validate all statements in method body
@@ -559,4 +586,105 @@ function checkNoNumberType(
   // 'number' would not be a PrimitiveTypeName in TSOP (it's excluded from
   // the type union), so this is mainly a sanity check. If we ever see it
   // via custom_type, we'd catch it elsewhere.
+}
+
+// ---------------------------------------------------------------------------
+// StatefulSmartContract: warn on manual preimage boilerplate
+// ---------------------------------------------------------------------------
+
+function warnManualPreimageUsage(method: MethodNode, ctx: ValidationContext): void {
+  walkExpressionsInBody(method.body, (expr) => {
+    // Detect manual checkPreimage(...)
+    if (expr.kind === 'call_expr' &&
+        expr.callee.kind === 'identifier' &&
+        expr.callee.name === 'checkPreimage') {
+      ctx.warnings.push(makeDiagnostic(
+        `StatefulSmartContract auto-injects checkPreimage(); calling it manually in '${method.name}' will cause a duplicate verification`,
+        'warning',
+        method.sourceLocation,
+      ));
+    }
+    // Detect manual this.getStateScript()
+    if (expr.kind === 'call_expr' &&
+        expr.callee.kind === 'property_access' &&
+        expr.callee.property === 'getStateScript') {
+      ctx.warnings.push(makeDiagnostic(
+        `StatefulSmartContract auto-injects state continuation; calling getStateScript() manually in '${method.name}' is redundant`,
+        'warning',
+        method.sourceLocation,
+      ));
+    }
+  });
+}
+
+function walkExpressionsInBody(
+  stmts: Statement[],
+  visitor: (expr: Expression) => void,
+): void {
+  for (const stmt of stmts) {
+    walkExpressionsInStatement(stmt, visitor);
+  }
+}
+
+function walkExpressionsInStatement(
+  stmt: Statement,
+  visitor: (expr: Expression) => void,
+): void {
+  switch (stmt.kind) {
+    case 'expression_statement':
+      walkExpr(stmt.expression, visitor);
+      break;
+    case 'variable_decl':
+      walkExpr(stmt.init, visitor);
+      break;
+    case 'assignment':
+      walkExpr(stmt.target, visitor);
+      walkExpr(stmt.value, visitor);
+      break;
+    case 'if_statement':
+      walkExpr(stmt.condition, visitor);
+      walkExpressionsInBody(stmt.then, visitor);
+      if (stmt.else) walkExpressionsInBody(stmt.else, visitor);
+      break;
+    case 'for_statement':
+      walkExpr(stmt.condition, visitor);
+      walkExpressionsInBody(stmt.body, visitor);
+      break;
+    case 'return_statement':
+      if (stmt.value) walkExpr(stmt.value, visitor);
+      break;
+  }
+}
+
+function walkExpr(expr: Expression, visitor: (expr: Expression) => void): void {
+  visitor(expr);
+  switch (expr.kind) {
+    case 'binary_expr':
+      walkExpr(expr.left, visitor);
+      walkExpr(expr.right, visitor);
+      break;
+    case 'unary_expr':
+      walkExpr(expr.operand, visitor);
+      break;
+    case 'call_expr':
+      walkExpr(expr.callee, visitor);
+      for (const arg of expr.args) walkExpr(arg, visitor);
+      break;
+    case 'member_expr':
+      walkExpr(expr.object, visitor);
+      break;
+    case 'ternary_expr':
+      walkExpr(expr.condition, visitor);
+      walkExpr(expr.consequent, visitor);
+      walkExpr(expr.alternate, visitor);
+      break;
+    case 'index_access':
+      walkExpr(expr.object, visitor);
+      walkExpr(expr.index, visitor);
+      break;
+    case 'increment_expr':
+    case 'decrement_expr':
+      walkExpr(expr.operand, visitor);
+      break;
+  }
 }

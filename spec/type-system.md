@@ -441,7 +441,7 @@ const val: bigint = matrix[0n][1n];  // 2n
 ### 9.4 Stateful Contract Types
 
 ```typescript
-export class Counter extends SmartContract {
+export class Counter extends StatefulSmartContract {
     counter: bigint;  // mutable -- state is carried across transactions
 
     constructor(counter: bigint) {
@@ -449,9 +449,9 @@ export class Counter extends SmartContract {
         this.counter = counter;
     }
 
-    public increment(amount: bigint, preimage: SigHashPreimage): void {
+    public increment(amount: bigint): void {
         this.counter += amount;
-        assert(this.checkPreimage(preimage));  // verifies new state
+        // Compiler auto-injects: checkPreimage at entry, state continuation at exit
     }
 }
 ```

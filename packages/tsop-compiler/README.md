@@ -98,7 +98,7 @@ console.log(result.diagnostics);   // warnings and errors
 The parser:
 
 1. Creates a `ts-morph` `Project` with in-memory file system.
-2. Locates the class declaration that extends `SmartContract`.
+2. Locates the class declaration that extends `SmartContract` or `StatefulSmartContract`.
 3. Extracts property declarations, noting `readonly` vs mutable.
 4. Extracts the constructor, verifying `super(...)` call structure.
 5. Extracts method declarations with visibility and parameter types.
@@ -110,6 +110,7 @@ The output is a `ContractNode` as defined in `tsop-ir-schema`:
 interface ContractNode {
   kind: 'contract';
   name: string;
+  parentClass: 'SmartContract' | 'StatefulSmartContract';
   properties: PropertyNode[];
   constructor: MethodNode;
   methods: MethodNode[];
@@ -126,7 +127,7 @@ Expression nodes use a discriminated union on the `kind` field: `binary_expr`, `
 
 The validator checks structural constraints that the parser does not enforce:
 
-- Exactly one class extending `SmartContract` (no inheritance chains).
+- Exactly one class extending `SmartContract` or `StatefulSmartContract`.
 - No decorators anywhere.
 - No disallowed TypeScript constructs (while loops, try/catch, async, closures, etc.).
 - Constructor calls `super(...)` first, passes all properties, assigns all properties.
