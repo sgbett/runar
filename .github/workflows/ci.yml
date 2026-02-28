@@ -30,6 +30,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.22'
+          cache-dependency-path: compilers/go/go.sum
       - run: cd compilers/go && go build ./...
       - run: cd compilers/go && go build -o tsop-go .
       - run: cd compilers/go && go test -race -v ./...
