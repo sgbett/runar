@@ -45,10 +45,11 @@ func ParseGoContract(source []byte, fileName string) *ParseResult {
 // ---------------------------------------------------------------------------
 
 type goContractParser struct {
-	fset     *token.FileSet
-	file     *ast.File
-	fileName string
-	errors   []string
+	fset         *token.FileSet
+	file         *ast.File
+	fileName     string
+	errors       []string
+	receiverName string // current method's receiver name (e.g. "c", "m", "self")
 }
 
 func (p *goContractParser) extractContract() *ContractNode {
@@ -163,6 +164,13 @@ func (p *goContractParser) extractContract() *ContractNode {
 		visibility := "private"
 		if funcDecl.Name.IsExported() {
 			visibility = "public"
+		}
+
+		// Extract receiver name for property access resolution
+		if len(funcDecl.Recv.List[0].Names) > 0 {
+			p.receiverName = funcDecl.Recv.List[0].Names[0].Name
+		} else {
+			p.receiverName = "c" // default
 		}
 
 		params := p.extractParams(funcDecl.Type.Params)
@@ -478,8 +486,8 @@ func (p *goContractParser) convertExpression(expr ast.Expr) Expression {
 			if ident.Name == "tsop" {
 				return Identifier{Name: mapGoBuiltin(e.Sel.Name)}
 			}
-			// c.Field -> property access
-			if ident.Name == "c" || ident.Name == "self" {
+			// receiver.Field -> property access (e.g. c.Count, m.Value)
+			if ident.Name == p.receiverName || ident.Name == "c" || ident.Name == "self" {
 				return PropertyAccessExpr{Property: goFieldToCamel(e.Sel.Name)}
 			}
 			// Any other package selector (math.Log, fmt.Println, etc.) is not valid TSOP
@@ -607,6 +615,18 @@ func mapGoBuiltin(name string) string {
 		"ExtractOutputHash": "extractOutputHash",
 		"AddOutput":         "addOutput",
 		"GetStateScript":    "getStateScript",
+		"Safediv":           "safediv",
+		"Safemod":           "safemod",
+		"Clamp":             "clamp",
+		"Sign":              "sign",
+		"Pow":               "pow",
+		"MulDiv":            "mulDiv",
+		"PercentOf":         "percentOf",
+		"Sqrt":              "sqrt",
+		"Gcd":               "gcd",
+		"Divmod":            "divmod",
+		"Log2":              "log2",
+		"ToBool":            "bool",
 	}
 	if mapped, ok := builtinMap[name]; ok {
 		return mapped

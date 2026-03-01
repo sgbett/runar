@@ -179,6 +179,18 @@ Built-in functions are accessed through the `tsop` package with PascalCase names
 | `tsop.Min(a, b)` | `min(a, b)` |
 | `tsop.Max(a, b)` | `max(a, b)` |
 | `tsop.Within(x, lo, hi)` | `within(x, lo, hi)` |
+| `tsop.Safediv(a, b)` | `safediv(a, b)` |
+| `tsop.Safemod(a, b)` | `safemod(a, b)` |
+| `tsop.Clamp(val, lo, hi)` | `clamp(val, lo, hi)` |
+| `tsop.Sign(n)` | `sign(n)` |
+| `tsop.Pow(base, exp)` | `pow(base, exp)` |
+| `tsop.MulDiv(a, b, c)` | `mulDiv(a, b, c)` |
+| `tsop.PercentOf(amount, bps)` | `percentOf(amount, bps)` |
+| `tsop.Sqrt(n)` | `sqrt(n)` |
+| `tsop.Gcd(a, b)` | `gcd(a, b)` |
+| `tsop.Divmod(a, b)` | `divmod(a, b)` |
+| `tsop.Log2(n)` | `log2(n)` |
+| `tsop.ToBool(n)` | `bool(n)` |
 | `tsop.CheckPreimage(pre)` | `checkPreimage(pre)` |
 | `tsop.ExtractLocktime(pre)` | `extractLocktime(pre)` |
 | `tsop.ExtractOutputHash(pre)` | `extractOutputHash(pre)` |

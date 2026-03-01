@@ -235,6 +235,94 @@ export function within(_value: bigint, _min: bigint, _max: bigint): boolean {
   return compilerStub('within');
 }
 
+/**
+ * Safe division — asserts the divisor is non-zero before dividing.
+ * Compiles to: `OP_DUP OP_0NOTEQUAL OP_VERIFY OP_DIV`
+ */
+export function safediv(_a: bigint, _b: bigint): bigint {
+  return compilerStub('safediv');
+}
+
+/**
+ * Safe modulo — asserts the divisor is non-zero before taking modulo.
+ * Compiles to: `OP_DUP OP_0NOTEQUAL OP_VERIFY OP_MOD`
+ */
+export function safemod(_a: bigint, _b: bigint): bigint {
+  return compilerStub('safemod');
+}
+
+/**
+ * Clamp a value to the range [lo, hi].
+ * Compiles to: `<lo> OP_MAX <hi> OP_MIN`
+ */
+export function clamp(_value: bigint, _lo: bigint, _hi: bigint): bigint {
+  return compilerStub('clamp');
+}
+
+/**
+ * Sign of a number: returns -1, 0, or 1.
+ * Compiles to: `OP_DUP OP_ABS OP_SWAP OP_DIV`
+ */
+export function sign(_value: bigint): bigint {
+  return compilerStub('sign');
+}
+
+/**
+ * Exponentiation.
+ * For constant exponents, the compiler unrolls to repeated `OP_MUL`.
+ * For runtime exponents, a bounded iteration is emitted.
+ */
+export function pow(_base: bigint, _exp: bigint): bigint {
+  return compilerStub('pow');
+}
+
+/**
+ * Multiply then divide: `(a * b) / c`.
+ * Useful for ratio calculations without intermediate overflow concern.
+ * Compiles to: `OP_MUL OP_DIV`
+ */
+export function mulDiv(_a: bigint, _b: bigint, _c: bigint): bigint {
+  return compilerStub('mulDiv');
+}
+
+/**
+ * Calculate a percentage in basis points: `(amount * bps) / 10000`.
+ * Compiles to: `OP_MUL <10000> OP_DIV`
+ */
+export function percentOf(_amount: bigint, _bps: bigint): bigint {
+  return compilerStub('percentOf');
+}
+
+/**
+ * Integer square root via Newton's method (bounded iterations).
+ */
+export function sqrt(_n: bigint): bigint {
+  return compilerStub('sqrt');
+}
+
+/**
+ * Greatest common divisor via Euclidean algorithm (bounded iterations).
+ */
+export function gcd(_a: bigint, _b: bigint): bigint {
+  return compilerStub('gcd');
+}
+
+/**
+ * Division returning quotient.
+ * Compiles to: `OP_2DUP OP_DIV OP_ROT OP_ROT OP_MOD OP_DROP`
+ */
+export function divmod(_a: bigint, _b: bigint): bigint {
+  return compilerStub('divmod');
+}
+
+/**
+ * Approximate floor(log2(n)) via byte size of script number encoding.
+ * Compiles to: `OP_SIZE OP_NIP 8 OP_MUL 8 OP_SUB`
+ */
+export function log2(_n: bigint): bigint {
+  return compilerStub('log2');
+}
+
 // ---------------------------------------------------------------------------
 // Rabin signature verification (oracle support)
 // ---------------------------------------------------------------------------

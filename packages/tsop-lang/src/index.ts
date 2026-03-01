@@ -71,6 +71,17 @@ export {
   min,
   max,
   within,
+  safediv,
+  safemod,
+  clamp,
+  sign,
+  pow,
+  mulDiv,
+  percentOf,
+  sqrt,
+  gcd,
+  divmod,
+  log2,
   // Rabin (also re-exported from oracle subpath)
   verifyRabinSig,
 } from './builtins.js';

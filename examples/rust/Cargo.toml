@@ -38,3 +38,7 @@ path = "covenant-vault/CovenantVault_test.rs"
 [[test]]
 name = "oracle_price"
 path = "oracle-price/OraclePriceFeed_test.rs"
+
+[[test]]
+name = "math_demo"
+path = "math-demo/MathDemo_test.rs"

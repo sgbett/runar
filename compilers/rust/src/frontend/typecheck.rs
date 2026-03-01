@@ -80,6 +80,18 @@ fn builtin_functions() -> HashMap<&'static str, FuncSig> {
     m.insert("exit", FuncSig { params: vec!["boolean"], return_type: "void" });
     m.insert("pack", FuncSig { params: vec!["bigint"], return_type: "ByteString" });
     m.insert("unpack", FuncSig { params: vec!["ByteString"], return_type: "bigint" });
+    m.insert("safediv", FuncSig { params: vec!["bigint", "bigint"], return_type: "bigint" });
+    m.insert("safemod", FuncSig { params: vec!["bigint", "bigint"], return_type: "bigint" });
+    m.insert("clamp", FuncSig { params: vec!["bigint", "bigint", "bigint"], return_type: "bigint" });
+    m.insert("sign", FuncSig { params: vec!["bigint"], return_type: "bigint" });
+    m.insert("pow", FuncSig { params: vec!["bigint", "bigint"], return_type: "bigint" });
+    m.insert("mulDiv", FuncSig { params: vec!["bigint", "bigint", "bigint"], return_type: "bigint" });
+    m.insert("percentOf", FuncSig { params: vec!["bigint", "bigint"], return_type: "bigint" });
+    m.insert("sqrt", FuncSig { params: vec!["bigint"], return_type: "bigint" });
+    m.insert("gcd", FuncSig { params: vec!["bigint", "bigint"], return_type: "bigint" });
+    m.insert("divmod", FuncSig { params: vec!["bigint", "bigint"], return_type: "bigint" });
+    m.insert("log2", FuncSig { params: vec!["bigint"], return_type: "bigint" });
+    m.insert("bool", FuncSig { params: vec!["bigint"], return_type: "boolean" });
 
     // Preimage extractors
     m.insert("extractVersion", FuncSig { params: vec!["SigHashPreimage"], return_type: "bigint" });
@@ -632,8 +644,8 @@ impl<'a> TypeChecker<'a> {
                 BOOLEAN.to_string()
             }
 
-            // Bitwise: bigint x bigint -> bigint
-            BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor => {
+            // Bitwise / shift: bigint x bigint -> bigint
+            BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor | BinaryOp::Shl | BinaryOp::Shr => {
                 if !is_bigint_family(&left_type) {
                     self.errors.push(format!(
                         "Left operand of '{}' must be bigint, got '{}'",
@@ -1045,7 +1057,9 @@ fn infer_expr_type_static(expr: &Expression) -> TType {
             | BinaryOp::Mod
             | BinaryOp::BitAnd
             | BinaryOp::BitOr
-            | BinaryOp::BitXor => BIGINT.to_string(),
+            | BinaryOp::BitXor
+            | BinaryOp::Shl
+            | BinaryOp::Shr => BIGINT.to_string(),
             _ => BOOLEAN.to_string(),
         },
         Expression::UnaryExpr { op, .. } => match op {

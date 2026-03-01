@@ -199,6 +199,8 @@ pub enum BinaryOp {
     BitAnd,    // &
     BitOr,     // |
     BitXor,    // ^
+    Shl,       // <<
+    Shr,       // >>
 }
 
 impl BinaryOp {
@@ -221,6 +223,8 @@ impl BinaryOp {
             BinaryOp::BitAnd => "&",
             BinaryOp::BitOr => "|",
             BinaryOp::BitXor => "^",
+            BinaryOp::Shl => "<<",
+            BinaryOp::Shr => ">>",
         }
     }
 }

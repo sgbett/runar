@@ -163,6 +163,92 @@ pub fn num2bin(v: &Bigint, length: usize) -> ByteString {
 }
 
 // ---------------------------------------------------------------------------
+// Math functions
+// ---------------------------------------------------------------------------
+
+/// Safe division — panics if b is zero.
+pub fn safediv(a: Int, b: Int) -> Int {
+    assert!(b != 0, "safediv: division by zero");
+    a / b
+}
+
+/// Safe modulo — panics if b is zero.
+pub fn safemod(a: Int, b: Int) -> Int {
+    assert!(b != 0, "safemod: modulo by zero");
+    a % b
+}
+
+/// Clamp value to [lo, hi].
+pub fn clamp(value: Int, lo: Int, hi: Int) -> Int {
+    if value < lo { lo } else if value > hi { hi } else { value }
+}
+
+/// Sign of a number: -1, 0, or 1.
+pub fn sign(n: Int) -> Int {
+    if n > 0 { 1 } else if n < 0 { -1 } else { 0 }
+}
+
+/// Exponentiation for non-negative exponents.
+pub fn pow(base: Int, exp: Int) -> Int {
+    assert!(exp >= 0, "pow: negative exponent");
+    let mut result: Int = 1;
+    for _ in 0..exp { result *= base; }
+    result
+}
+
+/// (a * b) / c without intermediate overflow concern.
+pub fn mul_div(a: Int, b: Int, c: Int) -> Int {
+    assert!(c != 0, "mulDiv: division by zero");
+    (a * b) / c
+}
+
+/// (amount * bps) / 10000 — basis point percentage.
+pub fn percent_of(amount: Int, bps: Int) -> Int {
+    (amount * bps) / 10000
+}
+
+/// Integer square root via Newton's method.
+pub fn sqrt(n: Int) -> Int {
+    assert!(n >= 0, "sqrt: negative input");
+    if n == 0 { return 0; }
+    let mut guess = n;
+    for _ in 0..256 {
+        let next = (guess + n / guess) / 2;
+        if next >= guess { break; }
+        guess = next;
+    }
+    guess
+}
+
+/// Greatest common divisor via Euclidean algorithm.
+pub fn gcd(mut a: Int, mut b: Int) -> Int {
+    a = a.abs();
+    b = b.abs();
+    while b != 0 { let t = b; b = a % b; a = t; }
+    a
+}
+
+/// Division returning quotient.
+pub fn divmod(a: Int, b: Int) -> Int {
+    assert!(b != 0, "divmod: division by zero");
+    a / b
+}
+
+/// Approximate floor(log2(n)).
+pub fn log2(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    let mut bits: Int = 0;
+    let mut val = n;
+    while val > 1 { val >>= 1; bits += 1; }
+    bits
+}
+
+/// Boolean cast — returns true if n is non-zero.
+pub fn bool_cast(n: Int) -> bool {
+    n != 0
+}
+
+// ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
 

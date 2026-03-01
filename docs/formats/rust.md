@@ -200,6 +200,18 @@ Built-in functions use snake_case and take references for byte-type arguments:
 | `extract_locktime(&pre)` | `extractLocktime(pre)` |
 | `extract_output_hash(&pre)` | `extractOutputHash(pre)` |
 | `verify_rabin_sig(&msg, &sig, &pad, &pk)` | `verifyRabinSig(msg, sig, pad, pk)` |
+| `safediv(a, b)` | `safediv(a, b)` |
+| `safemod(a, b)` | `safemod(a, b)` |
+| `clamp(val, lo, hi)` | `clamp(val, lo, hi)` |
+| `sign(n)` | `sign(n)` |
+| `pow(base, exp)` | `pow(base, exp)` |
+| `mul_div(a, b, c)` | `mulDiv(a, b, c)` |
+| `percent_of(amount, bps)` | `percentOf(amount, bps)` |
+| `sqrt(n)` | `sqrt(n)` |
+| `gcd(a, b)` | `gcd(a, b)` |
+| `divmod(a, b)` | `divmod(a, b)` |
+| `log2(n)` | `log2(n)` |
+| `bool_cast(n)` | `bool(n)` |
 
 ---
 

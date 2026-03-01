@@ -86,6 +86,8 @@ fn builtin_opcodes(name: &str) -> Option<Vec<&'static str>> {
         "left" => Some(vec!["OP_SPLIT", "OP_DROP"]),
         "right" => Some(vec!["OP_SPLIT", "OP_NIP"]),
         "int2str" => Some(vec!["OP_NUM2BIN"]),
+        "sign" => Some(vec!["OP_DUP", "OP_ABS", "OP_SWAP", "OP_DIV"]),
+        "bool" => Some(vec!["OP_0NOTEQUAL"]),
         _ => None,
     }
 }
@@ -108,6 +110,8 @@ fn binop_opcodes(op: &str) -> Option<Vec<&'static str>> {
         "&" => Some(vec!["OP_AND"]),
         "|" => Some(vec!["OP_OR"]),
         "^" => Some(vec!["OP_XOR"]),
+        "<<" => Some(vec!["OP_LSHIFT"]),
+        ">>" => Some(vec!["OP_RSHIFT"]),
         _ => None,
     }
 }
@@ -653,6 +657,56 @@ impl LoweringContext {
 
         if func_name == "verifyRabinSig" {
             self.lower_verify_rabin_sig(binding_name, args, binding_index, last_uses);
+            return;
+        }
+
+        if func_name == "safediv" {
+            self.lower_safediv(binding_name, args, binding_index, last_uses);
+            return;
+        }
+
+        if func_name == "safemod" {
+            self.lower_safemod(binding_name, args, binding_index, last_uses);
+            return;
+        }
+
+        if func_name == "clamp" {
+            self.lower_clamp(binding_name, args, binding_index, last_uses);
+            return;
+        }
+
+        if func_name == "pow" {
+            self.lower_pow(binding_name, args, binding_index, last_uses);
+            return;
+        }
+
+        if func_name == "mulDiv" {
+            self.lower_mul_div(binding_name, args, binding_index, last_uses);
+            return;
+        }
+
+        if func_name == "percentOf" {
+            self.lower_percent_of(binding_name, args, binding_index, last_uses);
+            return;
+        }
+
+        if func_name == "sqrt" {
+            self.lower_sqrt(binding_name, args, binding_index, last_uses);
+            return;
+        }
+
+        if func_name == "gcd" {
+            self.lower_gcd(binding_name, args, binding_index, last_uses);
+            return;
+        }
+
+        if func_name == "divmod" {
+            self.lower_divmod(binding_name, args, binding_index, last_uses);
+            return;
+        }
+
+        if func_name == "log2" {
+            self.lower_log2(binding_name, args, binding_index, last_uses);
             return;
         }
 
@@ -1475,6 +1529,360 @@ impl LoweringContext {
         self.emit_op(StackOp::Opcode("OP_SWAP".to_string()));
         self.emit_op(StackOp::Opcode("OP_SHA256".to_string()));
         self.emit_op(StackOp::Opcode("OP_EQUAL".to_string()));
+
+        self.sm.push(binding_name);
+        self.track_depth();
+    }
+
+    /// safediv(a, b): a / b with division-by-zero check.
+    /// Stack: a b -> OP_DUP OP_0NOTEQUAL OP_VERIFY OP_DIV -> result
+    fn lower_safediv(
+        &mut self,
+        binding_name: &str,
+        args: &[String],
+        binding_index: usize,
+        last_uses: &HashMap<String, usize>,
+    ) {
+        assert!(args.len() >= 2, "safediv requires 2 arguments");
+
+        let a_is_last = self.is_last_use(&args[0], binding_index, last_uses);
+        self.bring_to_top(&args[0], a_is_last);
+
+        let b_is_last = self.is_last_use(&args[1], binding_index, last_uses);
+        self.bring_to_top(&args[1], b_is_last);
+
+        self.sm.pop();
+        self.sm.pop();
+
+        self.emit_op(StackOp::Opcode("OP_DUP".to_string()));
+        self.emit_op(StackOp::Opcode("OP_0NOTEQUAL".to_string()));
+        self.emit_op(StackOp::Opcode("OP_VERIFY".to_string()));
+        self.emit_op(StackOp::Opcode("OP_DIV".to_string()));
+
+        self.sm.push(binding_name);
+        self.track_depth();
+    }
+
+    /// safemod(a, b): a % b with division-by-zero check.
+    /// Stack: a b -> OP_DUP OP_0NOTEQUAL OP_VERIFY OP_MOD -> result
+    fn lower_safemod(
+        &mut self,
+        binding_name: &str,
+        args: &[String],
+        binding_index: usize,
+        last_uses: &HashMap<String, usize>,
+    ) {
+        assert!(args.len() >= 2, "safemod requires 2 arguments");
+
+        let a_is_last = self.is_last_use(&args[0], binding_index, last_uses);
+        self.bring_to_top(&args[0], a_is_last);
+
+        let b_is_last = self.is_last_use(&args[1], binding_index, last_uses);
+        self.bring_to_top(&args[1], b_is_last);
+
+        self.sm.pop();
+        self.sm.pop();
+
+        self.emit_op(StackOp::Opcode("OP_DUP".to_string()));
+        self.emit_op(StackOp::Opcode("OP_0NOTEQUAL".to_string()));
+        self.emit_op(StackOp::Opcode("OP_VERIFY".to_string()));
+        self.emit_op(StackOp::Opcode("OP_MOD".to_string()));
+
+        self.sm.push(binding_name);
+        self.track_depth();
+    }
+
+    /// clamp(val, lo, hi): clamp val to [lo, hi].
+    /// Stack: val lo hi -> val lo OP_MAX hi OP_MIN -> result
+    fn lower_clamp(
+        &mut self,
+        binding_name: &str,
+        args: &[String],
+        binding_index: usize,
+        last_uses: &HashMap<String, usize>,
+    ) {
+        assert!(args.len() >= 3, "clamp requires 3 arguments");
+
+        let val_is_last = self.is_last_use(&args[0], binding_index, last_uses);
+        self.bring_to_top(&args[0], val_is_last);
+
+        let lo_is_last = self.is_last_use(&args[1], binding_index, last_uses);
+        self.bring_to_top(&args[1], lo_is_last);
+
+        self.sm.pop();
+        self.sm.pop();
+        self.emit_op(StackOp::Opcode("OP_MAX".to_string()));
+        self.sm.push(""); // intermediate result
+
+        let hi_is_last = self.is_last_use(&args[2], binding_index, last_uses);
+        self.bring_to_top(&args[2], hi_is_last);
+
+        self.sm.pop();
+        self.sm.pop();
+        self.emit_op(StackOp::Opcode("OP_MIN".to_string()));
+
+        self.sm.push(binding_name);
+        self.track_depth();
+    }
+
+    /// pow(base, exp): base^exp via 32-iteration bounded conditional multiply.
+    /// Strategy: swap to get exp base, push 1 (acc), then 32 rounds of:
+    ///   2 OP_PICK (get exp), push(i+1), OP_GREATERTHAN, OP_IF, OP_OVER, OP_MUL, OP_ENDIF
+    /// After iterations: OP_NIP OP_NIP to get result.
+    fn lower_pow(
+        &mut self,
+        binding_name: &str,
+        args: &[String],
+        binding_index: usize,
+        last_uses: &HashMap<String, usize>,
+    ) {
+        assert!(args.len() >= 2, "pow requires 2 arguments");
+
+        let base_is_last = self.is_last_use(&args[0], binding_index, last_uses);
+        self.bring_to_top(&args[0], base_is_last);
+
+        let exp_is_last = self.is_last_use(&args[1], binding_index, last_uses);
+        self.bring_to_top(&args[1], exp_is_last);
+
+        self.sm.pop();
+        self.sm.pop();
+
+        // Stack: base exp
+        self.emit_op(StackOp::Swap);                                  // exp base
+        self.emit_op(StackOp::Push(PushValue::Int(1)));               // exp base 1(acc)
+
+        for i in 0..32 {
+            // Stack: exp base acc
+            self.emit_op(StackOp::Push(PushValue::Int(2)));
+            self.emit_op(StackOp::Opcode("OP_PICK".to_string()));     // exp base acc exp
+            self.emit_op(StackOp::Push(PushValue::Int(i + 1)));
+            self.emit_op(StackOp::Opcode("OP_GREATERTHAN".to_string())); // exp base acc (exp > i)
+            self.emit_op(StackOp::If {
+                then_ops: vec![
+                    StackOp::Over,                                    // exp base acc base
+                    StackOp::Opcode("OP_MUL".to_string()),           // exp base (acc*base)
+                ],
+                else_ops: vec![],
+            });
+        }
+        // Stack: exp base result
+        self.emit_op(StackOp::Nip);                                   // exp result
+        self.emit_op(StackOp::Nip);                                   // result
+
+        self.sm.push(binding_name);
+        self.track_depth();
+    }
+
+    /// mulDiv(a, b, c): (a * b) / c
+    /// Stack: a b c -> a b OP_MUL c OP_DIV -> result
+    fn lower_mul_div(
+        &mut self,
+        binding_name: &str,
+        args: &[String],
+        binding_index: usize,
+        last_uses: &HashMap<String, usize>,
+    ) {
+        assert!(args.len() >= 3, "mulDiv requires 3 arguments");
+
+        let a_is_last = self.is_last_use(&args[0], binding_index, last_uses);
+        self.bring_to_top(&args[0], a_is_last);
+
+        let b_is_last = self.is_last_use(&args[1], binding_index, last_uses);
+        self.bring_to_top(&args[1], b_is_last);
+
+        self.sm.pop();
+        self.sm.pop();
+        self.emit_op(StackOp::Opcode("OP_MUL".to_string()));
+        self.sm.push(""); // a*b
+
+        let c_is_last = self.is_last_use(&args[2], binding_index, last_uses);
+        self.bring_to_top(&args[2], c_is_last);
+
+        self.sm.pop();
+        self.sm.pop();
+        self.emit_op(StackOp::Opcode("OP_DIV".to_string()));
+
+        self.sm.push(binding_name);
+        self.track_depth();
+    }
+
+    /// percentOf(amount, bps): (amount * bps) / 10000
+    /// Stack: amount bps -> OP_MUL 10000 OP_DIV -> result
+    fn lower_percent_of(
+        &mut self,
+        binding_name: &str,
+        args: &[String],
+        binding_index: usize,
+        last_uses: &HashMap<String, usize>,
+    ) {
+        assert!(args.len() >= 2, "percentOf requires 2 arguments");
+
+        let amount_is_last = self.is_last_use(&args[0], binding_index, last_uses);
+        self.bring_to_top(&args[0], amount_is_last);
+
+        let bps_is_last = self.is_last_use(&args[1], binding_index, last_uses);
+        self.bring_to_top(&args[1], bps_is_last);
+
+        self.sm.pop();
+        self.sm.pop();
+
+        self.emit_op(StackOp::Opcode("OP_MUL".to_string()));
+        self.emit_op(StackOp::Push(PushValue::Int(10000)));
+        self.emit_op(StackOp::Opcode("OP_DIV".to_string()));
+
+        self.sm.push(binding_name);
+        self.track_depth();
+    }
+
+    /// sqrt(n): integer square root via Newton's method, 16 iterations.
+    /// Uses: guess = n, then 16x: guess = (guess + n/guess) / 2
+    fn lower_sqrt(
+        &mut self,
+        binding_name: &str,
+        args: &[String],
+        binding_index: usize,
+        last_uses: &HashMap<String, usize>,
+    ) {
+        assert!(!args.is_empty(), "sqrt requires 1 argument");
+
+        let n_is_last = self.is_last_use(&args[0], binding_index, last_uses);
+        self.bring_to_top(&args[0], n_is_last);
+
+        self.sm.pop();
+
+        // Stack: n
+        // DUP to get initial guess = n
+        self.emit_op(StackOp::Opcode("OP_DUP".to_string()));
+        // Stack: n guess
+
+        // 16 iterations of Newton's method: guess = (guess + n/guess) / 2
+        for _ in 0..16 {
+            // Stack: n guess
+            self.emit_op(StackOp::Opcode("OP_TUCK".to_string()));     // guess n guess
+            self.emit_op(StackOp::Opcode("OP_OVER".to_string()));     // guess n guess n
+            self.emit_op(StackOp::Opcode("OP_SWAP".to_string()));     // guess n n guess
+            self.emit_op(StackOp::Opcode("OP_DIV".to_string()));      // guess n (n/guess)
+            self.emit_op(StackOp::Opcode("OP_ROT".to_string()));      // n (n/guess) guess
+            self.emit_op(StackOp::Opcode("OP_ADD".to_string()));      // n (n/guess + guess)
+            self.emit_op(StackOp::Push(PushValue::Int(2)));            // n (n/guess + guess) 2
+            self.emit_op(StackOp::Opcode("OP_DIV".to_string()));      // n new_guess
+        }
+
+        // Stack: n guess
+        // Drop n, keep guess
+        self.emit_op(StackOp::Opcode("OP_NIP".to_string()));
+
+        self.sm.push(binding_name);
+        self.track_depth();
+    }
+
+    /// gcd(a, b): Euclidean algorithm, 256 iterations with conditional OP_IF.
+    /// Each iteration: if b != 0 then (b, a % b) else (a, 0)
+    fn lower_gcd(
+        &mut self,
+        binding_name: &str,
+        args: &[String],
+        binding_index: usize,
+        last_uses: &HashMap<String, usize>,
+    ) {
+        assert!(args.len() >= 2, "gcd requires 2 arguments");
+
+        let a_is_last = self.is_last_use(&args[0], binding_index, last_uses);
+        self.bring_to_top(&args[0], a_is_last);
+
+        let b_is_last = self.is_last_use(&args[1], binding_index, last_uses);
+        self.bring_to_top(&args[1], b_is_last);
+
+        self.sm.pop();
+        self.sm.pop();
+
+        // Stack: a b
+        // 256 iterations of Euclidean algorithm
+        for _ in 0..256 {
+            // Stack: a b
+            // Check if b != 0
+            self.emit_op(StackOp::Opcode("OP_DUP".to_string()));      // a b b
+            self.emit_op(StackOp::Opcode("OP_0NOTEQUAL".to_string())); // a b (b!=0)
+
+            self.emit_op(StackOp::If {
+                then_ops: vec![
+                    // Stack: a b (b != 0)
+                    // Compute a % b, then swap: new a = b, new b = a%b
+                    StackOp::Opcode("OP_TUCK".to_string()),            // b a b
+                    StackOp::Opcode("OP_MOD".to_string()),             // b (a%b)
+                ],
+                else_ops: vec![
+                    // Stack: a b (b == 0), just keep as-is
+                ],
+            });
+        }
+
+        // Stack: a b (where b should be 0)
+        // Drop b, keep a (the GCD)
+        self.emit_op(StackOp::Drop);
+
+        self.sm.push(binding_name);
+        self.track_depth();
+    }
+
+    /// divmod(a, b): computes both a/b and a%b, returns a/b (drops a%b).
+    /// Stack: a b -> OP_2DUP OP_DIV OP_ROT OP_ROT OP_MOD OP_DROP -> quotient
+    fn lower_divmod(
+        &mut self,
+        binding_name: &str,
+        args: &[String],
+        binding_index: usize,
+        last_uses: &HashMap<String, usize>,
+    ) {
+        assert!(args.len() >= 2, "divmod requires 2 arguments");
+
+        let a_is_last = self.is_last_use(&args[0], binding_index, last_uses);
+        self.bring_to_top(&args[0], a_is_last);
+
+        let b_is_last = self.is_last_use(&args[1], binding_index, last_uses);
+        self.bring_to_top(&args[1], b_is_last);
+
+        self.sm.pop();
+        self.sm.pop();
+
+        // Stack: a b
+        self.emit_op(StackOp::Opcode("OP_2DUP".to_string()));         // a b a b
+        self.emit_op(StackOp::Opcode("OP_DIV".to_string()));          // a b (a/b)
+        self.emit_op(StackOp::Opcode("OP_ROT".to_string()));          // a (a/b) b
+        self.emit_op(StackOp::Opcode("OP_ROT".to_string()));          // (a/b) b a
+        self.emit_op(StackOp::Opcode("OP_MOD".to_string()));          // (a/b) (a%b) -- wait
+        // ROT ROT on a b (a/b): ROT -> b (a/b) a, ROT -> (a/b) a b
+        // Then MOD -> (a/b) (a%b)
+        // DROP -> (a/b)
+        self.emit_op(StackOp::Drop);
+
+        self.sm.push(binding_name);
+        self.track_depth();
+    }
+
+    /// log2(n): approximate log2 using byte size.
+    /// Stack: n -> OP_SIZE OP_NIP 8 OP_MUL 8 OP_SUB -> result
+    fn lower_log2(
+        &mut self,
+        binding_name: &str,
+        args: &[String],
+        binding_index: usize,
+        last_uses: &HashMap<String, usize>,
+    ) {
+        assert!(!args.is_empty(), "log2 requires 1 argument");
+
+        let n_is_last = self.is_last_use(&args[0], binding_index, last_uses);
+        self.bring_to_top(&args[0], n_is_last);
+
+        self.sm.pop();
+
+        // Stack: n
+        self.emit_op(StackOp::Opcode("OP_SIZE".to_string()));         // n size
+        self.emit_op(StackOp::Nip);                                    // size
+        self.emit_op(StackOp::Push(PushValue::Int(8)));                // size 8
+        self.emit_op(StackOp::Opcode("OP_MUL".to_string()));          // size*8
+        self.emit_op(StackOp::Push(PushValue::Int(8)));                // size*8 8
+        self.emit_op(StackOp::Opcode("OP_SUB".to_string()));          // size*8 - 8
 
         self.sm.push(binding_name);
         self.track_depth();

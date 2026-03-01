@@ -174,3 +174,5 @@ The `CompileCheck` / `compile_check` functions run the contract through the TSOP
 - Public methods are spending entry points; private methods are inlined helpers
 - `assert()` is the primary control mechanism — scripts fail if any assert is false
 - Only TSOP built-in functions are allowed — no arbitrary function calls (Math, console, etc.)
+- Built-in math functions: `abs`, `min`, `max`, `within`, `safediv`, `safemod`, `clamp`, `sign`, `pow`, `mulDiv`, `percentOf`, `sqrt`, `gcd`, `divmod`, `log2`, `bool`
+- Shift operators `<<` and `>>` compile to `OP_LSHIFT` and `OP_RSHIFT`

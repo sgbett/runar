@@ -164,7 +164,9 @@ export type BinaryOp =
   | '||'
   | '&'
   | '|'
-  | '^';
+  | '^'
+  | '<<'
+  | '>>';
 
 export type UnaryOp = '!' | '-' | '~';
 

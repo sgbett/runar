@@ -222,7 +222,17 @@ Short-circuit operators are lowered to `OP_IF`/`OP_ELSE`/`OP_ENDIF` in the IR.
 
 | Operator | Description | Opcode |
 |----------|-------------|--------|
+| `a & b` | Bitwise AND | `OP_AND` |
+| `a \| b` | Bitwise OR | `OP_OR` |
+| `a ^ b` | Bitwise XOR | `OP_XOR` |
 | `~a` | Bitwise NOT | `OP_INVERT` |
+
+### Shift (operands: `bigint`)
+
+| Operator | Description | Opcode |
+|----------|-------------|--------|
+| `a << b` | Left shift | `OP_LSHIFT` |
+| `a >> b` | Right shift | `OP_RSHIFT` |
 
 ### Unary
 
@@ -336,12 +346,47 @@ private helper(x: bigint): bigint {
 
 ### Math
 
+#### Basic Math (single-opcode)
+
 | Function | Signature | Opcode(s) |
 |----------|-----------|-----------|
 | `abs` | `(n: bigint) => bigint` | `OP_ABS` |
 | `min` | `(a: bigint, b: bigint) => bigint` | `OP_MIN` |
 | `max` | `(a: bigint, b: bigint) => bigint` | `OP_MAX` |
 | `within` | `(x: bigint, lo: bigint, hi: bigint) => boolean` | `OP_WITHIN` |
+| `sign` | `(n: bigint) => bigint` | `OP_DUP OP_ABS OP_SWAP OP_DIV` — returns -1, 0, or 1 |
+| `bool` | `(n: bigint) => boolean` | `OP_0NOTEQUAL` — converts integer to boolean |
+
+#### Safe Arithmetic
+
+| Function | Signature | Opcode(s) |
+|----------|-----------|-----------|
+| `safediv` | `(a: bigint, b: bigint) => bigint` | `OP_DUP OP_0NOTEQUAL OP_VERIFY OP_DIV` — aborts if `b` is zero |
+| `safemod` | `(a: bigint, b: bigint) => bigint` | `OP_DUP OP_0NOTEQUAL OP_VERIFY OP_MOD` — aborts if `b` is zero |
+
+#### Clamping and Scaling
+
+| Function | Signature | Opcode(s) |
+|----------|-----------|-----------|
+| `clamp` | `(val: bigint, lo: bigint, hi: bigint) => bigint` | `OP_MAX OP_MIN` — constrains `val` to `[lo, hi]` |
+| `mulDiv` | `(a: bigint, b: bigint, c: bigint) => bigint` | `OP_MUL OP_DIV` — computes `(a * b) / c` |
+| `percentOf` | `(amount: bigint, bps: bigint) => bigint` | `OP_MUL <10000> OP_DIV` — basis-point percentage: `(amount * bps) / 10000` |
+
+#### Advanced Math (multi-opcode sequences)
+
+| Function | Signature | Opcode(s) |
+|----------|-----------|-----------|
+| `pow` | `(base: bigint, exp: bigint) => bigint` | 32-iteration bounded conditional multiply loop |
+| `sqrt` | `(n: bigint) => bigint` | 16-iteration Newton's method: `guess = (guess + n/guess) / 2` |
+| `gcd` | `(a: bigint, b: bigint) => bigint` | 256-iteration Euclidean algorithm |
+| `divmod` | `(a: bigint, b: bigint) => bigint` | `OP_2DUP OP_DIV OP_ROT OP_ROT OP_MOD OP_DROP` — returns quotient |
+| `log2` | `(n: bigint) => bigint` | `OP_SIZE OP_NIP <8> OP_MUL <8> OP_SUB` — approximate floor(log2(n)) via byte size |
+
+> **Note on `pow`:** For compile-time constant exponents (e.g. `pow(x, 3n)`), the constant folder evaluates the result at compile time. For runtime exponents, a bounded 32-iteration loop is emitted, supporting exponents up to 32.
+>
+> **Note on `sqrt`:** Returns the integer (floor) square root. For `sqrt(10n)`, the result is `3n`.
+>
+> **Note on `log2`:** This is an approximation based on the byte size of the script number encoding. It is exact for powers of 2 and within 7 bits of the true value otherwise.
 
 ### Control
 

@@ -58,6 +58,18 @@ var builtinFunctions = map[string]funcSig{
 	"min":               {params: []string{"bigint", "bigint"}, returnType: "bigint"},
 	"max":               {params: []string{"bigint", "bigint"}, returnType: "bigint"},
 	"within":            {params: []string{"bigint", "bigint", "bigint"}, returnType: "boolean"},
+	"safediv":           {params: []string{"bigint", "bigint"}, returnType: "bigint"},
+	"safemod":           {params: []string{"bigint", "bigint"}, returnType: "bigint"},
+	"clamp":             {params: []string{"bigint", "bigint", "bigint"}, returnType: "bigint"},
+	"sign":              {params: []string{"bigint"}, returnType: "bigint"},
+	"pow":               {params: []string{"bigint", "bigint"}, returnType: "bigint"},
+	"mulDiv":            {params: []string{"bigint", "bigint", "bigint"}, returnType: "bigint"},
+	"percentOf":         {params: []string{"bigint", "bigint"}, returnType: "bigint"},
+	"sqrt":              {params: []string{"bigint"}, returnType: "bigint"},
+	"gcd":               {params: []string{"bigint", "bigint"}, returnType: "bigint"},
+	"divmod":            {params: []string{"bigint", "bigint"}, returnType: "bigint"},
+	"log2":              {params: []string{"bigint"}, returnType: "bigint"},
+	"bool":              {params: []string{"bigint"}, returnType: "boolean"},
 	"reverseBytes":      {params: []string{"ByteString"}, returnType: "ByteString"},
 	"left":              {params: []string{"ByteString", "bigint"}, returnType: "ByteString"},
 	"right":             {params: []string{"ByteString", "bigint"}, returnType: "ByteString"},
@@ -468,7 +480,7 @@ func (tc *typeChecker) checkBinaryExpr(e BinaryExpr, env *typeEnv) string {
 		}
 		return "boolean"
 
-	case "&", "|", "^":
+	case "&", "|", "^", "<<", ">>":
 		if !isBigintFamily(leftType) {
 			tc.addError(fmt.Sprintf("left operand of '%s' must be bigint, got '%s'", e.Op, leftType))
 		}
@@ -792,7 +804,7 @@ func inferExprTypeStatic(expr Expression) string {
 		return "<unknown>"
 	case BinaryExpr:
 		switch e.Op {
-		case "+", "-", "*", "/", "%", "&", "|", "^":
+		case "+", "-", "*", "/", "%", "&", "|", "^", "<<", ">>":
 			return "bigint"
 		default:
 			// Comparison, equality, logical operators -> boolean

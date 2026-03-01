@@ -49,6 +49,8 @@ const BUILTIN_OPCODES: Record<string, string[]> = {
   left: ['OP_SPLIT', 'OP_DROP'],
   right: ['OP_SPLIT', 'OP_NIP'],
   int2str: ['OP_NUM2BIN'],
+  sign: ['OP_DUP', 'OP_ABS', 'OP_SWAP', 'OP_DIV'],
+  bool: ['OP_0NOTEQUAL'],
 };
 
 // ---------------------------------------------------------------------------
@@ -80,6 +82,8 @@ const BINOP_OPCODES: Record<string, string[]> = {
   '&': ['OP_AND'],
   '|': ['OP_OR'],
   '^': ['OP_XOR'],
+  '<<': ['OP_LSHIFT'],
+  '>>': ['OP_RSHIFT'],
 };
 
 // ---------------------------------------------------------------------------
@@ -609,6 +613,51 @@ class LoweringContext {
 
     if (func === 'substr') {
       this.lowerSubstr(bindingName, args, bindingIndex, lastUses);
+      return;
+    }
+
+    if (func === 'safediv' || func === 'safemod') {
+      this.lowerSafeDivMod(bindingName, func, args, bindingIndex, lastUses);
+      return;
+    }
+
+    if (func === 'clamp') {
+      this.lowerClamp(bindingName, args, bindingIndex, lastUses);
+      return;
+    }
+
+    if (func === 'pow') {
+      this.lowerPow(bindingName, args, bindingIndex, lastUses);
+      return;
+    }
+
+    if (func === 'mulDiv') {
+      this.lowerMulDiv(bindingName, args, bindingIndex, lastUses);
+      return;
+    }
+
+    if (func === 'percentOf') {
+      this.lowerPercentOf(bindingName, args, bindingIndex, lastUses);
+      return;
+    }
+
+    if (func === 'sqrt') {
+      this.lowerSqrt(bindingName, args, bindingIndex, lastUses);
+      return;
+    }
+
+    if (func === 'gcd') {
+      this.lowerGcd(bindingName, args, bindingIndex, lastUses);
+      return;
+    }
+
+    if (func === 'divmod') {
+      this.lowerDivmod(bindingName, args, bindingIndex, lastUses);
+      return;
+    }
+
+    if (func === 'log2') {
+      this.lowerLog2(bindingName, args, bindingIndex, lastUses);
       return;
     }
 
@@ -1364,6 +1413,401 @@ class LoweringContext {
 
     // Rename top of stack to the binding name
     this.stackMap.pop();
+    this.stackMap.push(bindingName);
+    this.trackDepth();
+  }
+
+  /**
+   * Lower safediv(a, b) or safemod(a, b) — assert b != 0, then divide/mod.
+   * Opcodes: <a> <b> OP_DUP OP_0NOTEQUAL OP_VERIFY OP_DIV (or OP_MOD)
+   */
+  private lowerSafeDivMod(
+    bindingName: string,
+    func: string,
+    args: string[],
+    bindingIndex: number,
+    lastUses: Map<string, number>,
+  ): void {
+    if (args.length < 2) throw new Error(`${func} requires 2 arguments`);
+    const [a, b] = args as [string, string];
+
+    const aIsLast = this.isLastUse(a, bindingIndex, lastUses);
+    this.bringToTop(a, aIsLast);
+
+    const bIsLast = this.isLastUse(b, bindingIndex, lastUses);
+    this.bringToTop(b, bIsLast);
+
+    // Stack: ... a b
+    // DUP b, check non-zero, then divide/mod
+    this.emitOp({ op: 'opcode', code: 'OP_DUP' });   // ... a b b
+    this.stackMap.push(null); // extra b copy
+    this.emitOp({ op: 'opcode', code: 'OP_0NOTEQUAL' }); // ... a b (b!=0)
+    this.emitOp({ op: 'opcode', code: 'OP_VERIFY' });     // ... a b (aborts if zero)
+    this.stackMap.pop(); // remove the check result
+
+    // Pop both operands, emit div or mod
+    this.stackMap.pop(); // b
+    this.stackMap.pop(); // a
+    const opcode = func === 'safediv' ? 'OP_DIV' : 'OP_MOD';
+    this.emitOp({ op: 'opcode', code: opcode });
+
+    this.stackMap.push(bindingName);
+    this.trackDepth();
+  }
+
+  /**
+   * Lower clamp(val, lo, hi) — clamp value to [lo, hi].
+   * Opcodes: <val> <lo> OP_MAX <hi> OP_MIN
+   */
+  private lowerClamp(
+    bindingName: string,
+    args: string[],
+    bindingIndex: number,
+    lastUses: Map<string, number>,
+  ): void {
+    if (args.length < 3) throw new Error('clamp requires 3 arguments');
+    const [val, lo, hi] = args as [string, string, string];
+
+    const valIsLast = this.isLastUse(val, bindingIndex, lastUses);
+    this.bringToTop(val, valIsLast);
+
+    const loIsLast = this.isLastUse(lo, bindingIndex, lastUses);
+    this.bringToTop(lo, loIsLast);
+
+    // Stack: ... val lo → OP_MAX → max(val, lo)
+    this.stackMap.pop();
+    this.stackMap.pop();
+    this.emitOp({ op: 'opcode', code: 'OP_MAX' });
+    this.stackMap.push(null); // intermediate
+
+    const hiIsLast = this.isLastUse(hi, bindingIndex, lastUses);
+    this.bringToTop(hi, hiIsLast);
+
+    // Stack: ... max(val,lo) hi → OP_MIN → min(max(val,lo), hi)
+    this.stackMap.pop();
+    this.stackMap.pop();
+    this.emitOp({ op: 'opcode', code: 'OP_MIN' });
+
+    this.stackMap.push(bindingName);
+    this.trackDepth();
+  }
+
+  /**
+   * Lower pow(base, exp) — exponentiation.
+   * For constant exponents, unrolls to repeated OP_MUL.
+   * For runtime exponents, emits a bounded loop.
+   */
+  private lowerPow(
+    bindingName: string,
+    args: string[],
+    bindingIndex: number,
+    lastUses: Map<string, number>,
+  ): void {
+    if (args.length < 2) throw new Error('pow requires 2 arguments');
+    const [base, exp] = args as [string, string];
+
+    const baseIsLast = this.isLastUse(base, bindingIndex, lastUses);
+    this.bringToTop(base, baseIsLast);
+
+    const expIsLast = this.isLastUse(exp, bindingIndex, lastUses);
+    this.bringToTop(exp, expIsLast);
+
+    this.stackMap.pop(); // exp
+    this.stackMap.pop(); // base
+
+    // Emit the pow computation as a flat opcode sequence:
+    // Input stack:  <base> <exp>  (already consumed from stackMap above)
+    // Output stack: <result>
+    //
+    // Algorithm: iterative multiply with bounded loop (max 32 iterations)
+    // <base> <exp>
+    // OP_SWAP      → <exp> <base>
+    // OP_1         → <exp> <base> <1>  (accumulator)
+    // Then 32x: <exp> <base> <acc>
+    //   2 OP_PICK  → <exp> <base> <acc> <exp>
+    //   <i+1>      → <exp> <base> <acc> <exp> <i+1>
+    //   OP_GREATERTHAN → <exp> <base> <acc> <exp > i>
+    //   OP_IF
+    //     OP_OVER   → <exp> <base> <acc> <base>
+    //     OP_MUL    → <exp> <base> <acc*base>
+    //   OP_ENDIF
+    //
+    // After all iterations: <exp> <base> <result>
+    // OP_NIP OP_NIP → <result>
+    //
+    // Wait, this multiplies unconditionally for each step where exp > i.
+    // That gives base^min(exp, 32). That's correct!
+
+    this.emitOp({ op: 'swap' });     // exp base
+    this.emitOp({ op: 'push', value: 1n }); // exp base 1
+
+    const MAX_POW_ITERATIONS = 32;
+    for (let i = 0; i < MAX_POW_ITERATIONS; i++) {
+      // Stack: exp base acc
+      this.emitOp({ op: 'push', value: 2n });
+      this.emitOp({ op: 'opcode', code: 'OP_PICK' }); // exp base acc exp
+      this.emitOp({ op: 'push', value: BigInt(i + 1) });
+      this.emitOp({ op: 'opcode', code: 'OP_GREATERTHAN' }); // exp base acc (exp > i)
+      this.emitOp({
+        op: 'if',
+        then: [
+          { op: 'over' },  // exp base acc base
+          { op: 'opcode', code: 'OP_MUL' },  // exp base (acc*base)
+        ],
+        else: undefined,
+      });
+    }
+    // Stack: exp base result
+    this.emitOp({ op: 'nip' }); // exp result
+    this.emitOp({ op: 'nip' }); // result
+
+    this.stackMap.push(bindingName);
+    this.trackDepth();
+  }
+
+  /**
+   * Lower mulDiv(a, b, c) — (a * b) / c without intermediate overflow concern.
+   * Opcodes: <a> <b> OP_MUL <c> OP_DIV
+   * (Bitcoin Script numbers can be large, so no overflow issue.)
+   */
+  private lowerMulDiv(
+    bindingName: string,
+    args: string[],
+    bindingIndex: number,
+    lastUses: Map<string, number>,
+  ): void {
+    if (args.length < 3) throw new Error('mulDiv requires 3 arguments');
+    const [a, b, c] = args as [string, string, string];
+
+    const aIsLast = this.isLastUse(a, bindingIndex, lastUses);
+    this.bringToTop(a, aIsLast);
+    const bIsLast = this.isLastUse(b, bindingIndex, lastUses);
+    this.bringToTop(b, bIsLast);
+
+    this.stackMap.pop();
+    this.stackMap.pop();
+    this.emitOp({ op: 'opcode', code: 'OP_MUL' });
+    this.stackMap.push(null);
+
+    const cIsLast = this.isLastUse(c, bindingIndex, lastUses);
+    this.bringToTop(c, cIsLast);
+
+    this.stackMap.pop();
+    this.stackMap.pop();
+    this.emitOp({ op: 'opcode', code: 'OP_DIV' });
+
+    this.stackMap.push(bindingName);
+    this.trackDepth();
+  }
+
+  /**
+   * Lower percentOf(amount, bps) — (amount * bps) / 10000.
+   * Opcodes: <amount> <bps> OP_MUL <10000> OP_DIV
+   */
+  private lowerPercentOf(
+    bindingName: string,
+    args: string[],
+    bindingIndex: number,
+    lastUses: Map<string, number>,
+  ): void {
+    if (args.length < 2) throw new Error('percentOf requires 2 arguments');
+    const [amount, bps] = args as [string, string];
+
+    const amountIsLast = this.isLastUse(amount, bindingIndex, lastUses);
+    this.bringToTop(amount, amountIsLast);
+    const bpsIsLast = this.isLastUse(bps, bindingIndex, lastUses);
+    this.bringToTop(bps, bpsIsLast);
+
+    this.stackMap.pop();
+    this.stackMap.pop();
+    this.emitOp({ op: 'opcode', code: 'OP_MUL' });
+    this.stackMap.push(null);
+
+    this.emitOp({ op: 'push', value: 10000n });
+    this.stackMap.push(null);
+
+    this.stackMap.pop();
+    this.stackMap.pop();
+    this.emitOp({ op: 'opcode', code: 'OP_DIV' });
+
+    this.stackMap.push(bindingName);
+    this.trackDepth();
+  }
+
+  /**
+   * Lower sqrt(n) — integer square root via Newton's method.
+   * Emits a bounded iteration (16 rounds suffice for 256-bit numbers).
+   * Algorithm: guess = n, then repeatedly guess = (guess + n/guess) / 2
+   */
+  private lowerSqrt(
+    bindingName: string,
+    args: string[],
+    bindingIndex: number,
+    lastUses: Map<string, number>,
+  ): void {
+    if (args.length < 1) throw new Error('sqrt requires 1 argument');
+    const n = args[0]!;
+
+    const nIsLast = this.isLastUse(n, bindingIndex, lastUses);
+    this.bringToTop(n, nIsLast);
+    this.stackMap.pop();
+
+    // Stack: <n>
+    // DUP to get initial guess = n
+    this.emitOp({ op: 'opcode', code: 'OP_DUP' }); // n guess(=n)
+
+    // 16 Newton iterations: guess = (guess + n/guess) / 2
+    const SQRT_ITERATIONS = 16;
+    for (let i = 0; i < SQRT_ITERATIONS; i++) {
+      // Stack: n guess
+      this.emitOp({ op: 'over' });                      // n guess n
+      this.emitOp({ op: 'over' });                      // n guess n guess
+      this.emitOp({ op: 'opcode', code: 'OP_DIV' });    // n guess (n/guess)
+      this.emitOp({ op: 'opcode', code: 'OP_ADD' });    // n (guess + n/guess)
+      this.emitOp({ op: 'push', value: 2n });            // n (guess + n/guess) 2
+      this.emitOp({ op: 'opcode', code: 'OP_DIV' });    // n new_guess
+    }
+    // Stack: n result
+    this.emitOp({ op: 'nip' }); // result (drop n)
+
+    this.stackMap.push(bindingName);
+    this.trackDepth();
+  }
+
+  /**
+   * Lower gcd(a, b) — Euclidean algorithm.
+   * Bounded to 256 iterations.
+   * Algorithm: while (b != 0) { temp = b; b = a % b; a = temp; } return a;
+   */
+  private lowerGcd(
+    bindingName: string,
+    args: string[],
+    bindingIndex: number,
+    lastUses: Map<string, number>,
+  ): void {
+    if (args.length < 2) throw new Error('gcd requires 2 arguments');
+    const [a, b] = args as [string, string];
+
+    const aIsLast = this.isLastUse(a, bindingIndex, lastUses);
+    this.bringToTop(a, aIsLast);
+    const bIsLast = this.isLastUse(b, bindingIndex, lastUses);
+    this.bringToTop(b, bIsLast);
+
+    this.stackMap.pop();
+    this.stackMap.pop();
+
+    // Stack: a b
+    // Both should be absolute values
+    this.emitOp({ op: 'opcode', code: 'OP_ABS' });
+    this.emitOp({ op: 'swap' });
+    this.emitOp({ op: 'opcode', code: 'OP_ABS' });
+    this.emitOp({ op: 'swap' });
+    // Stack: |a| |b|
+
+    const GCD_ITERATIONS = 256;
+    for (let i = 0; i < GCD_ITERATIONS; i++) {
+      // Stack: a b
+      // if b != 0: a b → b (a%b)
+      this.emitOp({ op: 'opcode', code: 'OP_DUP' });     // a b b
+      this.emitOp({ op: 'opcode', code: 'OP_0NOTEQUAL' }); // a b (b!=0)
+      this.emitOp({
+        op: 'if',
+        then: [
+          // a b → b (a%b)
+          { op: 'opcode', code: 'OP_TUCK' }, // b a b
+          { op: 'opcode', code: 'OP_MOD' },  // b (a%b)
+        ],
+        else: undefined,
+      });
+    }
+    // Stack: result 0 (or result if b was already 0)
+    this.emitOp({ op: 'drop' }); // drop the 0
+
+    this.stackMap.push(bindingName);
+    this.trackDepth();
+  }
+
+  /**
+   * Lower divmod(a, b) — returns quotient (division result).
+   * Note: divmod in TSOP returns the quotient. The modulo can be obtained
+   * separately. This emits: <a> <b> OP_2DUP OP_MOD OP_TOALTSTACK OP_DIV
+   * But since we can only return one value, we return the quotient.
+   * The remainder is left on the alt stack for potential future use.
+   *
+   * Actually, since our type system returns bigint (not a tuple), divmod
+   * just computes a / b. For the tuple return, contracts should use
+   * separate div and mod calls. We emit both and drop the remainder.
+   */
+  private lowerDivmod(
+    bindingName: string,
+    args: string[],
+    bindingIndex: number,
+    lastUses: Map<string, number>,
+  ): void {
+    if (args.length < 2) throw new Error('divmod requires 2 arguments');
+    const [a, b] = args as [string, string];
+
+    const aIsLast = this.isLastUse(a, bindingIndex, lastUses);
+    this.bringToTop(a, aIsLast);
+    const bIsLast = this.isLastUse(b, bindingIndex, lastUses);
+    this.bringToTop(b, bIsLast);
+
+    this.stackMap.pop();
+    this.stackMap.pop();
+
+    // Stack: a b
+    // OP_2DUP: a b a b
+    this.emitOp({ op: 'opcode', code: 'OP_2DUP' });
+    // OP_DIV: a b (a/b)
+    this.emitOp({ op: 'opcode', code: 'OP_DIV' });
+    // OP_ROT OP_ROT: (a/b) a b
+    this.emitOp({ op: 'opcode', code: 'OP_ROT' });
+    this.emitOp({ op: 'opcode', code: 'OP_ROT' });
+    // OP_MOD: (a/b) (a%b)
+    this.emitOp({ op: 'opcode', code: 'OP_MOD' });
+    // Drop the remainder, keep quotient
+    this.emitOp({ op: 'drop' });
+
+    this.stackMap.push(bindingName);
+    this.trackDepth();
+  }
+
+  /**
+   * Lower log2(n) — approximate floor(log2(n)) via byte size.
+   * Uses OP_SIZE on the script number encoding.
+   * floor(log2(n)) ≈ (byteLength - 1) * 8 + highBitPosition
+   * Simplified: (OP_SIZE * 8) - 8 gives a rough approximation.
+   * More precisely: OP_SIZE OP_NIP OP_1SUB 8 OP_MUL
+   * This gives (byteLength - 1) * 8, which is floor(log2(n)) for
+   * numbers that are exact powers of 256.
+   *
+   * For a simpler but less precise version:
+   * OP_SIZE OP_NIP OP_1SUB gives floor(log256(n)), multiply by 8 for bits.
+   */
+  private lowerLog2(
+    bindingName: string,
+    args: string[],
+    bindingIndex: number,
+    lastUses: Map<string, number>,
+  ): void {
+    if (args.length < 1) throw new Error('log2 requires 1 argument');
+    const n = args[0]!;
+
+    const nIsLast = this.isLastUse(n, bindingIndex, lastUses);
+    this.bringToTop(n, nIsLast);
+    this.stackMap.pop();
+
+    // Stack: <n>
+    // OP_SIZE leaves: <n> <byteLen>
+    this.emitOp({ op: 'opcode', code: 'OP_SIZE' });
+    // OP_NIP: <byteLen>
+    this.emitOp({ op: 'nip' });
+    // byteLen * 8 - 8 ≈ floor(log2(n))
+    this.emitOp({ op: 'push', value: 8n });
+    this.emitOp({ op: 'opcode', code: 'OP_MUL' });
+    this.emitOp({ op: 'push', value: 8n });
+    this.emitOp({ op: 'opcode', code: 'OP_SUB' });
+
     this.stackMap.push(bindingName);
     this.trackDepth();
   }

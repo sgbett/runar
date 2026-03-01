@@ -270,6 +270,129 @@ func Within(value, min, max int64) bool {
 	return value >= min && value < max
 }
 
+// Safediv divides a by b, panicking if b is zero.
+func Safediv(a, b int64) int64 {
+	if b == 0 {
+		panic("safediv: division by zero")
+	}
+	return a / b
+}
+
+// Safemod computes a % b, panicking if b is zero.
+func Safemod(a, b int64) int64 {
+	if b == 0 {
+		panic("safemod: modulo by zero")
+	}
+	return a % b
+}
+
+// Clamp constrains value to the range [lo, hi].
+func Clamp(value, lo, hi int64) int64 {
+	if value < lo {
+		return lo
+	}
+	if value > hi {
+		return hi
+	}
+	return value
+}
+
+// Sign returns -1, 0, or 1 depending on the sign of n.
+func Sign(n int64) int64 {
+	if n > 0 {
+		return 1
+	}
+	if n < 0 {
+		return -1
+	}
+	return 0
+}
+
+// Pow computes base^exp for non-negative exponents.
+func Pow(base, exp int64) int64 {
+	if exp < 0 {
+		panic("pow: negative exponent")
+	}
+	result := int64(1)
+	for i := int64(0); i < exp; i++ {
+		result *= base
+	}
+	return result
+}
+
+// MulDiv computes (a * b) / c.
+func MulDiv(a, b, c int64) int64 {
+	if c == 0 {
+		panic("mulDiv: division by zero")
+	}
+	return (a * b) / c
+}
+
+// PercentOf computes (amount * bps) / 10000 (basis points).
+func PercentOf(amount, bps int64) int64 {
+	return (amount * bps) / 10000
+}
+
+// Sqrt computes the integer square root via Newton's method.
+func Sqrt(n int64) int64 {
+	if n < 0 {
+		panic("sqrt: negative input")
+	}
+	if n == 0 {
+		return 0
+	}
+	guess := n
+	for i := 0; i < 256; i++ {
+		next := (guess + n/guess) / 2
+		if next >= guess {
+			break
+		}
+		guess = next
+	}
+	return guess
+}
+
+// Gcd computes the greatest common divisor via Euclidean algorithm.
+func Gcd(a, b int64) int64 {
+	if a < 0 {
+		a = -a
+	}
+	if b < 0 {
+		b = -b
+	}
+	for b != 0 {
+		a, b = b, a%b
+	}
+	return a
+}
+
+// Divmod returns the quotient of a / b.
+func Divmod(a, b int64) int64 {
+	if b == 0 {
+		panic("divmod: division by zero")
+	}
+	return a / b
+}
+
+// Log2 returns the approximate floor(log2(n)).
+func Log2(n int64) int64 {
+	if n <= 0 {
+		return 0
+	}
+	bits := int64(0)
+	val := n
+	for val > 1 {
+		val >>= 1
+		bits++
+	}
+	return bits
+}
+
+// ToBool returns true if n is non-zero.
+func ToBool(n int64) bool {
+	return n != 0
+}
+
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------

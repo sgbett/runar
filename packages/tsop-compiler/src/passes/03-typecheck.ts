@@ -82,6 +82,18 @@ const BUILTIN_FUNCTIONS: Map<string, FuncSig> = new Map([
   ['min',          { params: ['bigint', 'bigint'], returnType: 'bigint' }],
   ['max',          { params: ['bigint', 'bigint'], returnType: 'bigint' }],
   ['within',       { params: ['bigint', 'bigint', 'bigint'], returnType: 'boolean' }],
+  ['safediv',      { params: ['bigint', 'bigint'], returnType: 'bigint' }],
+  ['safemod',      { params: ['bigint', 'bigint'], returnType: 'bigint' }],
+  ['clamp',        { params: ['bigint', 'bigint', 'bigint'], returnType: 'bigint' }],
+  ['sign',         { params: ['bigint'], returnType: 'bigint' }],
+  ['pow',          { params: ['bigint', 'bigint'], returnType: 'bigint' }],
+  ['mulDiv',       { params: ['bigint', 'bigint', 'bigint'], returnType: 'bigint' }],
+  ['percentOf',    { params: ['bigint', 'bigint'], returnType: 'bigint' }],
+  ['sqrt',         { params: ['bigint'], returnType: 'bigint' }],
+  ['gcd',          { params: ['bigint', 'bigint'], returnType: 'bigint' }],
+  ['divmod',       { params: ['bigint', 'bigint'], returnType: 'bigint' }],
+  ['log2',         { params: ['bigint'], returnType: 'bigint' }],
+  ['bool',         { params: ['bigint'], returnType: 'boolean' }],
   ['reverseBytes', { params: ['ByteString'], returnType: 'ByteString' }],
   ['left',         { params: ['ByteString', 'bigint'], returnType: 'ByteString' }],
   ['right',        { params: ['ByteString', 'bigint'], returnType: 'ByteString' }],
@@ -589,6 +601,24 @@ class TypeChecker {
       return BOOLEAN;
     }
 
+    // Shift operators: bigint x bigint -> bigint
+    const shiftOps = new Set(['<<', '>>']);
+    if (shiftOps.has(expr.op)) {
+      if (!isBigintFamily(leftType)) {
+        this.errors.push(makeDiagnostic(
+          `Left operand of '${expr.op}' must be bigint, got '${leftType}'`,
+          'error',
+        ));
+      }
+      if (!isBigintFamily(rightType)) {
+        this.errors.push(makeDiagnostic(
+          `Right operand of '${expr.op}' must be bigint, got '${rightType}'`,
+          'error',
+        ));
+      }
+      return BIGINT;
+    }
+
     // Bitwise operators: bigint x bigint -> bigint
     const bitwiseOps = new Set(['&', '|', '^']);
     if (bitwiseOps.has(expr.op)) {
@@ -1016,7 +1046,7 @@ function inferExprTypeStatic(expr: Expression): TType {
     case 'binary_expr': {
       const arithmeticOps = new Set(['+', '-', '*', '/', '%']);
       if (arithmeticOps.has(expr.op)) return BIGINT;
-      const bitwiseOps = new Set(['&', '|', '^']);
+      const bitwiseOps = new Set(['&', '|', '^', '<<', '>>']);
       if (bitwiseOps.has(expr.op)) return BIGINT;
       // Comparison and equality operators, logical operators
       return BOOLEAN;

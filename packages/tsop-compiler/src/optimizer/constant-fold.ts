@@ -46,6 +46,8 @@ function evalBinOp(op: string, left: ConstValue, right: ConstValue): ConstValue 
       case '&': return left & right;
       case '|': return left | right;
       case '^': return left ^ right;
+      case '<<': return left << right;
+      case '>>': return left >> right;
       default: return null;
     }
   }
@@ -100,6 +102,101 @@ function evalUnaryOp(op: string, operand: ConstValue): ConstValue | null {
   }
 
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Builtin call evaluation (pure math functions only)
+// ---------------------------------------------------------------------------
+
+function evalBuiltinCall(func: string, args: ConstValue[]): ConstValue | null {
+  // Only fold pure math builtins with bigint arguments
+  const bigintArgs = args.filter((a): a is bigint => typeof a === 'bigint');
+  if (bigintArgs.length !== args.length) return null;
+
+  switch (func) {
+    case 'abs':
+      if (bigintArgs.length !== 1) return null;
+      return bigintArgs[0]! < 0n ? -bigintArgs[0]! : bigintArgs[0]!;
+    case 'min':
+      if (bigintArgs.length !== 2) return null;
+      return bigintArgs[0]! < bigintArgs[1]! ? bigintArgs[0]! : bigintArgs[1]!;
+    case 'max':
+      if (bigintArgs.length !== 2) return null;
+      return bigintArgs[0]! > bigintArgs[1]! ? bigintArgs[0]! : bigintArgs[1]!;
+    case 'safediv':
+      if (bigintArgs.length !== 2 || bigintArgs[1]! === 0n) return null;
+      return bigintArgs[0]! / bigintArgs[1]!;
+    case 'safemod':
+      if (bigintArgs.length !== 2 || bigintArgs[1]! === 0n) return null;
+      return bigintArgs[0]! % bigintArgs[1]!;
+    case 'clamp': {
+      if (bigintArgs.length !== 3) return null;
+      const [val, lo, hi] = bigintArgs as [bigint, bigint, bigint];
+      return val < lo ? lo : val > hi ? hi : val;
+    }
+    case 'sign': {
+      if (bigintArgs.length !== 1) return null;
+      const n = bigintArgs[0]!;
+      return n > 0n ? 1n : n < 0n ? -1n : 0n;
+    }
+    case 'pow': {
+      if (bigintArgs.length !== 2) return null;
+      const [base, exp] = bigintArgs as [bigint, bigint];
+      if (exp < 0n || exp > 256n) return null;
+      let result = 1n;
+      for (let i = 0n; i < exp; i++) result *= base;
+      return result;
+    }
+    case 'mulDiv': {
+      if (bigintArgs.length !== 3) return null;
+      const [a, b, c] = bigintArgs as [bigint, bigint, bigint];
+      if (c === 0n) return null;
+      return (a * b) / c;
+    }
+    case 'percentOf': {
+      if (bigintArgs.length !== 2) return null;
+      return (bigintArgs[0]! * bigintArgs[1]!) / 10000n;
+    }
+    case 'sqrt': {
+      if (bigintArgs.length !== 1) return null;
+      const n = bigintArgs[0]!;
+      if (n < 0n) return null;
+      if (n === 0n) return 0n;
+      let guess = n;
+      for (let i = 0; i < 256; i++) {
+        const next = (guess + n / guess) / 2n;
+        if (next >= guess) break;
+        guess = next;
+      }
+      return guess;
+    }
+    case 'gcd': {
+      if (bigintArgs.length !== 2) return null;
+      let a = bigintArgs[0]! < 0n ? -bigintArgs[0]! : bigintArgs[0]!;
+      let b = bigintArgs[1]! < 0n ? -bigintArgs[1]! : bigintArgs[1]!;
+      while (b !== 0n) { const t = b; b = a % b; a = t; }
+      return a;
+    }
+    case 'divmod': {
+      if (bigintArgs.length !== 2 || bigintArgs[1]! === 0n) return null;
+      return bigintArgs[0]! / bigintArgs[1]!;
+    }
+    case 'log2': {
+      if (bigintArgs.length !== 1) return null;
+      const n = bigintArgs[0]!;
+      if (n <= 0n) return 0n;
+      let bits = 0n;
+      let val = n;
+      while (val > 1n) { val >>= 1n; bits++; }
+      return bits;
+    }
+    case 'bool': {
+      if (bigintArgs.length !== 1) return null;
+      return bigintArgs[0]! !== 0n;
+    }
+    default:
+      return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -196,10 +293,18 @@ function foldValue(value: ANFValue, env: ConstEnv): ANFValue {
       return value;
     }
 
-    case 'call':
-      // Cannot fold function calls in general (they have side effects
-      // or depend on runtime values).
+    case 'call': {
+      // Fold pure math builtins when all args are constants
+      const allConst = value.args.every(a => env.has(a));
+      if (allConst) {
+        const constArgs = value.args.map(a => env.get(a)!);
+        const folded = evalBuiltinCall(value.func, constArgs);
+        if (folded !== null) {
+          return { kind: 'load_const', value: folded };
+        }
+      }
       return value;
+    }
 
     case 'method_call':
       return value;

@@ -448,6 +448,8 @@ export class TSOPInterpreter {
         case '&': return { kind: 'bigint', value: left.value & right.value };
         case '|': return { kind: 'bigint', value: left.value | right.value };
         case '^': return { kind: 'bigint', value: left.value ^ right.value };
+        case '<<': return { kind: 'bigint', value: left.value << right.value };
+        case '>>': return { kind: 'bigint', value: left.value >> right.value };
         case '===': return { kind: 'boolean', value: left.value === right.value };
         case '!==': return { kind: 'boolean', value: left.value !== right.value };
         case '<': return { kind: 'boolean', value: left.value < right.value };
@@ -754,6 +756,102 @@ export class TSOPInterpreter {
         const min = this.toBigInt(args[1]!);
         const max = this.toBigInt(args[2]!);
         return { kind: 'boolean', value: value >= min && value < max };
+      }
+
+      case 'safediv': {
+        const a = this.toBigInt(args[0]!);
+        const b = this.toBigInt(args[1]!);
+        if (b === 0n) throw new Error('safediv: division by zero');
+        return { kind: 'bigint', value: a / b };
+      }
+
+      case 'safemod': {
+        const a = this.toBigInt(args[0]!);
+        const b = this.toBigInt(args[1]!);
+        if (b === 0n) throw new Error('safemod: modulo by zero');
+        return { kind: 'bigint', value: a % b };
+      }
+
+      case 'clamp': {
+        const val = this.toBigInt(args[0]!);
+        const lo = this.toBigInt(args[1]!);
+        const hi = this.toBigInt(args[2]!);
+        return { kind: 'bigint', value: val < lo ? lo : val > hi ? hi : val };
+      }
+
+      case 'sign': {
+        const n = this.toBigInt(args[0]!);
+        return { kind: 'bigint', value: n > 0n ? 1n : n < 0n ? -1n : 0n };
+      }
+
+      case 'pow': {
+        const base = this.toBigInt(args[0]!);
+        const exp = this.toBigInt(args[1]!);
+        if (exp < 0n) throw new Error('pow: negative exponent');
+        let result = 1n;
+        for (let i = 0n; i < exp; i++) result *= base;
+        return { kind: 'bigint', value: result };
+      }
+
+      case 'mulDiv': {
+        const a = this.toBigInt(args[0]!);
+        const b = this.toBigInt(args[1]!);
+        const c = this.toBigInt(args[2]!);
+        if (c === 0n) throw new Error('mulDiv: division by zero');
+        return { kind: 'bigint', value: (a * b) / c };
+      }
+
+      case 'percentOf': {
+        const amount = this.toBigInt(args[0]!);
+        const bps = this.toBigInt(args[1]!);
+        return { kind: 'bigint', value: (amount * bps) / 10000n };
+      }
+
+      case 'sqrt': {
+        const n = this.toBigInt(args[0]!);
+        if (n < 0n) throw new Error('sqrt: negative input');
+        if (n === 0n) return { kind: 'bigint', value: 0n };
+        let guess = n;
+        for (let i = 0; i < 256; i++) {
+          const next = (guess + n / guess) / 2n;
+          if (next >= guess) break;
+          guess = next;
+        }
+        return { kind: 'bigint', value: guess };
+      }
+
+      case 'gcd': {
+        let a = this.toBigInt(args[0]!);
+        let b = this.toBigInt(args[1]!);
+        a = a < 0n ? -a : a;
+        b = b < 0n ? -b : b;
+        while (b !== 0n) {
+          const temp = b;
+          b = a % b;
+          a = temp;
+        }
+        return { kind: 'bigint', value: a };
+      }
+
+      case 'divmod': {
+        const a = this.toBigInt(args[0]!);
+        const b = this.toBigInt(args[1]!);
+        if (b === 0n) throw new Error('divmod: division by zero');
+        return { kind: 'bigint', value: a / b };
+      }
+
+      case 'log2': {
+        const n = this.toBigInt(args[0]!);
+        if (n <= 0n) return { kind: 'bigint', value: 0n };
+        let bits = 0n;
+        let val = n;
+        while (val > 1n) { val >>= 1n; bits++; }
+        return { kind: 'bigint', value: bits };
+      }
+
+      case 'bool': {
+        const n = this.toBigInt(args[0]!);
+        return { kind: 'boolean', value: n !== 0n };
       }
 
       case 'checkPreimage':

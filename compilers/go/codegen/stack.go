@@ -69,6 +69,8 @@ var builtinOpcodes = map[string][]string{
 	"left":         {"OP_SPLIT", "OP_DROP"},
 	"right":        {"OP_SPLIT", "OP_NIP"},
 	"int2str":      {"OP_NUM2BIN"},
+	"sign":         {"OP_DUP", "OP_ABS", "OP_SWAP", "OP_DIV"},
+	"bool":         {"OP_0NOTEQUAL"},
 }
 
 // ---------------------------------------------------------------------------
@@ -92,6 +94,8 @@ var binopOpcodes = map[string][]string{
 	"&":   {"OP_AND"},
 	"|":   {"OP_OR"},
 	"^":   {"OP_XOR"},
+	"<<":  {"OP_LSHIFT"},
+	">>":  {"OP_RSHIFT"},
 }
 
 // ---------------------------------------------------------------------------
@@ -583,6 +587,51 @@ func (ctx *loweringContext) lowerCall(bindingName, funcName string, args []strin
 
 	if funcName == "verifyRabinSig" {
 		ctx.lowerVerifyRabinSig(bindingName, args, bindingIndex, lastUses)
+		return
+	}
+
+	if funcName == "safediv" || funcName == "safemod" {
+		ctx.lowerSafeDivMod(bindingName, funcName, args, bindingIndex, lastUses)
+		return
+	}
+
+	if funcName == "clamp" {
+		ctx.lowerClamp(bindingName, args, bindingIndex, lastUses)
+		return
+	}
+
+	if funcName == "pow" {
+		ctx.lowerPow(bindingName, args, bindingIndex, lastUses)
+		return
+	}
+
+	if funcName == "mulDiv" {
+		ctx.lowerMulDiv(bindingName, args, bindingIndex, lastUses)
+		return
+	}
+
+	if funcName == "percentOf" {
+		ctx.lowerPercentOf(bindingName, args, bindingIndex, lastUses)
+		return
+	}
+
+	if funcName == "sqrt" {
+		ctx.lowerSqrt(bindingName, args, bindingIndex, lastUses)
+		return
+	}
+
+	if funcName == "gcd" {
+		ctx.lowerGcd(bindingName, args, bindingIndex, lastUses)
+		return
+	}
+
+	if funcName == "divmod" {
+		ctx.lowerDivmod(bindingName, args, bindingIndex, lastUses)
+		return
+	}
+
+	if funcName == "log2" {
+		ctx.lowerLog2(bindingName, args, bindingIndex, lastUses)
 		return
 	}
 
@@ -1355,6 +1404,326 @@ func (ctx *loweringContext) lowerVerifyRabinSig(bindingName string, args []strin
 	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_SWAP"})
 	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_SHA256"})
 	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_EQUAL"})
+
+	ctx.sm.push(bindingName)
+	ctx.trackDepth()
+}
+
+// ---------------------------------------------------------------------------
+// New math/utility builtin lowering
+// ---------------------------------------------------------------------------
+
+// lowerSafeDivMod lowers safediv(a, b) or safemod(a, b).
+// Asserts b != 0, then performs OP_DIV or OP_MOD.
+// Opcodes: <a> <b> OP_DUP OP_0NOTEQUAL OP_VERIFY OP_DIV (or OP_MOD)
+func (ctx *loweringContext) lowerSafeDivMod(bindingName, funcName string, args []string, bindingIndex int, lastUses map[string]int) {
+	if len(args) < 2 {
+		panic(fmt.Sprintf("%s requires 2 arguments", funcName))
+	}
+	a, b := args[0], args[1]
+
+	aIsLast := ctx.isLastUse(a, bindingIndex, lastUses)
+	ctx.bringToTop(a, aIsLast)
+
+	bIsLast := ctx.isLastUse(b, bindingIndex, lastUses)
+	ctx.bringToTop(b, bIsLast)
+
+	// Stack: ... a b
+	// DUP b, check non-zero, then divide/mod
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_DUP"}) // ... a b b
+	ctx.sm.push("")                                     // extra b copy
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_0NOTEQUAL"}) // ... a b (b!=0)
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_VERIFY"})    // ... a b (aborts if zero)
+	ctx.sm.pop() // remove the check result
+
+	// Pop both operands, emit div or mod
+	ctx.sm.pop() // b
+	ctx.sm.pop() // a
+	opcode := "OP_DIV"
+	if funcName == "safemod" {
+		opcode = "OP_MOD"
+	}
+	ctx.emitOp(StackOp{Op: "opcode", Code: opcode})
+
+	ctx.sm.push(bindingName)
+	ctx.trackDepth()
+}
+
+// lowerClamp lowers clamp(val, lo, hi) — clamp value to [lo, hi].
+// Opcodes: <val> <lo> OP_MAX <hi> OP_MIN
+func (ctx *loweringContext) lowerClamp(bindingName string, args []string, bindingIndex int, lastUses map[string]int) {
+	if len(args) < 3 {
+		panic("clamp requires 3 arguments")
+	}
+	val, lo, hi := args[0], args[1], args[2]
+
+	valIsLast := ctx.isLastUse(val, bindingIndex, lastUses)
+	ctx.bringToTop(val, valIsLast)
+
+	loIsLast := ctx.isLastUse(lo, bindingIndex, lastUses)
+	ctx.bringToTop(lo, loIsLast)
+
+	// Stack: ... val lo -> OP_MAX -> max(val, lo)
+	ctx.sm.pop()
+	ctx.sm.pop()
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_MAX"})
+	ctx.sm.push("") // intermediate
+
+	hiIsLast := ctx.isLastUse(hi, bindingIndex, lastUses)
+	ctx.bringToTop(hi, hiIsLast)
+
+	// Stack: ... max(val,lo) hi -> OP_MIN -> min(max(val,lo), hi)
+	ctx.sm.pop()
+	ctx.sm.pop()
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_MIN"})
+
+	ctx.sm.push(bindingName)
+	ctx.trackDepth()
+}
+
+// lowerPow lowers pow(base, exp) — exponentiation with bounded 32-iteration
+// conditional multiply loop.
+// Strategy: <base> <exp> OP_SWAP push(1), then 32 rounds of:
+//
+//	2 OP_PICK (get exp), push(i+1), OP_GREATERTHAN, OP_IF, OP_OVER, OP_MUL, OP_ENDIF
+//
+// After iterations: OP_NIP OP_NIP to get result.
+func (ctx *loweringContext) lowerPow(bindingName string, args []string, bindingIndex int, lastUses map[string]int) {
+	if len(args) < 2 {
+		panic("pow requires 2 arguments")
+	}
+	base, exp := args[0], args[1]
+
+	baseIsLast := ctx.isLastUse(base, bindingIndex, lastUses)
+	ctx.bringToTop(base, baseIsLast)
+
+	expIsLast := ctx.isLastUse(exp, bindingIndex, lastUses)
+	ctx.bringToTop(exp, expIsLast)
+
+	// Pop both args from stack map
+	ctx.sm.pop() // exp
+	ctx.sm.pop() // base
+
+	// Stack: base exp
+	ctx.emitOp(StackOp{Op: "swap"})                          // exp base
+	ctx.emitOp(StackOp{Op: "push", Value: bigIntPush(1)})    // exp base 1(acc)
+
+	const maxPowIterations = 32
+	for i := 0; i < maxPowIterations; i++ {
+		// Stack: exp base acc
+		ctx.emitOp(StackOp{Op: "push", Value: bigIntPush(2)})
+		ctx.emitOp(StackOp{Op: "opcode", Code: "OP_PICK"})              // exp base acc exp
+		ctx.emitOp(StackOp{Op: "push", Value: bigIntPush(int64(i + 1))})
+		ctx.emitOp(StackOp{Op: "opcode", Code: "OP_GREATERTHAN"})       // exp base acc (exp > i)
+		ctx.emitOp(StackOp{
+			Op: "if",
+			Then: []StackOp{
+				{Op: "over"},                            // exp base acc base
+				{Op: "opcode", Code: "OP_MUL"},          // exp base (acc*base)
+			},
+		})
+	}
+	// Stack: exp base result
+	ctx.emitOp(StackOp{Op: "nip"}) // exp result
+	ctx.emitOp(StackOp{Op: "nip"}) // result
+
+	ctx.sm.push(bindingName)
+	ctx.trackDepth()
+}
+
+// lowerMulDiv lowers mulDiv(a, b, c) — (a * b) / c.
+// Opcodes: <a> <b> OP_MUL <c> OP_DIV
+func (ctx *loweringContext) lowerMulDiv(bindingName string, args []string, bindingIndex int, lastUses map[string]int) {
+	if len(args) < 3 {
+		panic("mulDiv requires 3 arguments")
+	}
+	a, b, c := args[0], args[1], args[2]
+
+	aIsLast := ctx.isLastUse(a, bindingIndex, lastUses)
+	ctx.bringToTop(a, aIsLast)
+	bIsLast := ctx.isLastUse(b, bindingIndex, lastUses)
+	ctx.bringToTop(b, bIsLast)
+
+	ctx.sm.pop()
+	ctx.sm.pop()
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_MUL"})
+	ctx.sm.push("") // intermediate
+
+	cIsLast := ctx.isLastUse(c, bindingIndex, lastUses)
+	ctx.bringToTop(c, cIsLast)
+
+	ctx.sm.pop()
+	ctx.sm.pop()
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_DIV"})
+
+	ctx.sm.push(bindingName)
+	ctx.trackDepth()
+}
+
+// lowerPercentOf lowers percentOf(amount, bps) — (amount * bps) / 10000.
+// Opcodes: <amount> <bps> OP_MUL <10000> OP_DIV
+func (ctx *loweringContext) lowerPercentOf(bindingName string, args []string, bindingIndex int, lastUses map[string]int) {
+	if len(args) < 2 {
+		panic("percentOf requires 2 arguments")
+	}
+	amount, bps := args[0], args[1]
+
+	amountIsLast := ctx.isLastUse(amount, bindingIndex, lastUses)
+	ctx.bringToTop(amount, amountIsLast)
+	bpsIsLast := ctx.isLastUse(bps, bindingIndex, lastUses)
+	ctx.bringToTop(bps, bpsIsLast)
+
+	ctx.sm.pop()
+	ctx.sm.pop()
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_MUL"})
+	ctx.sm.push("") // intermediate
+
+	ctx.emitOp(StackOp{Op: "push", Value: bigIntPush(10000)})
+	ctx.sm.push("")
+
+	ctx.sm.pop()
+	ctx.sm.pop()
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_DIV"})
+
+	ctx.sm.push(bindingName)
+	ctx.trackDepth()
+}
+
+// lowerSqrt lowers sqrt(n) — integer square root via Newton's method.
+// 16 iterations: guess = n, then guess = (guess + n/guess) / 2
+func (ctx *loweringContext) lowerSqrt(bindingName string, args []string, bindingIndex int, lastUses map[string]int) {
+	if len(args) < 1 {
+		panic("sqrt requires 1 argument")
+	}
+	n := args[0]
+
+	nIsLast := ctx.isLastUse(n, bindingIndex, lastUses)
+	ctx.bringToTop(n, nIsLast)
+	ctx.sm.pop()
+
+	// Stack: <n>
+	// DUP to get initial guess = n
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_DUP"}) // n guess(=n)
+
+	// 16 Newton iterations: guess = (guess + n/guess) / 2
+	const sqrtIterations = 16
+	for i := 0; i < sqrtIterations; i++ {
+		// Stack: n guess
+		ctx.emitOp(StackOp{Op: "over"})                          // n guess n
+		ctx.emitOp(StackOp{Op: "over"})                          // n guess n guess
+		ctx.emitOp(StackOp{Op: "opcode", Code: "OP_DIV"})        // n guess (n/guess)
+		ctx.emitOp(StackOp{Op: "opcode", Code: "OP_ADD"})        // n (guess + n/guess)
+		ctx.emitOp(StackOp{Op: "push", Value: bigIntPush(2)})    // n (guess + n/guess) 2
+		ctx.emitOp(StackOp{Op: "opcode", Code: "OP_DIV"})        // n new_guess
+	}
+	// Stack: n result
+	ctx.emitOp(StackOp{Op: "nip"}) // result (drop n)
+
+	ctx.sm.push(bindingName)
+	ctx.trackDepth()
+}
+
+// lowerGcd lowers gcd(a, b) — Euclidean algorithm, bounded to 256 iterations.
+// Algorithm: while (b != 0) { temp = b; b = a % b; a = temp; } return a;
+func (ctx *loweringContext) lowerGcd(bindingName string, args []string, bindingIndex int, lastUses map[string]int) {
+	if len(args) < 2 {
+		panic("gcd requires 2 arguments")
+	}
+	a, b := args[0], args[1]
+
+	aIsLast := ctx.isLastUse(a, bindingIndex, lastUses)
+	ctx.bringToTop(a, aIsLast)
+	bIsLast := ctx.isLastUse(b, bindingIndex, lastUses)
+	ctx.bringToTop(b, bIsLast)
+
+	ctx.sm.pop()
+	ctx.sm.pop()
+
+	// Stack: a b
+	// Both should be absolute values
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_ABS"})
+	ctx.emitOp(StackOp{Op: "swap"})
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_ABS"})
+	ctx.emitOp(StackOp{Op: "swap"})
+	// Stack: |a| |b|
+
+	const gcdIterations = 256
+	for i := 0; i < gcdIterations; i++ {
+		// Stack: a b
+		// if b != 0: a b -> b (a%b)
+		ctx.emitOp(StackOp{Op: "opcode", Code: "OP_DUP"})        // a b b
+		ctx.emitOp(StackOp{Op: "opcode", Code: "OP_0NOTEQUAL"})  // a b (b!=0)
+		ctx.emitOp(StackOp{
+			Op: "if",
+			Then: []StackOp{
+				// a b -> b (a%b)
+				{Op: "opcode", Code: "OP_TUCK"}, // b a b
+				{Op: "opcode", Code: "OP_MOD"},   // b (a%b)
+			},
+		})
+	}
+	// Stack: result 0 (or result if b was already 0)
+	ctx.emitOp(StackOp{Op: "drop"}) // drop the 0
+
+	ctx.sm.push(bindingName)
+	ctx.trackDepth()
+}
+
+// lowerDivmod lowers divmod(a, b) — returns quotient.
+// Opcodes: <a> <b> OP_2DUP OP_DIV OP_ROT OP_ROT OP_MOD OP_DROP
+func (ctx *loweringContext) lowerDivmod(bindingName string, args []string, bindingIndex int, lastUses map[string]int) {
+	if len(args) < 2 {
+		panic("divmod requires 2 arguments")
+	}
+	a, b := args[0], args[1]
+
+	aIsLast := ctx.isLastUse(a, bindingIndex, lastUses)
+	ctx.bringToTop(a, aIsLast)
+	bIsLast := ctx.isLastUse(b, bindingIndex, lastUses)
+	ctx.bringToTop(b, bIsLast)
+
+	ctx.sm.pop()
+	ctx.sm.pop()
+
+	// Stack: a b
+	// OP_2DUP: a b a b
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_2DUP"})
+	// OP_DIV: a b (a/b)
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_DIV"})
+	// OP_ROT OP_ROT: (a/b) a b
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_ROT"})
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_ROT"})
+	// OP_MOD: (a/b) (a%b)
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_MOD"})
+	// Drop the remainder, keep quotient
+	ctx.emitOp(StackOp{Op: "drop"})
+
+	ctx.sm.push(bindingName)
+	ctx.trackDepth()
+}
+
+// lowerLog2 lowers log2(n) — approximate floor(log2(n)) via byte size.
+// Opcodes: <n> OP_SIZE OP_NIP push(8) OP_MUL push(8) OP_SUB
+func (ctx *loweringContext) lowerLog2(bindingName string, args []string, bindingIndex int, lastUses map[string]int) {
+	if len(args) < 1 {
+		panic("log2 requires 1 argument")
+	}
+	n := args[0]
+
+	nIsLast := ctx.isLastUse(n, bindingIndex, lastUses)
+	ctx.bringToTop(n, nIsLast)
+	ctx.sm.pop()
+
+	// Stack: <n>
+	// OP_SIZE leaves: <n> <byteLen>
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_SIZE"})
+	// OP_NIP: <byteLen>
+	ctx.emitOp(StackOp{Op: "nip"})
+	// byteLen * 8 - 8 ~ floor(log2(n))
+	ctx.emitOp(StackOp{Op: "push", Value: bigIntPush(8)})
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_MUL"})
+	ctx.emitOp(StackOp{Op: "push", Value: bigIntPush(8)})
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_SUB"})
 
 	ctx.sm.push(bindingName)
 	ctx.trackDepth()
