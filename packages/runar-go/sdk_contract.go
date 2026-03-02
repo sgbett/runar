@@ -36,14 +36,14 @@ func NewRunarContract(artifact *RunarArtifact, constructorArgs []interface{}) *R
 		state:           make(map[string]interface{}),
 	}
 
-	// Initialize state from constructor args for stateful contracts
+	// Initialize state from constructor args for stateful contracts.
+	// State fields are matched to constructor args by their declaration
+	// index, not by name, since the constructor param name may differ
+	// from the state field name (e.g., "initialHash" → "rollingHash").
 	if len(artifact.StateFields) > 0 {
 		for _, field := range artifact.StateFields {
-			for pi, param := range artifact.ABI.Constructor.Params {
-				if param.Name == field.Name {
-					c.state[field.Name] = constructorArgs[pi]
-					break
-				}
+			if field.Index < len(constructorArgs) {
+				c.state[field.Name] = constructorArgs[field.Index]
 			}
 		}
 	}

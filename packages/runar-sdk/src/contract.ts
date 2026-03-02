@@ -41,14 +41,14 @@ export class RunarContract {
       );
     }
 
-    // Initialize state from constructor args for stateful contracts
+    // Initialize state from constructor args for stateful contracts.
+    // State fields are matched to constructor args by their declaration
+    // index, not by name, since the constructor param name may differ
+    // from the state field name (e.g., `initialHash` → `rollingHash`).
     if (artifact.stateFields && artifact.stateFields.length > 0) {
       for (const field of artifact.stateFields) {
-        const paramIndex = artifact.abi.constructor.params.findIndex(
-          (p) => p.name === field.name,
-        );
-        if (paramIndex >= 0) {
-          this._state[field.name] = constructorArgs[paramIndex];
+        if (field.index < constructorArgs.length) {
+          this._state[field.name] = constructorArgs[field.index];
         }
       }
     }

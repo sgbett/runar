@@ -50,21 +50,16 @@ impl RunarContract {
             );
         }
 
-        // Initialize state from constructor args for stateful contracts
+        // Initialize state from constructor args for stateful contracts.
+        // State fields are matched to constructor args by their declaration
+        // index, not by name, since the constructor param name may differ
+        // from the state field name (e.g., "initialHash" → "rollingHash").
         let mut state = HashMap::new();
         if let Some(ref state_fields) = artifact.state_fields {
             if !state_fields.is_empty() {
                 for field in state_fields {
-                    let param_index = artifact
-                        .abi
-                        .constructor
-                        .params
-                        .iter()
-                        .position(|p| p.name == field.name);
-                    if let Some(idx) = param_index {
-                        if idx < constructor_args.len() {
-                            state.insert(field.name.clone(), constructor_args[idx].clone());
-                        }
+                    if field.index < constructor_args.len() {
+                        state.insert(field.name.clone(), constructor_args[field.index].clone());
                     }
                 }
             }
@@ -1315,6 +1310,48 @@ mod tests {
         new_state.insert("count".to_string(), SdkValue::Int(42));
         contract.set_state(new_state);
         assert_eq!(contract.state()["count"], SdkValue::Int(42));
+    }
+
+    // -----------------------------------------------------------------------
+    // State initialization with mismatched param/field names
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn initializes_state_by_index_not_name() {
+        // Constructor param "initialHash" maps to state field "rollingHash" by index
+        let artifact = RunarArtifact {
+            version: "runar-v0.1.0".to_string(),
+            contract_name: "Test".to_string(),
+            abi: Abi {
+                constructor: AbiConstructor {
+                    params: vec![
+                        AbiParam { name: "genesisOutpoint".to_string(), param_type: "ByteString".to_string() },
+                        AbiParam { name: "initialHash".to_string(), param_type: "ByteString".to_string() },
+                        AbiParam { name: "metadata".to_string(), param_type: "ByteString".to_string() },
+                    ],
+                },
+                methods: vec![],
+            },
+            script: "51".to_string(),
+            state_fields: Some(vec![
+                StateField { name: "genesisOutpoint".to_string(), field_type: "ByteString".to_string(), index: 0 },
+                StateField { name: "rollingHash".to_string(), field_type: "ByteString".to_string(), index: 1 },
+                StateField { name: "metadata".to_string(), field_type: "ByteString".to_string(), index: 2 },
+            ]),
+            constructor_slots: None,
+        };
+
+        let contract = RunarContract::new(
+            artifact,
+            vec![
+                SdkValue::Bytes("aabb".to_string()),
+                SdkValue::Bytes("ccdd".to_string()),
+                SdkValue::Bytes("eeff".to_string()),
+            ],
+        );
+        assert_eq!(contract.state()["genesisOutpoint"], SdkValue::Bytes("aabb".to_string()));
+        assert_eq!(contract.state()["rollingHash"], SdkValue::Bytes("ccdd".to_string()));
+        assert_eq!(contract.state()["metadata"], SdkValue::Bytes("eeff".to_string()));
     }
 
     // -----------------------------------------------------------------------

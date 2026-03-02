@@ -95,6 +95,62 @@ function parseTxHex(hex: string) {
 }
 
 // ---------------------------------------------------------------------------
+// State initialization with mismatched constructor param / state field names
+// ---------------------------------------------------------------------------
+
+describe('state initialization with mismatched names', () => {
+  it('initializes state by field index, not by name matching', () => {
+    // Constructor param "initialHash" maps to state field "rollingHash" by index
+    const artifact = makeArtifact({
+      script: '51',
+      abi: {
+        constructor: {
+          params: [
+            { name: 'genesisOutpoint', type: 'ByteString' },
+            { name: 'initialHash', type: 'ByteString' },
+            { name: 'metadata', type: 'ByteString' },
+          ],
+        },
+        methods: [],
+      },
+      stateFields: [
+        { name: 'genesisOutpoint', type: 'ByteString', index: 0 },
+        { name: 'rollingHash', type: 'ByteString', index: 1 },
+        { name: 'metadata', type: 'ByteString', index: 2 },
+      ],
+    });
+
+    const contract = new RunarContract(artifact, ['aabb', 'ccdd', 'eeff']);
+    expect(contract.state.genesisOutpoint).toBe('aabb');
+    expect(contract.state.rollingHash).toBe('ccdd');
+    expect(contract.state.metadata).toBe('eeff');
+  });
+
+  it('produces valid hex in getLockingScript when names differ', () => {
+    const artifact = makeArtifact({
+      script: '51',
+      abi: {
+        constructor: {
+          params: [
+            { name: 'initialHash', type: 'ByteString' },
+          ],
+        },
+        methods: [],
+      },
+      stateFields: [
+        { name: 'rollingHash', type: 'ByteString', index: 0 },
+      ],
+    });
+
+    const contract = new RunarContract(artifact, ['aabbccdd']);
+    const script = contract.getLockingScript();
+    // Must be valid hex, no "undefined" or "4.8"
+    expect(script).toMatch(/^[0-9a-f]+$/);
+    expect(script).not.toContain('undefined');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Fix 1: insertUnlockingScript actually modifies the transaction
 // ---------------------------------------------------------------------------
 

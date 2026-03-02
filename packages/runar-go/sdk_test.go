@@ -227,6 +227,38 @@ func TestNewRunarContract_InitializesState(t *testing.T) {
 	}
 }
 
+func TestNewRunarContract_InitializesState_MismatchedNames(t *testing.T) {
+	// Constructor param "initialHash" maps to state field "rollingHash" by index
+	artifact := makeArtifact("51", ABI{
+		Constructor: ABIConstructor{
+			Params: []ABIParam{
+				{Name: "genesisOutpoint", Type: "ByteString"},
+				{Name: "initialHash", Type: "ByteString"},
+				{Name: "metadata", Type: "ByteString"},
+			},
+		},
+		Methods: []ABIMethod{},
+	}, func(a *RunarArtifact) {
+		a.StateFields = []StateField{
+			{Name: "genesisOutpoint", Type: "ByteString", Index: 0},
+			{Name: "rollingHash", Type: "ByteString", Index: 1},
+			{Name: "metadata", Type: "ByteString", Index: 2},
+		}
+	})
+
+	c := NewRunarContract(artifact, []interface{}{"aabb", "ccdd", "eeff"})
+	state := c.GetState()
+	if state["genesisOutpoint"] != "aabb" {
+		t.Errorf("expected genesisOutpoint=aabb, got %v", state["genesisOutpoint"])
+	}
+	if state["rollingHash"] != "ccdd" {
+		t.Errorf("expected rollingHash=ccdd, got %v", state["rollingHash"])
+	}
+	if state["metadata"] != "eeff" {
+		t.Errorf("expected metadata=eeff, got %v", state["metadata"])
+	}
+}
+
 // ---------------------------------------------------------------------------
 // getLockingScript with constructor slots
 // ---------------------------------------------------------------------------
