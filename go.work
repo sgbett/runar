@@ -3,6 +3,7 @@ go 1.26
 use (
 	./compilers/go
 	./conformance
+	./end2end-example/go
 	./examples/go
 	./packages/runar-go
 )
