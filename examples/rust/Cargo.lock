@@ -652,6 +652,8 @@ dependencies = [
  "ripemd",
  "runar-compiler-rust",
  "runar-macros",
+ "serde",
+ "serde_json",
  "sha2",
 ]
 

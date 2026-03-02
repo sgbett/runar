@@ -71,18 +71,66 @@ export function extractStateFromScript(
     return null;
   }
 
-  // The state section begins after OP_RETURN (0x6a). We search for the
-  // *last* occurrence of OP_RETURN in the script, since the code section
-  // itself could contain 0x6a as part of push data.
-  const opReturnByte = '6a';
-  const lastOpReturn = scriptHex.lastIndexOf(opReturnByte);
-  if (lastOpReturn === -1) {
+  const opReturnPos = findLastOpReturn(scriptHex);
+  if (opReturnPos === -1) {
     return null;
   }
 
-  // State data starts after the OP_RETURN byte
-  const stateHex = scriptHex.slice(lastOpReturn + opReturnByte.length);
+  // State data starts after the OP_RETURN byte (2 hex chars)
+  const stateHex = scriptHex.slice(opReturnPos + 2);
   return deserializeState(artifact.stateFields, stateHex);
+}
+
+/**
+ * Walk the script hex as Bitcoin Script opcodes to find the last OP_RETURN
+ * (0x6a) at a real opcode boundary. Unlike `lastIndexOf('6a')`, this
+ * properly skips push data so it won't match 0x6a bytes inside data payloads.
+ *
+ * Returns the hex-char offset of the last OP_RETURN, or -1 if not found.
+ */
+export function findLastOpReturn(scriptHex: string): number {
+  let lastPos = -1;
+  let offset = 0;
+  const len = scriptHex.length;
+
+  while (offset + 2 <= len) {
+    const opcode = parseInt(scriptHex.slice(offset, offset + 2), 16);
+
+    if (opcode === 0x6a) {
+      // OP_RETURN at a real opcode boundary
+      lastPos = offset;
+      offset += 2;
+    } else if (opcode >= 0x01 && opcode <= 0x4b) {
+      // Direct push: opcode is the number of bytes to push
+      offset += 2 + opcode * 2;
+    } else if (opcode === 0x4c) {
+      // OP_PUSHDATA1: next 1 byte is the length
+      if (offset + 4 > len) break;
+      const pushLen = parseInt(scriptHex.slice(offset + 2, offset + 4), 16);
+      offset += 4 + pushLen * 2;
+    } else if (opcode === 0x4d) {
+      // OP_PUSHDATA2: next 2 bytes (LE) are the length
+      if (offset + 6 > len) break;
+      const lo = parseInt(scriptHex.slice(offset + 2, offset + 4), 16);
+      const hi = parseInt(scriptHex.slice(offset + 4, offset + 6), 16);
+      const pushLen = lo | (hi << 8);
+      offset += 6 + pushLen * 2;
+    } else if (opcode === 0x4e) {
+      // OP_PUSHDATA4: next 4 bytes (LE) are the length
+      if (offset + 10 > len) break;
+      const b0 = parseInt(scriptHex.slice(offset + 2, offset + 4), 16);
+      const b1 = parseInt(scriptHex.slice(offset + 4, offset + 6), 16);
+      const b2 = parseInt(scriptHex.slice(offset + 6, offset + 8), 16);
+      const b3 = parseInt(scriptHex.slice(offset + 8, offset + 10), 16);
+      const pushLen = b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+      offset += 10 + pushLen * 2;
+    } else {
+      // All other opcodes (OP_0, OP_1..OP_16, OP_IF, OP_ADD, etc.)
+      offset += 2;
+    }
+  }
+
+  return lastPos;
 }
 
 // ---------------------------------------------------------------------------

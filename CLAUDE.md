@@ -16,8 +16,8 @@ packages/
   runar-testing/       # TestContract API, Script VM, interpreter, fuzzer
   runar-sdk/           # Deployment SDK (providers, signers, contract interaction)
   runar-cli/           # CLI tool
-  runar-go/            # Go mock package: types, mock crypto, real hashes, CompileCheck()
-  runar-rs/            # Rust mock crate: prelude types, mock crypto, real hashes, compile_check()
+  runar-go/            # Go package: types, mock crypto, real hashes, CompileCheck(), deployment SDK
+  runar-rs/            # Rust crate: prelude types, mock crypto, real hashes, compile_check(), deployment SDK
   runar-rs-macros/     # Rust proc-macro crate: #[runar::contract], #[public], #[readonly]
 compilers/
   go/                 # Go compiler implementation
@@ -44,6 +44,8 @@ pnpm run build                                  # Build all packages (turbo)
 npx vitest run                                  # Run all TypeScript tests (packages + all format examples)
 cd compilers/go && go test ./...                # Run Go compiler tests
 cd compilers/rust && cargo test                 # Run Rust compiler tests
+cd packages/runar-go && go test ./...           # Run Go SDK + mock package tests
+cd packages/runar-rs && cargo test              # Run Rust SDK + crate tests
 cd examples/go && go test ./...                 # Run Go contract tests (business logic + Rúnar compile check)
 cd examples/rust && cargo test                  # Run Rust contract tests (business logic + Rúnar compile check)
 ```
@@ -62,7 +64,8 @@ Each pass is a pure function in `packages/runar-compiler/src/passes/`:
 5. **05-stack-lower.ts** — ANF → Stack IR (Bitcoin Script stack operations)
 6. **06-emit.ts** — Stack IR → hex-encoded Bitcoin Script
 
-The optimizer (`src/optimizer/constant-fold.ts`) runs between passes 4 and 5.
+The constant folding optimizer (`src/optimizer/constant-fold.ts`) is available between passes 4 and 5 but disabled by default to preserve ANF conformance (see whitepaper Section 4.5).
+The peephole optimizer (`src/optimizer/peephole.ts`) runs on Stack IR between passes 5 and 6 (always enabled).
 
 Go and Rust compilers have their own parser dispatch:
 - Go: `frontend.ParseSource()` handles `.runar.ts`, `.runar.sol`, `.runar.move`, `.runar.go`
@@ -160,6 +163,25 @@ fn test_compile() {
 `TestContract` uses the interpreter (not the VM) — it tests business logic with mocked crypto (`checkSig` always true, `checkPreimage` always true). Go and Rust tests run contracts as native code with mock types from the `runar` package/crate.
 
 The `CompileCheck` / `compile_check` functions run the contract through the Rúnar frontend (parse → validate → typecheck) to verify it's valid Rúnar that will compile to Bitcoin Script.
+
+### Deployment SDK (3 languages)
+
+All three languages have equivalent deployment SDKs for interacting with compiled contracts on-chain:
+
+**TypeScript** (`packages/runar-sdk/`): `RunarContract`, `MockProvider`, `WhatsOnChainProvider`, `LocalSigner` (wraps @bsv/sdk for ECDSA + BIP-143), `buildDeployTransaction`, `buildCallTransaction`, state serialization.
+
+**Go** (`packages/runar-go/sdk_*.go`): `RunarContract`, `MockProvider`, `MockSignerImpl`/`ExternalSigner`, `BuildDeployTransaction`, `BuildCallTransaction`, state serialization. Signing is delegated via the `ExternalSigner` callback pattern (e.g., wrapping `github.com/bsv-blockchain/go-sdk`).
+
+**Rust** (`packages/runar-rs/src/sdk/`): `RunarContract`, `MockProvider`, `MockSigner`/`ExternalSigner`, `build_deploy_transaction`, `build_call_transaction`, state serialization. Signing is delegated via the `ExternalSigner` closure pattern (e.g., wrapping `rust-sv`).
+
+Key SDK concepts:
+- `RunarContract` wraps a compiled artifact + constructor args, manages state and UTXO tracking
+- `Provider` interface abstracts blockchain access (UTXO lookup, tx broadcast)
+- `Signer` interface abstracts key management (sign, get pubkey, get address)
+- State is serialized as Bitcoin Script push data after an OP_RETURN separator
+- Constructor args are spliced into the locking script at byte offsets specified by `constructorSlots`
+- UTXO selection uses largest-first strategy with fee-aware iteration
+- Fee estimation uses actual script sizes (not hardcoded P2PKH assumptions)
 
 ### Module Resolution
 - pnpm workspace packages are not hoisted to root `node_modules`. The `vitest.config.ts` at root provides aliases so `examples/` tests can import `runar-testing` by name.

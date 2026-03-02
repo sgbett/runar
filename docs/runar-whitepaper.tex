@@ -1747,6 +1747,24 @@ arguments and execute them through the \texttt{@bsv/sdk} \texttt{Spend}
 class, validating that the generated Bitcoin Script executes correctly in
 a production-grade script interpreter.
 
+\subsection{Deployment SDKs}
+\label{sec:eval-sdk}
+
+Deployment SDKs are provided in all three implementation languages
+(TypeScript, Go, Rust), enabling contract deployment, method invocation,
+state management, and blockchain interaction from any language. Each SDK
+provides equivalent functionality: contract lifecycle management
+(\texttt{RunarContract}), blockchain abstraction (\texttt{Provider}
+interface with mock and WhatsOnChain implementations), and signing
+abstraction (\texttt{Signer} interface with local and external
+implementations). The TypeScript SDK delegates cryptographic operations
+to the official BSV TypeScript SDK (\texttt{@bsv/sdk}) via its
+\texttt{LocalSigner}. The Go and Rust SDKs provide an
+\texttt{ExternalSigner} callback pattern that lets callers integrate
+any signing library (e.g., \texttt{go-sdk} for Go, \texttt{rust-sv}
+for Rust) without introducing direct crypto dependencies into the SDK
+packages.
+
 %=============================================================================
 \section{Limitations and Threats to Validity}
 \label{sec:limitations}

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { RunarContract } from '../contract.js';
-import { buildDeployTransaction, selectUtxos, estimateDeployFee } from '../deployment.js';
+import { selectUtxos, estimateDeployFee } from '../deployment.js';
 import { buildCallTransaction } from '../calling.js';
 import { MockProvider } from '../providers/mock.js';
 import { LocalSigner } from '../signers/local.js';
@@ -408,26 +408,6 @@ describe('fee estimation with actual script sizes', () => {
       utxo, 'aa'.repeat(200), undefined, undefined, 'addr', changeScript,
     );
 
-    // Parse both to compare change amounts
-    let offset = 0;
-    function readSatoshisFromOutput(hex: string): number {
-      // Skip to output section: version(8) + varint(2) + input(varies) + varint(2)
-      let pos = 8;
-      const inputCountByte = parseInt(hex.slice(pos, pos + 2), 16);
-      pos += 2;
-      for (let i = 0; i < inputCountByte; i++) {
-        pos += 64 + 8; // prevTxid + prevOutputIndex
-        const scriptLen = parseInt(hex.slice(pos, pos + 2), 16);
-        pos += 2 + scriptLen * 2 + 8; // varint + script + sequence
-      }
-      pos += 2; // output count varint
-      // Read first output satoshis (8 bytes LE)
-      const satHex = hex.slice(pos, pos + 16);
-      const bytes = [];
-      for (let i = 0; i < 16; i += 2) bytes.push(parseInt(satHex.slice(i, i + 2), 16));
-      return bytes[0]! + bytes[1]! * 256 + bytes[2]! * 65536 + bytes[3]! * 16777216;
-    }
-
     // The larger unlocking script should result in less change (higher fee)
     // We can verify this indirectly: larger tx should have smaller change output
     // Both txs have the same total input, so fee difference = change difference
@@ -487,7 +467,6 @@ describe('selectUtxos', () => {
     // Each additional input adds ~148 bytes to the fee
     // Create UTXOs where we're right at the boundary
     const fee1Input = estimateDeployFee(1, 1); // fee with 1 input
-    const fee2Inputs = estimateDeployFee(2, 1); // fee with 2 inputs
 
     // UTXO that's just barely not enough for 1-input scenario
     const target = 10_000;

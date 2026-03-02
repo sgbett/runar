@@ -8,7 +8,7 @@ import type { Signer } from './signers/signer.js';
 import type { Transaction, UTXO, DeployOptions, CallOptions } from './types.js';
 import { buildDeployTransaction, selectUtxos } from './deployment.js';
 import { buildCallTransaction } from './calling.js';
-import { serializeState, extractStateFromScript } from './state.js';
+import { serializeState, extractStateFromScript, findLastOpReturn } from './state.js';
 
 /**
  * Runtime wrapper for a compiled Rúnar contract.
@@ -379,8 +379,10 @@ export class RunarContract {
     // Store the code portion of the on-chain script so getLockingScript()
     // produces correct output without needing the original constructor args.
     if (artifact.stateFields && artifact.stateFields.length > 0) {
-      // Stateful: code is everything before the last OP_RETURN
-      const lastOpReturn = output.script.lastIndexOf('6a');
+      // Stateful: code is everything before the last OP_RETURN.
+      // Use opcode-aware walking to find the real OP_RETURN (not a 0x6a
+      // byte inside push data).
+      const lastOpReturn = findLastOpReturn(output.script);
       contract._codeScript = lastOpReturn !== -1
         ? output.script.slice(0, lastOpReturn)
         : output.script;

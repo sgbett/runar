@@ -1,0 +1,223 @@
+package runar
+
+import (
+	"fmt"
+	"sort"
+)
+
+// ---------------------------------------------------------------------------
+// Transaction construction for contract deployment
+// ---------------------------------------------------------------------------
+
+// P2PKH sizes for fee estimation
+const (
+	p2pkhInputSize  = 148 // prevTxid(32) + index(4) + scriptSig(~107) + sequence(4) + varint(1)
+	p2pkhOutputSize = 34  // satoshis(8) + varint(1) + P2PKH script(25)
+	txOverhead      = 10  // version(4) + input varint(1) + output varint(1) + locktime(4)
+)
+
+// BuildDeployTransaction builds a raw transaction hex that creates an output
+// with the given locking script. The transaction consumes the provided UTXOs,
+// places the contract output first, and sends any remaining value (minus fees)
+// to a change address.
+//
+// Returns the unsigned transaction hex and the number of inputs.
+func BuildDeployTransaction(
+	lockingScript string,
+	utxos []UTXO,
+	satoshis int64,
+	changeAddress string,
+	changeScript string,
+) (txHex string, inputCount int) {
+	if len(utxos) == 0 {
+		panic("buildDeployTransaction: no UTXOs provided")
+	}
+
+	var totalInput int64
+	for _, u := range utxos {
+		totalInput += u.Satoshis
+	}
+
+	fee := EstimateDeployFee(len(utxos), len(lockingScript)/2)
+	change := totalInput - satoshis - fee
+
+	if change < 0 {
+		panic(fmt.Sprintf(
+			"buildDeployTransaction: insufficient funds. Need %d sats, have %d",
+			satoshis+fee, totalInput,
+		))
+	}
+
+	var tx string
+
+	// Version (4 bytes LE)
+	tx += toLittleEndian32(1)
+
+	// Input count (varint)
+	tx += encodeVarInt(len(utxos))
+
+	// Inputs (unsigned — scriptSig is empty)
+	for _, utxo := range utxos {
+		// Previous txid (32 bytes, reversed byte order)
+		tx += reverseHex(utxo.Txid)
+		// Previous output index (4 bytes LE)
+		tx += toLittleEndian32(utxo.OutputIndex)
+		// ScriptSig length + script (empty for unsigned)
+		tx += "00"
+		// Sequence (4 bytes LE) — 0xffffffff
+		tx += "ffffffff"
+	}
+
+	// Output count
+	hasChange := change > 0
+	outputCount := 1
+	if hasChange {
+		outputCount = 2
+	}
+	tx += encodeVarInt(outputCount)
+
+	// Output 0: contract locking script
+	tx += toLittleEndian64(satoshis)
+	tx += encodeVarInt(len(lockingScript) / 2)
+	tx += lockingScript
+
+	// Output 1: change (if any)
+	if hasChange {
+		actualChangeScript := changeScript
+		if actualChangeScript == "" {
+			actualChangeScript = BuildP2PKHScript(changeAddress)
+		}
+		tx += toLittleEndian64(change)
+		tx += encodeVarInt(len(actualChangeScript) / 2)
+		tx += actualChangeScript
+	}
+
+	// Locktime (4 bytes LE)
+	tx += toLittleEndian32(0)
+
+	return tx, len(utxos)
+}
+
+// SelectUtxos selects the minimum set of UTXOs needed to fund a deployment,
+// using a largest-first strategy.
+func SelectUtxos(utxos []UTXO, targetSatoshis int64, lockingScriptByteLen int) []UTXO {
+	sorted := make([]UTXO, len(utxos))
+	copy(sorted, utxos)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Satoshis > sorted[j].Satoshis
+	})
+
+	var selected []UTXO
+	var total int64
+
+	for _, utxo := range sorted {
+		selected = append(selected, utxo)
+		total += utxo.Satoshis
+
+		fee := EstimateDeployFee(len(selected), lockingScriptByteLen)
+		if total >= targetSatoshis+fee {
+			return selected
+		}
+	}
+
+	// Return all UTXOs; BuildDeployTransaction will panic if still insufficient
+	return selected
+}
+
+// EstimateDeployFee estimates the fee for a deploy transaction given the
+// number of P2PKH inputs and the contract locking script byte length.
+// Assumes 1 sat/byte fee rate and includes a P2PKH change output.
+func EstimateDeployFee(numInputs int, lockingScriptByteLen int) int64 {
+	inputsSize := numInputs * p2pkhInputSize
+	contractOutputSize := 8 + varIntByteSize(lockingScriptByteLen) + lockingScriptByteLen
+	changeOutputSize := p2pkhOutputSize
+	return int64(txOverhead + inputsSize + contractOutputSize + changeOutputSize)
+}
+
+// ---------------------------------------------------------------------------
+// Bitcoin wire format helpers
+// ---------------------------------------------------------------------------
+
+func toLittleEndian32(n int) string {
+	b0 := n & 0xff
+	b1 := (n >> 8) & 0xff
+	b2 := (n >> 16) & 0xff
+	b3 := (n >> 24) & 0xff
+	return fmt.Sprintf("%02x%02x%02x%02x", b0, b1, b2, b3)
+}
+
+func toLittleEndian64(n int64) string {
+	lo := int(n & 0xffffffff)
+	hi := int((n >> 32) & 0xffffffff)
+	return toLittleEndian32(lo) + toLittleEndian32(hi)
+}
+
+func encodeVarInt(n int) string {
+	if n < 0xfd {
+		return fmt.Sprintf("%02x", n)
+	} else if n <= 0xffff {
+		lo := n & 0xff
+		hi := (n >> 8) & 0xff
+		return fmt.Sprintf("fd%02x%02x", lo, hi)
+	} else if n <= 0xffffffff {
+		return "fe" + toLittleEndian32(n)
+	}
+	return "ff" + toLittleEndian64(int64(n))
+}
+
+func reverseHex(hex string) string {
+	pairs := make([]string, len(hex)/2)
+	for i := 0; i < len(hex); i += 2 {
+		pairs[i/2] = hex[i : i+2]
+	}
+	// Reverse
+	for i, j := 0, len(pairs)-1; i < j; i, j = i+1, j-1 {
+		pairs[i], pairs[j] = pairs[j], pairs[i]
+	}
+	result := ""
+	for _, p := range pairs {
+		result += p
+	}
+	return result
+}
+
+func varIntByteSize(n int) int {
+	if n < 0xfd {
+		return 1
+	}
+	if n <= 0xffff {
+		return 3
+	}
+	if n <= 0xffffffff {
+		return 5
+	}
+	return 9
+}
+
+// BuildP2PKHScript builds a standard P2PKH locking script from an address.
+// If the address is a 40-char hex string, it's treated as a raw pubkey hash.
+// Otherwise, a deterministic placeholder hash is used.
+func BuildP2PKHScript(address string) string {
+	pubKeyHash := address
+	if len(address) != 40 || !isHex(address) {
+		pubKeyHash = deterministicHash20(address)
+	}
+	return "76a914" + pubKeyHash + "88ac"
+}
+
+func isHex(s string) bool {
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
+func deterministicHash20(input string) string {
+	bytes := make([]byte, 20)
+	for i := 0; i < len(input); i++ {
+		bytes[i%20] = byte(((int(bytes[i%20]) ^ int(input[i])) * 31 + 17) & 0xff)
+	}
+	return bytesToHex(bytes)
+}

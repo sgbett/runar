@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractStateFromScript, serializeState } from '../state.js';
+import { extractStateFromScript, serializeState, findLastOpReturn } from '../state.js';
 import type { RunarArtifact, StateField } from 'runar-ir-schema';
 
 // ---------------------------------------------------------------------------
@@ -68,13 +68,8 @@ describe('extractStateFromScript — returns null when appropriate', () => {
       stateFields: makeFields({ name: 'count', type: 'bigint', index: 0 }),
     });
 
-    // A script that does NOT contain 0x6a anywhere
-    const result = extractStateFromScript(artifact, '76a91400889c69ac');
-    // '6a' appears as part of '76a914...' — but that is a false positive at position 2
-    // Actually '76a914' does contain '6a' at hex offset 2.
-    // Let's use a script that truly has no '6a' substring
-    const result2 = extractStateFromScript(artifact, '5193885187');
-    expect(result2).toBeNull();
+    // Use a script that truly has no OP_RETURN opcode
+    expect(extractStateFromScript(artifact, '5193885187')).toBeNull();
   });
 });
 
@@ -331,6 +326,105 @@ describe('extractStateFromScript — field ordering', () => {
     expect(result!.count).toBe(7n);
     expect(result!.owner).toBe(pubkey);
     expect(result!.active).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractStateFromScript — 0x6a in state data (regression test)
+// ---------------------------------------------------------------------------
+
+describe('extractStateFromScript — 0x6a inside state data', () => {
+  it('correctly extracts state when bigint value is 106 (0x6a)', () => {
+    const fields = makeFields({ name: 'count', type: 'bigint', index: 0 });
+    const artifact = makeArtifact({
+      script: '51ac',
+      abi: {
+        constructor: { params: [] },
+        methods: [{ name: 'check', params: [], isPublic: true }],
+      },
+      stateFields: fields,
+    });
+
+    // 106 = 0x6a → state encoding: push 1 byte 0x6a → "016a"
+    // Full script: "51ac" + "6a" + "016a"
+    // Naive lastIndexOf("6a") would find the last "6a" inside the state data.
+    const stateHex = serializeState(fields, { count: 106n });
+    expect(stateHex).toBe('016a'); // sanity check
+    const fullScript = '51ac' + '6a' + stateHex;
+
+    const result = extractStateFromScript(artifact, fullScript);
+    expect(result).not.toBeNull();
+    expect(result!.count).toBe(106n);
+  });
+
+  it('correctly extracts state when PubKey ends with 0x6a', () => {
+    const pubkey = 'ab'.repeat(32) + '6a'; // 33 bytes, last byte is 0x6a
+    const fields = makeFields(
+      { name: 'count', type: 'bigint', index: 0 },
+      { name: 'owner', type: 'PubKey', index: 1 },
+    );
+    const artifact = makeArtifact({
+      script: '51',
+      abi: {
+        constructor: { params: [] },
+        methods: [{ name: 'check', params: [], isPublic: true }],
+      },
+      stateFields: fields,
+    });
+
+    const stateHex = serializeState(fields, { count: 42n, owner: pubkey });
+    const fullScript = '51' + '6a' + stateHex;
+
+    const result = extractStateFromScript(artifact, fullScript);
+    expect(result).not.toBeNull();
+    expect(result!.count).toBe(42n);
+    expect(result!.owner).toBe(pubkey);
+  });
+
+  it('correctly extracts state when Addr ends with 0x6a', () => {
+    const addr = 'ff'.repeat(19) + '6a'; // 20 bytes, last byte is 0x6a
+    const fields = makeFields({ name: 'recipient', type: 'Addr', index: 0 });
+    const artifact = makeArtifact({
+      script: '76a988ac',
+      abi: {
+        constructor: { params: [] },
+        methods: [{ name: 'check', params: [], isPublic: true }],
+      },
+      stateFields: fields,
+    });
+
+    const stateHex = serializeState(fields, { recipient: addr });
+    const fullScript = '76a988ac' + '6a' + stateHex;
+
+    const result = extractStateFromScript(artifact, fullScript);
+    expect(result).not.toBeNull();
+    expect(result!.recipient).toBe(addr);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// findLastOpReturn — opcode-aware walking
+// ---------------------------------------------------------------------------
+
+describe('findLastOpReturn', () => {
+  it('finds OP_RETURN in simple script', () => {
+    // OP_1 OP_RETURN push(1 byte 0x2a)
+    expect(findLastOpReturn('516a012a')).toBe(2);
+  });
+
+  it('skips 0x6a inside push data', () => {
+    // push(1 byte: 0x6a) OP_ADD OP_RETURN push(1 byte: 0x2a)
+    // 01 6a 93 6a 01 2a
+    expect(findLastOpReturn('016a936a012a')).toBe(6);
+  });
+
+  it('returns -1 when no OP_RETURN exists', () => {
+    expect(findLastOpReturn('5193885187')).toBe(-1);
+  });
+
+  it('skips 0x6a inside OP_PUSHDATA1', () => {
+    // OP_PUSHDATA1 len=3 data=[0x6a, 0x6a, 0x6a] OP_RETURN
+    expect(findLastOpReturn('4c036a6a6a6a')).toBe(10);
   });
 });
 

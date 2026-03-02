@@ -9,3 +9,5 @@ runar-macros = { path = "../runar-rs-macros" }
 runar-compiler-rust = { path = "../../compilers/rust" }
 sha2 = "0.10"
 ripemd = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

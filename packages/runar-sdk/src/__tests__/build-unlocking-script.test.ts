@@ -40,7 +40,6 @@ describe('buildUnlockingScript — method selector', () => {
     const script = contract.buildUnlockingScript('unlock', [sig]);
 
     // Should be ONLY the push-data-encoded signature, no trailing selector
-    const expectedSigPush = '4c48' + sig; // 0x48 = 72, OP_PUSHDATA1 because 72 < 76? No, 72 <= 75, so direct push: '48' + sig
     // 72 in hex is 0x48, and 72 <= 75, so direct push encoding: length byte + data
     const expected = '48' + sig;
     expect(script).toBe(expected);

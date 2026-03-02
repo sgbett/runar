@@ -679,3 +679,57 @@ runar-rust --ir Counter-anf.json -o Counter.json
 ```
 
 All three produce identical `script` hex. The conformance test suite validates this.
+
+---
+
+## Deployment SDKs
+
+Deployment SDKs are available in all three languages. Each provides the same API surface: `RunarContract` for lifecycle management, `Provider` for blockchain access, and `Signer` for key operations.
+
+### Go SDK (`packages/runar-go/`)
+
+```go
+import "runar"
+
+// Load artifact
+artifact := runar.RunarArtifact{}
+json.Unmarshal(data, &artifact)
+
+// Create contract
+contract := runar.NewRunarContract(&artifact, []interface{}{pubKeyHash})
+
+// Deploy
+provider := runar.NewMockProvider("testnet")
+signer := runar.NewExternalSigner(pubKeyHex, address, signFunc)
+txid, tx, err := contract.Deploy(provider, signer, runar.DeployOptions{Satoshis: 50000})
+
+// Call
+txid, tx, err = contract.Call("unlock", []interface{}{sig, pubKey}, provider, signer, nil)
+```
+
+Signing is delegated via the `ExternalSigner` callback pattern. For real ECDSA signing, wrap `github.com/bsv-blockchain/go-sdk` in an `ExternalSigner`.
+
+### Rust SDK (`packages/runar-rs/src/sdk/`)
+
+```rust
+use runar::sdk::*;
+
+// Load artifact
+let artifact: RunarArtifact = serde_json::from_str(&data)?;
+
+// Create contract
+let mut contract = RunarContract::new(artifact, vec![SdkValue::Bytes(pub_key_hash)]);
+
+// Deploy
+let mut provider = MockProvider::new("testnet");
+let signer = MockSigner::new();
+let txid = contract.deploy(&mut provider, &signer, &DeployOptions {
+    satoshis: 50000,
+    change_address: None,
+})?;
+
+// Call
+let txid = contract.call("unlock", &[sig, pub_key], &mut provider, &signer, None)?;
+```
+
+Signing is delegated via the `ExternalSigner` closure pattern. For real ECDSA signing, wrap `rust-sv` in an `ExternalSigner`.

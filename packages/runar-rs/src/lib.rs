@@ -9,6 +9,7 @@
 //! ```
 
 pub mod prelude;
+pub mod sdk;
 
 // Re-export proc-macro attributes so `#[runar::contract]` works.
 pub use runar_macros::{contract, methods, public, stateful_contract};
