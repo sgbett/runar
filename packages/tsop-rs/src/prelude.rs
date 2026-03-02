@@ -85,6 +85,21 @@ pub fn verify_rabin_sig(_msg: &[u8], _sig: &[u8], _padding: &[u8], _pk: &[u8]) -
     true
 }
 
+/// Always returns `true` in test mode.
+/// Real WOTS+ verification happens in compiled Bitcoin Script.
+pub fn verify_wots(_msg: &[u8], _sig: &[u8], _pk: &[u8]) -> bool {
+    true
+}
+
+// SLH-DSA (SPHINCS+) SHA-256 variants — all return true in test mode.
+
+pub fn verify_slh_dsa_sha2_128s(_msg: &[u8], _sig: &[u8], _pk: &[u8]) -> bool { true }
+pub fn verify_slh_dsa_sha2_128f(_msg: &[u8], _sig: &[u8], _pk: &[u8]) -> bool { true }
+pub fn verify_slh_dsa_sha2_192s(_msg: &[u8], _sig: &[u8], _pk: &[u8]) -> bool { true }
+pub fn verify_slh_dsa_sha2_192f(_msg: &[u8], _sig: &[u8], _pk: &[u8]) -> bool { true }
+pub fn verify_slh_dsa_sha2_256s(_msg: &[u8], _sig: &[u8], _pk: &[u8]) -> bool { true }
+pub fn verify_slh_dsa_sha2_256f(_msg: &[u8], _sig: &[u8], _pk: &[u8]) -> bool { true }
+
 // ---------------------------------------------------------------------------
 // Real hash functions
 // ---------------------------------------------------------------------------

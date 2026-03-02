@@ -10,6 +10,13 @@
  */
 
 import { createHash } from 'node:crypto';
+import { wotsVerify as wotsVerifyImpl } from '../crypto/wots.js';
+import {
+  slhVerify as slhVerifyImpl,
+  SLH_SHA2_128s, SLH_SHA2_128f,
+  SLH_SHA2_192s, SLH_SHA2_192f,
+  SLH_SHA2_256s, SLH_SHA2_256f,
+} from '../crypto/slh-dsa.js';
 import type {
   ContractNode,
   MethodNode,
@@ -859,6 +866,34 @@ export class TSOPInterpreter {
 
       case 'verifyRabinSig':
         return { kind: 'boolean', value: true };
+
+      case 'verifyWOTS': {
+        const wotsMsg = this.toBytes(args[0]!);
+        const wotsSig = this.toBytes(args[1]!);
+        const wotsPk = this.toBytes(args[2]!);
+        return { kind: 'boolean', value: wotsVerifyImpl(wotsMsg, wotsSig, wotsPk) };
+      }
+
+      case 'verifySLHDSA_SHA2_128s':
+      case 'verifySLHDSA_SHA2_128f':
+      case 'verifySLHDSA_SHA2_192s':
+      case 'verifySLHDSA_SHA2_192f':
+      case 'verifySLHDSA_SHA2_256s':
+      case 'verifySLHDSA_SHA2_256f': {
+        const slhParamsMap: Record<string, typeof SLH_SHA2_128s> = {
+          verifySLHDSA_SHA2_128s: SLH_SHA2_128s,
+          verifySLHDSA_SHA2_128f: SLH_SHA2_128f,
+          verifySLHDSA_SHA2_192s: SLH_SHA2_192s,
+          verifySLHDSA_SHA2_192f: SLH_SHA2_192f,
+          verifySLHDSA_SHA2_256s: SLH_SHA2_256s,
+          verifySLHDSA_SHA2_256f: SLH_SHA2_256f,
+        };
+        const slhMsg = this.toBytes(args[0]!);
+        const slhSig = this.toBytes(args[1]!);
+        const slhPk = this.toBytes(args[2]!);
+        const params = slhParamsMap[funcName]!;
+        return { kind: 'boolean', value: slhVerifyImpl(params, slhMsg, slhSig, slhPk) };
+      }
 
       case 'extractLocktime':
         return { kind: 'bigint', value: this._mockPreimage.locktime ?? 0n };

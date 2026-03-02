@@ -106,6 +106,7 @@ Bitcoin Script development today forces a choice between hand-writing opcodes (e
 - **Write in your language** — TypeScript, Go, Rust, Solidity-like, or Move-style
 - **Test natively** — `vitest` for TS, `go test` for Go, `cargo test` for Rust
 - **Three compilers** — TypeScript (reference), Go, Rust — all produce byte-identical output
+- **Post-quantum ready** — WOTS+ and SLH-DSA (FIPS 205) signature verification in Bitcoin Script
 - **Nanopass architecture** — 6 small passes, each auditable in a single sitting
 - **Full IDE support** — type checking, autocompletion, go-to-definition in every language
 
@@ -223,6 +224,8 @@ All formats parse into the same `ContractNode` AST. From there, the pipeline is 
 | [OraclePriceFeed](examples/ts/oracle-price/) | Rabin signature oracle | No | No |
 | [FungibleToken](examples/ts/token-ft/) | Token with split/merge | Yes | Yes (3 paths) |
 | [SimpleNFT](examples/ts/token-nft/) | NFT with transfer/burn | Yes | Yes |
+| [PostQuantumWallet](examples/ts/post-quantum-wallet/) | WOTS+ signature verification | No | No |
+| [SPHINCSWallet](examples/ts/sphincs-wallet/) | SLH-DSA (FIPS 205) verification | No | No |
 
 Each contract has tests in TypeScript, Go, Rust, Solidity, and Move:
 ```
@@ -258,10 +261,10 @@ The optimizer (constant folding + dead binding elimination) runs between passes 
 TSOP defines a **canonical IR conformance boundary** at the ANF level. Any compiler that produces byte-identical ANF IR for a given source file is conformant:
 
 - The **TypeScript compiler** is the reference implementation
-- The **Go compiler** produces identical output for all 8 example contracts
-- The **Rust compiler** produces identical output for all 8 example contracts
+- The **Go compiler** produces identical output for all example contracts including post-quantum
+- The **Rust compiler** produces identical output for all example contracts including post-quantum
 
-The conformance suite in `conformance/` contains golden-file tests. All three compilers must pass the same suite.
+The conformance suite in `conformance/` contains 9 golden-file tests (including WOTS+ and SLH-DSA). All three compilers must pass the same suite.
 
 ### Contract Model
 

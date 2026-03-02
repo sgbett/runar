@@ -361,3 +361,5 @@ This pattern demonstrates combining multiple stateful fields, time-based conditi
 | Oracle | No | Rabin signatures, `verifyRabinSig`, `num2bin` |
 | Covenant | No | `checkPreimage` for transaction introspection |
 | Auction | Yes | Multiple stateful fields, locktime checks, two spending paths |
+| PostQuantumWallet | No | `verifyWOTS` — WOTS+ one-time PQ signature (~10 KB script) |
+| SPHINCSWallet | No | `verifySLHDSA_SHA2_128s` — SLH-DSA stateless PQ signature (~203 KB script) |

@@ -184,7 +184,7 @@ export function compile(source: string, options?: CompileOptions): CompileResult
   // the default compile path.
   const optimizedAnf = anf;
 
-  // Pass 5-6: Stack lower + Emit (wrapped in try/catch for backward compat)
+  // Pass 5-6: Stack lower + Emit
   try {
     const stackProgram = lowerToStack(optimizedAnf);
     const emitResult = emit(stackProgram);
@@ -205,13 +205,15 @@ export function compile(source: string, options?: CompileOptions): CompileResult
       scriptHex: emitResult.scriptHex,
       scriptAsm: emitResult.scriptAsm,
     };
-  } catch {
-    // Later passes failed; return ANF-only result for backward compat
+  } catch (e: unknown) {
+    // Stack lowering or emit failed — report as a compilation error
+    const msg = e instanceof Error ? e.message : String(e);
+    diagnostics.push({ message: msg, severity: 'error' } as CompilerDiagnostic);
     return {
       anf: optimizedAnf,
       contract: parseResult.contract,
       diagnostics,
-      success: !hasErrors(diagnostics),
+      success: false,
     };
   }
 }

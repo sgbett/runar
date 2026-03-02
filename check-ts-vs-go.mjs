@@ -1,7 +1,7 @@
 import { compile } from './packages/tsop-compiler/dist/index.js';
 import { lowerToStack } from './packages/tsop-compiler/dist/passes/05-stack-lower.js';
 import { emit } from './packages/tsop-compiler/dist/passes/06-emit.js';
-import { readFileSync } from 'fs';
+import { readFileSync } from 'node:fs';
 
 const tests = ['basic-p2pkh', 'arithmetic', 'boolean-logic', 'bounded-loop', 'if-else', 'multi-method', 'stateful'];
 

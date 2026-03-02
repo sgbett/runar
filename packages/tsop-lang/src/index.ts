@@ -84,6 +84,14 @@ export {
   log2,
   // Rabin (also re-exported from oracle subpath)
   verifyRabinSig,
+  // Post-quantum (hash-based)
+  verifyWOTS,
+  verifySLHDSA_SHA2_128s,
+  verifySLHDSA_SHA2_128f,
+  verifySLHDSA_SHA2_192s,
+  verifySLHDSA_SHA2_192f,
+  verifySLHDSA_SHA2_256s,
+  verifySLHDSA_SHA2_256f,
 } from './builtins.js';
 
 // ---------------------------------------------------------------------------

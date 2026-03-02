@@ -100,7 +100,7 @@ When adding a new frontend format parser:
 - Add format docs in `docs/formats/`
 
 ### Three Compilers Must Stay in Sync
-Any language feature change must be implemented in TypeScript, Go, AND Rust. Cross-compiler tests in `packages/tsop-compiler/src/__tests__/cross-compiler.test.ts` validate consistency.
+Any language feature change must be implemented in TypeScript, Go, AND Rust. Cross-compiler tests in `packages/tsop-compiler/src/__tests__/cross-compiler.test.ts` validate consistency. The conformance suite in `conformance/` has 9 golden-file tests (including WOTS+ and SLH-DSA) that all 3 compilers must pass.
 
 ### Contract Model
 - `SmartContract` — stateless, all properties `readonly`, developer writes full logic
@@ -176,3 +176,5 @@ The `CompileCheck` / `compile_check` functions run the contract through the TSOP
 - Only TSOP built-in functions are allowed — no arbitrary function calls (Math, console, etc.)
 - Built-in math functions: `abs`, `min`, `max`, `within`, `safediv`, `safemod`, `clamp`, `sign`, `pow`, `mulDiv`, `percentOf`, `sqrt`, `gcd`, `divmod`, `log2`, `bool`
 - Shift operators `<<` and `>>` compile to `OP_LSHIFT` and `OP_RSHIFT`
+- Post-quantum signature verification (experimental): `verifyWOTS` (one-time, ~10 KB script), `verifySLHDSA_SHA2_*` (6 FIPS 205 parameter sets, 200-900 KB scripts)
+- SLH-DSA codegen lives in a separate module: `packages/tsop-compiler/src/passes/slh-dsa-codegen.ts` (TS), `compilers/go/codegen/slh_dsa.go` (Go), `compilers/rust/src/codegen/slh_dsa.rs` (Rust)

@@ -414,6 +414,20 @@ In `StatefulSmartContract`, `checkPreimage` and state continuation are handled a
 |----------|-----------|-------------|
 | `verifyRabinSig` | `(msg, sig, padding, pubKey) => boolean` | Verify a Rabin signature |
 
+### Post-Quantum Signature Verification (Experimental)
+
+> These functions are experimental and APIs may change.
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `verifyWOTS` | `(msg, sig, pubkey) => boolean` | WOTS+ verification (w=16, SHA-256). One-time use per keypair. Sig: 2,144 B. |
+| `verifySLHDSA_SHA2_128s` | `(msg, sig, pubkey) => boolean` | SLH-DSA-SHA2-128s (FIPS 205). Stateless, multi-use. Sig: 7,856 B. |
+| `verifySLHDSA_SHA2_128f` | `(msg, sig, pubkey) => boolean` | SLH-DSA-SHA2-128f. Fast variant. Sig: 17,088 B. |
+| `verifySLHDSA_SHA2_192s` | `(msg, sig, pubkey) => boolean` | SLH-DSA-SHA2-192s. 192-bit security. Sig: 16,224 B. |
+| `verifySLHDSA_SHA2_192f` | `(msg, sig, pubkey) => boolean` | SLH-DSA-SHA2-192f. Fast variant. Sig: 35,664 B. |
+| `verifySLHDSA_SHA2_256s` | `(msg, sig, pubkey) => boolean` | SLH-DSA-SHA2-256s. 256-bit security. Sig: 29,792 B. |
+| `verifySLHDSA_SHA2_256f` | `(msg, sig, pubkey) => boolean` | SLH-DSA-SHA2-256f. Fast variant. Sig: 49,856 B. |
+
 ---
 
 ## Disallowed Features

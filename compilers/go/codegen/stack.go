@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/big"
+	"strings"
 
 	"github.com/tsop/compiler-go/ir"
 )
@@ -607,6 +608,17 @@ func (ctx *loweringContext) lowerCall(bindingName, funcName string, args []strin
 
 	if funcName == "verifyRabinSig" {
 		ctx.lowerVerifyRabinSig(bindingName, args, bindingIndex, lastUses)
+		return
+	}
+
+	if funcName == "verifyWOTS" {
+		ctx.lowerVerifyWOTS(bindingName, args, bindingIndex, lastUses)
+		return
+	}
+
+	if strings.HasPrefix(funcName, "verifySLHDSA_SHA2_") {
+		paramKey := strings.TrimPrefix(funcName, "verifySLHDSA_")
+		ctx.lowerVerifySLHDSA(bindingName, paramKey, args, bindingIndex, lastUses)
 		return
 	}
 
@@ -1904,4 +1916,194 @@ func hexToBytes(h string) []byte {
 		panic(fmt.Sprintf("invalid hex string: %s", err))
 	}
 	return b
+}
+
+// lowerVerifyWOTS emits the WOTS+ signature verification script.
+// Parameters: w=16, n=32 (SHA-256), len=67 chains.
+// emitWOTSOneChain emits one WOTS+ chain verification.
+// Input: sig(0) csum(1) endpt(2) digit(3) → sigRest(0) newCsum(1) newEndpt(2)
+func (ctx *loweringContext) emitWOTSOneChain() {
+	// steps = 15 - digit
+	ctx.emitOp(StackOp{Op: "push", Value: bigIntPush(15)})
+	ctx.emitOp(StackOp{Op: "swap"})
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_SUB"})
+
+	// Save: steps_copy, endpt, csum to alt. Leave sig+steps on main.
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_DUP"})
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_TOALTSTACK"}) // push#1: steps_copy
+	ctx.emitOp(StackOp{Op: "swap"})
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_TOALTSTACK"}) // push#2: endpt
+	ctx.emitOp(StackOp{Op: "swap"})
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_TOALTSTACK"}) // push#3: csum
+
+	// Split 32B sig element
+	ctx.emitOp(StackOp{Op: "swap"})
+	ctx.emitOp(StackOp{Op: "push", Value: bigIntPush(32)})
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_SPLIT"})
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_TOALTSTACK"}) // push#4: sigRest
+	ctx.emitOp(StackOp{Op: "swap"})
+
+	// Hash loop: 15 conditional SHA-256 iterations
+	for j := 0; j < 15; j++ {
+		ctx.emitOp(StackOp{Op: "opcode", Code: "OP_DUP"})
+		ctx.emitOp(StackOp{Op: "opcode", Code: "OP_0NOTEQUAL"})
+		ctx.emitOp(StackOp{Op: "if", Then: []StackOp{
+			{Op: "swap"},
+			{Op: "opcode", Code: "OP_SHA256"},
+			{Op: "swap"},
+			{Op: "opcode", Code: "OP_1SUB"},
+		}})
+	}
+	ctx.emitOp(StackOp{Op: "drop"})
+
+	// Restore: sigRest, csum, endpt_acc, steps_copy
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_FROMALTSTACK"})
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_FROMALTSTACK"})
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_FROMALTSTACK"})
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_FROMALTSTACK"})
+
+	// csum += steps_copy
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_ROT"})
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_ADD"})
+
+	// Concat endpoint to endpt_acc
+	ctx.emitOp(StackOp{Op: "swap"})
+	ctx.emitOp(StackOp{Op: "push", Value: bigIntPush(3)})
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_ROLL"})
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_CAT"})
+}
+
+func (ctx *loweringContext) lowerVerifyWOTS(bindingName string, args []string, bindingIndex int, lastUses map[string]int) {
+	if len(args) < 3 {
+		panic("verifyWOTS requires 3 arguments: msg, sig, pubkey")
+	}
+
+	// Bring args to top: msg, sig, pubkey
+	for _, arg := range args {
+		ctx.bringToTop(arg, ctx.isLastUse(arg, bindingIndex, lastUses))
+	}
+	for i := 0; i < 3; i++ {
+		ctx.sm.pop()
+	}
+
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_TOALTSTACK"}) // pubkey → alt
+	ctx.emitOp(StackOp{Op: "swap"})
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_SHA256"})
+
+	// Canonical layout: sig(0) csum=0(1) endptAcc=empty(2) hashRem(3)
+	ctx.emitOp(StackOp{Op: "swap"})
+	ctx.emitOp(StackOp{Op: "push", Value: bigIntPush(0)})
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_0"})
+	ctx.emitOp(StackOp{Op: "push", Value: bigIntPush(3)})
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_ROLL"})
+
+	// Process 32 bytes → 64 message chains
+	for byteIdx := 0; byteIdx < 32; byteIdx++ {
+		if byteIdx < 31 {
+			ctx.emitOp(StackOp{Op: "push", Value: bigIntPush(1)})
+			ctx.emitOp(StackOp{Op: "opcode", Code: "OP_SPLIT"})
+			ctx.emitOp(StackOp{Op: "swap"})
+		}
+		// Unsigned byte conversion: append 0x00 before BIN2NUM
+		ctx.emitOp(StackOp{Op: "push", Value: bigIntPush(0)})
+		ctx.emitOp(StackOp{Op: "push", Value: bigIntPush(1)})
+		ctx.emitOp(StackOp{Op: "opcode", Code: "OP_NUM2BIN"})
+		ctx.emitOp(StackOp{Op: "opcode", Code: "OP_CAT"})
+		ctx.emitOp(StackOp{Op: "opcode", Code: "OP_BIN2NUM"})
+		// Extract nibbles
+		ctx.emitOp(StackOp{Op: "opcode", Code: "OP_DUP"})
+		ctx.emitOp(StackOp{Op: "push", Value: bigIntPush(16)})
+		ctx.emitOp(StackOp{Op: "opcode", Code: "OP_DIV"})
+		ctx.emitOp(StackOp{Op: "swap"})
+		ctx.emitOp(StackOp{Op: "push", Value: bigIntPush(16)})
+		ctx.emitOp(StackOp{Op: "opcode", Code: "OP_MOD"})
+
+		// Save low (and hashRest) to alt
+		if byteIdx < 31 {
+			ctx.emitOp(StackOp{Op: "opcode", Code: "OP_TOALTSTACK"})
+			ctx.emitOp(StackOp{Op: "swap"})
+			ctx.emitOp(StackOp{Op: "opcode", Code: "OP_TOALTSTACK"})
+		} else {
+			ctx.emitOp(StackOp{Op: "opcode", Code: "OP_TOALTSTACK"})
+		}
+
+		ctx.emitWOTSOneChain()
+
+		if byteIdx < 31 {
+			ctx.emitOp(StackOp{Op: "opcode", Code: "OP_FROMALTSTACK"})
+			ctx.emitOp(StackOp{Op: "opcode", Code: "OP_FROMALTSTACK"})
+			ctx.emitOp(StackOp{Op: "swap"})
+			ctx.emitOp(StackOp{Op: "opcode", Code: "OP_TOALTSTACK"})
+		} else {
+			ctx.emitOp(StackOp{Op: "opcode", Code: "OP_FROMALTSTACK"})
+		}
+
+		ctx.emitWOTSOneChain()
+
+		if byteIdx < 31 {
+			ctx.emitOp(StackOp{Op: "opcode", Code: "OP_FROMALTSTACK"})
+		}
+	}
+
+	// Checksum digits
+	ctx.emitOp(StackOp{Op: "swap"})
+	// d66
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_DUP"})
+	ctx.emitOp(StackOp{Op: "push", Value: bigIntPush(16)})
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_MOD"})
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_TOALTSTACK"})
+	// d65
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_DUP"})
+	ctx.emitOp(StackOp{Op: "push", Value: bigIntPush(16)})
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_DIV"})
+	ctx.emitOp(StackOp{Op: "push", Value: bigIntPush(16)})
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_MOD"})
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_TOALTSTACK"})
+	// d64
+	ctx.emitOp(StackOp{Op: "push", Value: bigIntPush(256)})
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_DIV"})
+	ctx.emitOp(StackOp{Op: "push", Value: bigIntPush(16)})
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_MOD"})
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_TOALTSTACK"})
+
+	// 3 checksum chains
+	for ci := 0; ci < 3; ci++ {
+		ctx.emitOp(StackOp{Op: "opcode", Code: "OP_TOALTSTACK"})
+		ctx.emitOp(StackOp{Op: "push", Value: bigIntPush(0)})
+		ctx.emitOp(StackOp{Op: "opcode", Code: "OP_FROMALTSTACK"})
+		ctx.emitOp(StackOp{Op: "opcode", Code: "OP_FROMALTSTACK"})
+		ctx.emitWOTSOneChain()
+		ctx.emitOp(StackOp{Op: "swap"})
+		ctx.emitOp(StackOp{Op: "drop"})
+	}
+
+	// Final comparison
+	ctx.emitOp(StackOp{Op: "swap"})
+	ctx.emitOp(StackOp{Op: "drop"})
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_SHA256"})
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_FROMALTSTACK"})
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_EQUAL"})
+
+	ctx.sm.push(bindingName)
+	ctx.trackDepth()
+}
+
+// lowerVerifySLHDSA emits the SLH-DSA (FIPS 205) signature verification script.
+func (ctx *loweringContext) lowerVerifySLHDSA(bindingName, paramKey string, args []string, bindingIndex int, lastUses map[string]int) {
+	if len(args) < 3 {
+		panic("verifySLHDSA requires 3 arguments: msg, sig, pubkey")
+	}
+
+	// Bring args to top: msg, sig, pubkey
+	for _, arg := range args {
+		ctx.bringToTop(arg, ctx.isLastUse(arg, bindingIndex, lastUses))
+	}
+	for i := 0; i < 3; i++ {
+		ctx.sm.pop()
+	}
+
+	EmitVerifySLHDSA(func(op StackOp) { ctx.emitOp(op) }, paramKey)
+
+	ctx.sm.push(bindingName)
+	ctx.trackDepth()
 }

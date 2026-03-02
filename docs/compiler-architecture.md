@@ -23,6 +23,7 @@ Each pass lives in its own file under `packages/tsop-compiler/src/passes/`:
 | `03-typecheck.ts` | Type-check | Validated AST | Typed AST |
 | `04-anf-lower.ts` | ANF Lower | Typed AST | ANF IR |
 | `05-stack-lower.ts` | Stack Lower | ANF IR | Stack IR |
+| `slh-dsa-codegen.ts` | SLH-DSA Codegen | (called by Pass 5) | Stack IR fragment |
 | `06-emit.ts` | Emit | Stack IR | Bitcoin Script (hex) |
 
 The key benefit of this approach: each pass can be tested and verified in isolation. You can unit-test Pass 4 without caring about Passes 1-3, and you can swap out Pass 1 entirely (as the Go and Rust compilers do) while keeping Passes 4-6.
@@ -239,6 +240,20 @@ For contracts with multiple public methods, the emitter generates a dispatch tab
 ### Constructor Parameter Placeholders
 
 Constructor parameters appear as `<paramName>` placeholders in the script template. The SDK replaces them with actual values at deployment time.
+
+### Post-Quantum Signature Codegen (Experimental)
+
+Complex built-in functions like `verifyWOTS` and `verifySLHDSA_SHA2_*` are handled by dedicated codegen modules called from the stack lowerer:
+
+- **WOTS+** (`verifyWOTS`): Inline in `05-stack-lower.ts`. Emits ~10 KB of Bitcoin Script with 67 conditional hash chain loops. Uses the same `emitOp` pattern as other builtins.
+- **SLH-DSA** (`verifySLHDSA_SHA2_*`): In separate module `slh-dsa-codegen.ts`. Emits 200-900 KB of Bitcoin Script depending on parameter set. Uses a `SLHTracker` class to manage named stack positions across ~2,100 tweakable hash operations. Each hash uses a dynamically-constructed 22-byte ADRS for domain separation.
+
+The SLH-DSA codegen is replicated across all three compilers:
+- TypeScript: `packages/tsop-compiler/src/passes/slh-dsa-codegen.ts`
+- Go: `compilers/go/codegen/slh_dsa.go`
+- Rust: `compilers/rust/src/codegen/slh_dsa.rs`
+
+All three produce byte-identical Bitcoin Script, verified by the conformance suite.
 
 ---
 

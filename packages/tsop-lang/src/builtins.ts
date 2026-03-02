@@ -341,3 +341,83 @@ export function verifyRabinSig(
 ): boolean {
   return compilerStub('verifyRabinSig');
 }
+
+// ---------------------------------------------------------------------------
+// Post-quantum signature verification (hash-based)
+// ---------------------------------------------------------------------------
+
+/**
+ * Verify a WOTS+ (Winternitz One-Time Signature) signature.
+ *
+ * Uses SHA-256 with w=16, n=32. The compiler emits an inlined verification
+ * script that extracts base-16 digits from the message hash, computes a
+ * checksum, verifies 67 hash chains, and compares the reconstructed public
+ * key.
+ *
+ * Signature size: 2,144 bytes (67 chains x 32 bytes).
+ * Public key size: 32 bytes.
+ * Estimated script size: ~12 KB.
+ *
+ * One-time use: each keypair can securely sign only one message.
+ * This is a natural fit for Bitcoin's UTXO model where each output is spent
+ * exactly once.
+ *
+ * @param msg    - The message to verify.
+ * @param sig    - WOTS+ signature (2,144 bytes).
+ * @param pubkey - WOTS+ public key (32 bytes).
+ */
+export function verifyWOTS(
+  _msg: ByteString,
+  _sig: ByteString,
+  _pubkey: ByteString,
+): boolean {
+  return compilerStub('verifyWOTS');
+}
+
+/**
+ * Verify an SLH-DSA-SHA2-128s (SPHINCS+) signature.
+ * NIST FIPS 205, 128-bit security, small signatures (7,856 bytes).
+ */
+export function verifySLHDSA_SHA2_128s(_msg: ByteString, _sig: ByteString, _pubkey: ByteString): boolean {
+  return compilerStub('verifySLHDSA_SHA2_128s');
+}
+
+/**
+ * Verify an SLH-DSA-SHA2-128f (SPHINCS+) signature.
+ * NIST FIPS 205, 128-bit security, fast signatures (17,088 bytes).
+ */
+export function verifySLHDSA_SHA2_128f(_msg: ByteString, _sig: ByteString, _pubkey: ByteString): boolean {
+  return compilerStub('verifySLHDSA_SHA2_128f');
+}
+
+/**
+ * Verify an SLH-DSA-SHA2-192s (SPHINCS+) signature.
+ * NIST FIPS 205, 192-bit security, small signatures (16,224 bytes).
+ */
+export function verifySLHDSA_SHA2_192s(_msg: ByteString, _sig: ByteString, _pubkey: ByteString): boolean {
+  return compilerStub('verifySLHDSA_SHA2_192s');
+}
+
+/**
+ * Verify an SLH-DSA-SHA2-192f (SPHINCS+) signature.
+ * NIST FIPS 205, 192-bit security, fast signatures (35,664 bytes).
+ */
+export function verifySLHDSA_SHA2_192f(_msg: ByteString, _sig: ByteString, _pubkey: ByteString): boolean {
+  return compilerStub('verifySLHDSA_SHA2_192f');
+}
+
+/**
+ * Verify an SLH-DSA-SHA2-256s (SPHINCS+) signature.
+ * NIST FIPS 205, 256-bit security, small signatures (29,792 bytes).
+ */
+export function verifySLHDSA_SHA2_256s(_msg: ByteString, _sig: ByteString, _pubkey: ByteString): boolean {
+  return compilerStub('verifySLHDSA_SHA2_256s');
+}
+
+/**
+ * Verify an SLH-DSA-SHA2-256f (SPHINCS+) signature.
+ * NIST FIPS 205, 256-bit security, fast signatures (49,856 bytes).
+ */
+export function verifySLHDSA_SHA2_256f(_msg: ByteString, _sig: ByteString, _pubkey: ByteString): boolean {
+  return compilerStub('verifySLHDSA_SHA2_256f');
+}

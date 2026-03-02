@@ -68,6 +68,13 @@ fn builtin_functions() -> HashMap<&'static str, FuncSig> {
     m.insert("bin2num", FuncSig { params: vec!["ByteString"], return_type: "bigint" });
     m.insert("checkPreimage", FuncSig { params: vec!["SigHashPreimage"], return_type: "boolean" });
     m.insert("verifyRabinSig", FuncSig { params: vec!["ByteString", "RabinSig", "ByteString", "RabinPubKey"], return_type: "boolean" });
+    m.insert("verifyWOTS", FuncSig { params: vec!["ByteString", "ByteString", "ByteString"], return_type: "boolean" });
+    m.insert("verifySLHDSA_SHA2_128s", FuncSig { params: vec!["ByteString", "ByteString", "ByteString"], return_type: "boolean" });
+    m.insert("verifySLHDSA_SHA2_128f", FuncSig { params: vec!["ByteString", "ByteString", "ByteString"], return_type: "boolean" });
+    m.insert("verifySLHDSA_SHA2_192s", FuncSig { params: vec!["ByteString", "ByteString", "ByteString"], return_type: "boolean" });
+    m.insert("verifySLHDSA_SHA2_192f", FuncSig { params: vec!["ByteString", "ByteString", "ByteString"], return_type: "boolean" });
+    m.insert("verifySLHDSA_SHA2_256s", FuncSig { params: vec!["ByteString", "ByteString", "ByteString"], return_type: "boolean" });
+    m.insert("verifySLHDSA_SHA2_256f", FuncSig { params: vec!["ByteString", "ByteString", "ByteString"], return_type: "boolean" });
     m.insert("abs", FuncSig { params: vec!["bigint"], return_type: "bigint" });
     m.insert("min", FuncSig { params: vec!["bigint", "bigint"], return_type: "bigint" });
     m.insert("max", FuncSig { params: vec!["bigint", "bigint"], return_type: "bigint" });

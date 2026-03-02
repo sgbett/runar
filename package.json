@@ -13,7 +13,8 @@
     "conformance:ts": "cd conformance && npx tsx runner/index.ts --tests-dir tests",
     "conformance:go": "cd compilers/go && go test -v -run TestSourceCompile ./...",
     "conformance:rust": "cd compilers/rust && PATH=\"$HOME/.cargo/bin:$PATH\" cargo test --test compiler_tests",
-    "conformance:all": "pnpm run conformance:ts && pnpm run conformance:go && pnpm run conformance:rust"
+    "conformance:all": "pnpm run conformance:ts && pnpm run conformance:go && pnpm run conformance:rust",
+    "whitepaper": "cd docs && pdflatex -interaction=nonstopmode tsop-whitepaper.tex && pdflatex -interaction=nonstopmode tsop-whitepaper.tex && pdflatex -interaction=nonstopmode tsop-whitepaper.tex"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

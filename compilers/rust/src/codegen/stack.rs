@@ -686,6 +686,17 @@ impl LoweringContext {
             return;
         }
 
+        if func_name == "verifyWOTS" {
+            self.lower_verify_wots(binding_name, args, binding_index, last_uses);
+            return;
+        }
+
+        if func_name.starts_with("verifySLHDSA_") {
+            let param_key = func_name.trim_start_matches("verifySLHDSA_");
+            self.lower_verify_slh_dsa(binding_name, param_key, args, binding_index, last_uses);
+            return;
+        }
+
         if func_name == "safediv" {
             self.lower_safediv(binding_name, args, binding_index, last_uses);
             return;
@@ -1582,6 +1593,203 @@ impl LoweringContext {
         self.emit_op(StackOp::Opcode("OP_SWAP".to_string()));
         self.emit_op(StackOp::Opcode("OP_SHA256".to_string()));
         self.emit_op(StackOp::Opcode("OP_EQUAL".to_string()));
+
+        self.sm.push(binding_name);
+        self.track_depth();
+    }
+
+    /// Emit one WOTS+ chain: sig(0) csum(1) endpt(2) digit(3) → sigRest(0) newCsum(1) newEndpt(2)
+    fn emit_wots_one_chain(&mut self) {
+        self.emit_op(StackOp::Push(PushValue::Int(15)));
+        self.emit_op(StackOp::Swap);
+        self.emit_op(StackOp::Opcode("OP_SUB".into()));
+        // Save: steps_copy, endpt, csum to alt
+        self.emit_op(StackOp::Opcode("OP_DUP".into()));
+        self.emit_op(StackOp::Opcode("OP_TOALTSTACK".into()));
+        self.emit_op(StackOp::Swap);
+        self.emit_op(StackOp::Opcode("OP_TOALTSTACK".into()));
+        self.emit_op(StackOp::Swap);
+        self.emit_op(StackOp::Opcode("OP_TOALTSTACK".into()));
+        // Split 32B sig element
+        self.emit_op(StackOp::Swap);
+        self.emit_op(StackOp::Push(PushValue::Int(32)));
+        self.emit_op(StackOp::Opcode("OP_SPLIT".into()));
+        self.emit_op(StackOp::Opcode("OP_TOALTSTACK".into()));
+        self.emit_op(StackOp::Swap);
+        // Hash loop: 15 conditional SHA-256 iterations
+        for _ in 0..15 {
+            self.emit_op(StackOp::Opcode("OP_DUP".into()));
+            self.emit_op(StackOp::Opcode("OP_0NOTEQUAL".into()));
+            self.emit_op(StackOp::If {
+                then_ops: vec![
+                    StackOp::Swap,
+                    StackOp::Opcode("OP_SHA256".into()),
+                    StackOp::Swap,
+                    StackOp::Opcode("OP_1SUB".into()),
+                ],
+                else_ops: vec![],
+            });
+        }
+        self.emit_op(StackOp::Drop);
+        // Restore: sigRest, csum, endpt_acc, steps_copy
+        self.emit_op(StackOp::Opcode("OP_FROMALTSTACK".into()));
+        self.emit_op(StackOp::Opcode("OP_FROMALTSTACK".into()));
+        self.emit_op(StackOp::Opcode("OP_FROMALTSTACK".into()));
+        self.emit_op(StackOp::Opcode("OP_FROMALTSTACK".into()));
+        // csum += steps_copy
+        self.emit_op(StackOp::Rot);
+        self.emit_op(StackOp::Opcode("OP_ADD".into()));
+        // Concat endpoint to endpt_acc
+        self.emit_op(StackOp::Swap);
+        self.emit_op(StackOp::Push(PushValue::Int(3)));
+        self.emit_op(StackOp::Opcode("OP_ROLL".into()));
+        self.emit_op(StackOp::Opcode("OP_CAT".into()));
+    }
+
+    /// WOTS+ signature verification (post-quantum hash-based).
+    /// Parameters: w=16, n=32 (SHA-256), len=67 chains.
+    fn lower_verify_wots(
+        &mut self,
+        binding_name: &str,
+        args: &[String],
+        binding_index: usize,
+        last_uses: &HashMap<String, usize>,
+    ) {
+        assert!(args.len() >= 3, "verifyWOTS requires 3 arguments: msg, sig, pubkey");
+
+        for arg in args.iter() {
+            let is_last = self.is_last_use(arg, binding_index, last_uses);
+            self.bring_to_top(arg, is_last);
+        }
+        for _ in 0..3 { self.sm.pop(); }
+
+        self.emit_op(StackOp::Opcode("OP_TOALTSTACK".into())); // pubkey → alt
+        self.emit_op(StackOp::Swap);
+        self.emit_op(StackOp::Opcode("OP_SHA256".into()));
+
+        // Canonical layout: sig(0) csum=0(1) endptAcc=empty(2) hashRem(3)
+        self.emit_op(StackOp::Swap);
+        self.emit_op(StackOp::Push(PushValue::Int(0)));
+        self.emit_op(StackOp::Opcode("OP_0".into()));
+        self.emit_op(StackOp::Push(PushValue::Int(3)));
+        self.emit_op(StackOp::Opcode("OP_ROLL".into()));
+
+        for byte_idx in 0..32 {
+            if byte_idx < 31 {
+                self.emit_op(StackOp::Push(PushValue::Int(1)));
+                self.emit_op(StackOp::Opcode("OP_SPLIT".into()));
+                self.emit_op(StackOp::Swap);
+            }
+            // Unsigned byte conversion
+            self.emit_op(StackOp::Push(PushValue::Int(0)));
+            self.emit_op(StackOp::Push(PushValue::Int(1)));
+            self.emit_op(StackOp::Opcode("OP_NUM2BIN".into()));
+            self.emit_op(StackOp::Opcode("OP_CAT".into()));
+            self.emit_op(StackOp::Opcode("OP_BIN2NUM".into()));
+            // Extract nibbles
+            self.emit_op(StackOp::Opcode("OP_DUP".into()));
+            self.emit_op(StackOp::Push(PushValue::Int(16)));
+            self.emit_op(StackOp::Opcode("OP_DIV".into()));
+            self.emit_op(StackOp::Swap);
+            self.emit_op(StackOp::Push(PushValue::Int(16)));
+            self.emit_op(StackOp::Opcode("OP_MOD".into()));
+
+            if byte_idx < 31 {
+                self.emit_op(StackOp::Opcode("OP_TOALTSTACK".into()));
+                self.emit_op(StackOp::Swap);
+                self.emit_op(StackOp::Opcode("OP_TOALTSTACK".into()));
+            } else {
+                self.emit_op(StackOp::Opcode("OP_TOALTSTACK".into()));
+            }
+
+            self.emit_wots_one_chain();
+
+            if byte_idx < 31 {
+                self.emit_op(StackOp::Opcode("OP_FROMALTSTACK".into()));
+                self.emit_op(StackOp::Opcode("OP_FROMALTSTACK".into()));
+                self.emit_op(StackOp::Swap);
+                self.emit_op(StackOp::Opcode("OP_TOALTSTACK".into()));
+            } else {
+                self.emit_op(StackOp::Opcode("OP_FROMALTSTACK".into()));
+            }
+
+            self.emit_wots_one_chain();
+
+            if byte_idx < 31 {
+                self.emit_op(StackOp::Opcode("OP_FROMALTSTACK".into()));
+            }
+        }
+
+        // Checksum digits
+        self.emit_op(StackOp::Swap);
+        // d66
+        self.emit_op(StackOp::Opcode("OP_DUP".into()));
+        self.emit_op(StackOp::Push(PushValue::Int(16)));
+        self.emit_op(StackOp::Opcode("OP_MOD".into()));
+        self.emit_op(StackOp::Opcode("OP_TOALTSTACK".into()));
+        // d65
+        self.emit_op(StackOp::Opcode("OP_DUP".into()));
+        self.emit_op(StackOp::Push(PushValue::Int(16)));
+        self.emit_op(StackOp::Opcode("OP_DIV".into()));
+        self.emit_op(StackOp::Push(PushValue::Int(16)));
+        self.emit_op(StackOp::Opcode("OP_MOD".into()));
+        self.emit_op(StackOp::Opcode("OP_TOALTSTACK".into()));
+        // d64
+        self.emit_op(StackOp::Push(PushValue::Int(256)));
+        self.emit_op(StackOp::Opcode("OP_DIV".into()));
+        self.emit_op(StackOp::Push(PushValue::Int(16)));
+        self.emit_op(StackOp::Opcode("OP_MOD".into()));
+        self.emit_op(StackOp::Opcode("OP_TOALTSTACK".into()));
+
+        // 3 checksum chains
+        for _ in 0..3 {
+            self.emit_op(StackOp::Opcode("OP_TOALTSTACK".into()));
+            self.emit_op(StackOp::Push(PushValue::Int(0)));
+            self.emit_op(StackOp::Opcode("OP_FROMALTSTACK".into()));
+            self.emit_op(StackOp::Opcode("OP_FROMALTSTACK".into()));
+            self.emit_wots_one_chain();
+            self.emit_op(StackOp::Swap);
+            self.emit_op(StackOp::Drop);
+        }
+
+        // Final comparison
+        self.emit_op(StackOp::Swap);
+        self.emit_op(StackOp::Drop);
+        self.emit_op(StackOp::Opcode("OP_SHA256".into()));
+        self.emit_op(StackOp::Opcode("OP_FROMALTSTACK".into()));
+        self.emit_op(StackOp::Opcode("OP_EQUAL".into()));
+
+        self.sm.push(binding_name);
+        self.track_depth();
+    }
+
+    /// SLH-DSA (FIPS 205) signature verification.
+    /// Brings all 3 args to the top, pops them, delegates to slh_dsa::emit_verify_slh_dsa,
+    /// and pushes the boolean result.
+    fn lower_verify_slh_dsa(
+        &mut self,
+        binding_name: &str,
+        param_key: &str,
+        args: &[String],
+        binding_index: usize,
+        last_uses: &HashMap<String, usize>,
+    ) {
+        assert!(
+            args.len() >= 3,
+            "verifySLHDSA requires 3 arguments: msg, sig, pubkey"
+        );
+
+        // Bring args to top in order: msg, sig, pubkey
+        for arg in args.iter() {
+            let is_last = self.is_last_use(arg, binding_index, last_uses);
+            self.bring_to_top(arg, is_last);
+        }
+        for _ in 0..3 {
+            self.sm.pop();
+        }
+
+        // Delegate to slh_dsa module
+        super::slh_dsa::emit_verify_slh_dsa(&mut |op| self.ops.push(op), param_key);
 
         self.sm.push(binding_name);
         self.track_depth();

@@ -143,9 +143,9 @@ locking scripts. The key design decisions are:
     three independent compiler implementations (TypeScript, Go, Rust) to
     produce byte-identical output for the same input.
   \item \textbf{Static guarantees.} The type system, combined with validation
-    constraints (bounded loops, no recursion, affine resource types), ensures
-    that all compiled programs terminate, maintain type safety, and preserve
-    UTXO integrity.
+    constraints (bounded loops, no recursion, affine consumption tracking
+    for signature and preimage types), ensures that all compiled programs
+    terminate, maintain type safety, and preserve UTXO integrity.
   \item \textbf{Deterministic stack scheduling.} A last-use analysis algorithm
     deterministically maps named ANF temporaries to Bitcoin Script stack
     positions, producing identical bytecode across all three compiler
@@ -162,8 +162,11 @@ Section~\ref{sec:codegen} details Bitcoin Script code generation, including
 the stack scheduling algorithm and opcode emission.
 Section~\ref{sec:stateful} describes the compilation of stateful contracts
 using the OP\_PUSH\_TX pattern. Section~\ref{sec:correctness} states the
-correctness properties of the compilation. Section~\ref{sec:related}
-discusses related work, and Section~\ref{sec:conclusion} concludes.
+correctness properties of the compilation. Section~\ref{sec:evaluation}
+presents empirical evaluation results including cross-compiler conformance
+and script size measurements. Section~\ref{sec:limitations} discusses
+limitations and threats to validity. Section~\ref{sec:related} surveys
+related work, and Section~\ref{sec:conclusion} concludes.
 
 %=============================================================================
 \section{Source Language}
@@ -236,8 +239,8 @@ or unbounded iteration).
 %-----------------------------------------------------------------------------
 
 The \tsop{} type system is a simple, decidable type system with subtyping
-and affine resource tracking. Types are organized into two families with a
-strict separation between them.
+and targeted affine constraints on security-critical types. Types are
+organized into two families with a strict separation between them.
 
 \begin{definition}[Type Universe]
 The set of \tsop{} types $\mathcal{T}$ is partitioned into:
@@ -275,9 +278,12 @@ of these types must be consumed at most once. The type checker tracks usage
 and rejects programs that duplicate these values.
 \end{definition}
 
-The affine constraint on \texttt{SigHashPreimage} ensures that the sighash
-preimage is consumed exactly once in the OP\_PUSH\_TX verification, preventing
-transaction malleability. The affine constraint on \texttt{Sig} prevents
+The affine constraint on \texttt{SigHashPreimage} prevents the sighash
+preimage from being duplicated, which would enable transaction malleability
+attacks. In practice, the preimage is consumed exactly once because the
+compiler auto-injects \texttt{checkPreimage} for stateful contracts, but the
+type-level guarantee is the weaker affine bound (at most once).
+The affine constraint on \texttt{Sig} similarly prevents
 signature duplication attacks.
 
 \subsubsection{Typing Rules}
@@ -637,8 +643,8 @@ Key mapping rules include:
 The Rust frontend uses attribute macros to annotate standard Rust structs and
 impl blocks:
 
-\begin{lstlisting}[style=tsop,language=Rust,
-  morekeywords={pub,struct,impl,fn,let,mut,self}]
+\begin{lstlisting}[style=tsop,language=C,
+  morekeywords={pub,struct,impl,fn,let,mut,self,use}]
 #[tsop::contract]
 pub struct P2PKH {
   #[readonly]
@@ -705,18 +711,26 @@ The parser accepts a source string and an optional filename. The filename's
 extension determines which frontend parser is invoked:
 
 \begin{center}
-\begin{tabular}{@{}ll@{}}
+\small
+\begin{tabular}{@{}lll@{}}
 \toprule
-\textbf{Extension} & \textbf{Parser} \\
+\textbf{Extension} & \textbf{Parser} & \textbf{Available in} \\
 \midrule
-\texttt{.tsop.ts} (or default) & TypeScript (via ts-morph) \\
-\texttt{.tsop.sol} & Solidity-like (recursive descent) \\
-\texttt{.tsop.move} & Move-style (recursive descent) \\
-\texttt{.tsop.go} & Go (\texttt{go/parser} + AST mapping) \\
-\texttt{.tsop.rs} & Rust (tokenizer + recursive descent) \\
+\texttt{.tsop.ts} (or default) & TypeScript (via ts-morph) & TS, Go, Rust \\
+\texttt{.tsop.sol} & Solidity-like (recursive descent) & TS, Go, Rust \\
+\texttt{.tsop.move} & Move-style (recursive descent) & TS, Go, Rust \\
+\texttt{.tsop.go} & Go (\texttt{go/parser} + AST mapping) & Go only \\
+\texttt{.tsop.rs} & Rust (tokenizer + recursive descent) & Rust only \\
 \bottomrule
 \end{tabular}
 \end{center}
+
+The TypeScript reference compiler dispatches \texttt{.tsop.sol} and
+\texttt{.tsop.move} to their respective hand-written parsers, with all
+other extensions falling through to the TypeScript parser. The
+\texttt{.tsop.go} and \texttt{.tsop.rs} formats are handled exclusively
+by the Go and Rust compilers respectively, which leverage their native
+language toolchains for parsing.
 
 All parsers produce a \texttt{ContractNode} AST (defined in
 Section~\ref{sec:ir-ast}) or a list of diagnostic errors.
@@ -738,8 +752,9 @@ the AST. The following invariants are checked:
   \item \label{v:assign} Each property is assigned exactly once in the
     constructor.
   \item \label{v:readonly} All properties in \texttt{SmartContract} are
-    \texttt{readonly}; \texttt{StatefulSmartContract} has at least one
-    mutable property.
+    \texttt{readonly}. If a \texttt{StatefulSmartContract} has no mutable
+    properties, a warning is emitted (suggesting \texttt{SmartContract}
+    instead), but compilation proceeds.
   \item \label{v:recursion} No direct or mutual recursion among methods.
   \item \label{v:loops} All \texttt{for} loop bounds are compile-time
     constants.
@@ -819,13 +834,17 @@ method. This canonical naming scheme is critical for cross-compiler
 conformance: all three compiler implementations must produce identical
 temporary indices for the same input.
 
-\subsubsection{Short-Circuit Lowering}
+\subsubsection{Logical Operator Lowering}
 
-Logical operators are desugared into conditional expressions:
-\begin{align}
-  a \mathbin{\&\&} b &\leadsto \texttt{if}(a)\; \{b\}\; \texttt{else}\; \{\texttt{false}\} \\
-  a \mathbin{||} b &\leadsto \texttt{if}(a)\; \{\texttt{true}\}\; \texttt{else}\; \{b\}
-\end{align}
+Unlike many compilers, \tsop{} does \emph{not} desugar logical operators
+into short-circuit conditional expressions. Instead, \texttt{\&\&} and
+\texttt{||} are preserved as binary operations through the ANF IR and
+lowered directly to \op{BOOLAND} and \op{BOOLOR} respectively. Both
+operands are always evaluated. This is safe because \tsop{} programs are
+side-effect-free: the language permits no I/O, no mutation outside of
+explicit property updates, and no non-terminating expressions, so eager
+evaluation of both operands is semantically equivalent to short-circuit
+evaluation.
 
 \subsubsection{Stateful Contract Injection}
 
@@ -1063,11 +1082,14 @@ The value kinds $V$ are:
 \end{tabular}
 \end{center}
 
-The ANF IR is serialized using RFC 8785 (JSON Canonicalization Scheme)
-with lexicographically sorted keys, no whitespace, and minimal number
-representations. This canonical form serves as the \emph{conformance
-boundary}: all three compiler implementations must produce byte-identical
-ANF IR JSON for the same input.
+The ANF IR is serialized as JSON with lexicographically sorted object keys
+and deterministic formatting, producing a canonical form that serves as the
+\emph{conformance boundary}: all three compiler implementations must produce
+byte-identical ANF IR JSON for the same input. The conformance runner
+canonicalizes by recursively sorting keys and re-serializing with uniform
+indentation. A strict RFC~8785 (JSON Canonicalization Scheme) serializer
+is also available in the IR schema package for use cases requiring minimal
+canonical JSON.
 
 %-----------------------------------------------------------------------------
 \subsection{Stack IR}
@@ -1403,20 +1425,25 @@ exceed the maximum stack depth of 800 items.
 
 \begin{property}[UTXO Safety]
 \label{prop:utxo-safety}
-For stateful contracts, the affine type system ensures that
-\texttt{SigHashPreimage} is consumed exactly once, preventing transaction
-malleability attacks. The state continuation pattern ensures that every
-state transition produces a valid output matching the expected hash.
+For stateful contracts, the affine type constraint prevents duplication
+of \texttt{SigHashPreimage} values when passed as identifier arguments
+to consuming functions, mitigating transaction malleability attacks.
+Combined with the compiler's automatic injection of \texttt{checkPreimage}
+at public method entry---where the preimage is always an identifier
+parameter---this ensures that the preimage is consumed exactly once in
+the standard usage pattern. The state continuation pattern ensures that
+every state transition produces a valid output matching the expected hash.
 \end{property}
 
 %=============================================================================
-\section{Post-Quantum Signature Verification}
+\section{Post-Quantum Signature Verification (Experimental)}
 \label{sec:pq}
 %=============================================================================
 
-\tsop{} includes support for post-quantum signature schemes that can be
-verified entirely within Bitcoin Script, providing resistance against
-quantum computing attacks on ECDSA.
+\tsop{} includes experimental support for post-quantum signature schemes
+that can be verified entirely within Bitcoin Script, providing resistance
+against quantum computing attacks on ECDSA. These features are experimental
+and the APIs may change in future releases.
 
 %-----------------------------------------------------------------------------
 \subsection{WOTS+ (Winternitz One-Time Signature)}
@@ -1447,6 +1474,315 @@ The stack lowerer manages the complex stack state using the alt stack for
 temporary saves during chain processing, maintaining a canonical layout
 between chains: signature remainder at position 0, checksum at position 1,
 and endpoint accumulator at position 2.
+
+%-----------------------------------------------------------------------------
+\subsection{SLH-DSA (FIPS 205, SPHINCS+ SHA-256)}
+\label{sec:slhdsa}
+%-----------------------------------------------------------------------------
+
+SLH-DSA is the NIST-standardized stateless hash-based signature scheme
+(FIPS~205), based on SPHINCS+. Unlike WOTS+ which is one-time, SLH-DSA
+supports unlimited signatures from a single keypair, making it suitable
+for scenarios where key reuse is necessary.
+
+\tsop{} supports all six SHA-256 parameter sets (128s/f, 192s/f, 256s/f)
+through corresponding built-in functions of the form
+\mbox{\texttt{verifySLHDSA\_SHA2\_}\textit{param}}.
+
+SLH-DSA verification composes three sub-algorithms:
+\begin{enumerate}[nosep]
+  \item \textbf{FORS} (Forest of Random Subsets): A few-time signature
+    scheme that hashes a secret value and verifies a Merkle authentication
+    path for each of $k$ trees of height $a$. The $k$ tree roots are
+    compressed into a FORS public key.
+  \item \textbf{WOTS+} (Winternitz OTS): Used at each hypertree layer
+    to sign the previous layer's root. Each WOTS+ instance uses
+    \emph{tweakable hashing} with domain separation via a 22-byte
+    compressed address (ADRS).
+  \item \textbf{Hypertree}: A chain of $d$ XMSS trees, each containing
+    a Merkle tree with WOTS+ leaves. Verification walks $d$ layers,
+    each verifying a WOTS+ signature and a Merkle authentication path.
+\end{enumerate}
+
+Unlike standalone WOTS+ which uses plain SHA-256, every hash operation in
+SLH-DSA is a \emph{tweakable hash}:
+\[
+  T(\text{PK.seed}, \text{ADRS}, M) =
+  \text{trunc}_n\!\left(\text{SHA-256}(\text{PK.seed} \| \text{pad} \| \text{ADRS}_c \| M)\right)
+\]
+where $\text{ADRS}_c$ is a 22-byte compressed address providing domain
+separation between different hash invocations.
+
+\begin{table}[h]
+\centering
+\caption{SLH-DSA SHA-256 parameter sets}
+\label{tab:slhdsa}
+\begin{tabular}{@{}lccccccc@{}}
+\toprule
+Parameter set & $n$ & $d$ & $h'$ & $k$ & $a$ & Sig size & Script size \\
+\midrule
+128s & 16 & 7 & 9 & 14 & 12 & 7,856~B & 203~KB$^\dagger$ \\
+128f & 16 & 22 & 3 & 33 & 6 & 17,088~B & $\sim$310~KB \\
+192s & 24 & 7 & 9 & 17 & 14 & 16,224~B & $\sim$310~KB \\
+192f & 24 & 22 & 3 & 33 & 8 & 35,664~B & $\sim$410~KB \\
+256s & 32 & 8 & 8 & 22 & 14 & 29,792~B & $\sim$410~KB \\
+256f & 32 & 17 & 4 & 35 & 8 & 49,856~B & $\sim$620~KB \\
+\bottomrule
+\end{tabular}
+\vspace{0.3em}
+\footnotesize{$^\dagger$Measured from conformance test golden file.
+  Other values estimated by parameter scaling.}
+\end{table}
+
+The script sizes are substantially larger than WOTS+ ($\sim$10~KB)
+due to the three-tier tree structure and per-hash domain separation.
+The measured SHA2-128s script (203~KB) is approximately $5\times$ larger
+than the earlier estimates, primarily because the tweakable hash
+operations each require a 64-byte padded seed prefix, inflating push
+data volume. All parameter sets remain well within Bitcoin SV's 10~MB
+script size limit.
+
+%=============================================================================
+\section{Empirical Evaluation}
+\label{sec:evaluation}
+%=============================================================================
+
+This section presents empirical measurements of the \tsop{} compiler across
+its test corpus, covering cross-compiler conformance, script sizes, and
+test suite structure.
+
+%-----------------------------------------------------------------------------
+\subsection{Test Corpus}
+\label{sec:eval-corpus}
+%-----------------------------------------------------------------------------
+
+The \tsop{} test suite comprises three tiers of validation:
+
+\begin{enumerate}[nosep]
+  \item \textbf{Per-pass unit tests} (11 test files): Each compiler pass has
+    dedicated tests covering parsing, validation, type checking, ANF lowering,
+    stack lowering, emission, optimization, and multi-format dispatch.
+  \item \textbf{Contract-level tests} ($\sim$50 contract implementations):
+    12 base contracts implemented across up to 5 source formats, each with
+    business-logic tests exercising constructor initialization, method calls,
+    state transitions, and assertion behavior.
+  \item \textbf{Cross-compiler conformance tests} (9 golden-file tests +
+    dynamic discovery): The conformance suite compiles each test case through
+    all three compiler implementations and compares the output against a
+    golden \texttt{expected-script.hex} file, requiring byte-identical results.
+\end{enumerate}
+
+Table~\ref{tab:corpus} summarizes the test corpus by source format.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Source Format} & \textbf{Contracts} & \textbf{Compilers} & \textbf{Status} \\
+\midrule
+TypeScript (\texttt{.tsop.ts}) & 12 & TS, Go, Rust & Stable \\
+Solidity-like (\texttt{.tsop.sol}) & 9 & TS, Go, Rust & Experimental \\
+Move-style (\texttt{.tsop.move}) & 9 & TS, Go, Rust & Experimental \\
+Go (\texttt{.tsop.go}) & 10 & Go & Experimental \\
+Rust (\texttt{.tsop.rs}) & 10 & Rust & Experimental \\
+\midrule
+\textbf{Total} & \textbf{50} & & \\
+\bottomrule
+\end{tabular}
+\caption{Test corpus: contract implementations by source format.}
+\label{tab:corpus}
+\end{table}
+
+%-----------------------------------------------------------------------------
+\subsection{Cross-Compiler Conformance Results}
+\label{sec:eval-conformance}
+%-----------------------------------------------------------------------------
+
+The conformance suite tests 9 golden-file cases and dynamically discovers
+all example contracts for cross-compilation. Table~\ref{tab:conformance}
+lists the golden-file test cases with their output sizes.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}lrl@{}}
+\toprule
+\textbf{Test Case} & \textbf{Script Size (bytes)} & \textbf{Category} \\
+\midrule
+basic-p2pkh & 5 & Signature verification \\
+if-else & 18 & Conditional branching \\
+multi-method & 24 & Method dispatch \\
+boolean-logic & 31 & Boolean operators \\
+arithmetic & 35 & Integer arithmetic \\
+bounded-loop & 51 & Loop unrolling \\
+stateful & 129 & OP\_PUSH\_TX + state continuation \\
+post-quantum-wots & 10,530 & WOTS+ hash-based signature \\
+post-quantum-slhdsa & 207,874 & SLH-DSA (SHA2-128s) \\
+\bottomrule
+\end{tabular}
+\caption{Conformance test cases with byte-identical output across
+  all three compiler implementations (TypeScript, Go, Rust).}
+\label{tab:conformance}
+\end{table}
+
+All 9 conformance tests produce byte-identical Bitcoin Script across the
+TypeScript, Go, and Rust compilers. The cross-compiler test suite additionally
+compiles all 12 TypeScript example contracts through both the TS and Go
+pipelines, verifying identical hex output.
+
+%-----------------------------------------------------------------------------
+\subsection{Script Size Measurements}
+\label{sec:eval-sizes}
+%-----------------------------------------------------------------------------
+
+Table~\ref{tab:sizes} reports compiled script sizes for the full example
+contract suite.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}lrrl@{}}
+\toprule
+\textbf{Contract} & \textbf{Size (B)} & \textbf{Opcodes} & \textbf{Notes} \\
+\midrule
+P2PKH & 5 & 5 & Stateless, 1 method \\
+Escrow & 30 & 30 & Stateless, multi-sig \\
+OraclePriceFeed & 41 & 38 & Rabin oracle \\
+CovenantVault & 42 & 9 & Covenant pattern \\
+NFTExample & 112 & 44 & Stateful, multi-output \\
+Counter & 130 & 60 & Stateful, state continuation \\
+Auction & 142 & 74 & Stateful, multi-method \\
+FungibleTokenExample & 259 & 154 & Stateful, multi-output \\
+FunctionPatterns & 373 & 231 & Private method inlining \\
+MathDemo & 2,548 & 2,215 & Extended math builtins \\
+PostQuantumWallet & 10,530 & 10,461 & WOTS+ (67 chains) \\
+\bottomrule
+\end{tabular}
+\caption{Compiled script sizes for the example contract suite.
+  All contracts except PostQuantumWallet produce byte-identical output
+  across the TS and Go compilers.}
+\label{tab:sizes}
+\end{table}
+
+Several observations emerge from these measurements:
+
+\begin{itemize}[nosep]
+  \item \textbf{Typical contracts are compact.} The eight contracts
+    representing common smart contract patterns (P2PKH through
+    FungibleTokenExample) range from 5 to 259 bytes, well within
+    Bitcoin SV's standard transaction limits.
+  \item \textbf{Loop unrolling dominates size.} \texttt{MathDemo}
+    exercises math builtins that expand into multi-opcode sequences
+    (\texttt{sqrt}: 16 Newton iterations, \texttt{pow}: 32 conditional
+    multiplies, \texttt{gcd}: 256 Euclidean iterations), resulting in
+    2.5~KB of script. This illustrates the size--generality tradeoff
+    inherent in full loop unrolling.
+  \item \textbf{Post-quantum scripts are large but feasible.}
+    \texttt{PostQuantumWallet} at 10.5~KB is 2--3 orders of magnitude
+    larger than typical contracts, but remains well under Bitcoin SV's
+    10~MB script size limit.
+  \item \textbf{Opcode-to-byte ratio varies.} Contracts with many push
+    data operations (CovenantVault, NFTExample) have lower opcode-to-byte
+    ratios due to inline data, while computation-heavy contracts
+    (MathDemo, PostQuantumWallet) have ratios near 1:1.
+\end{itemize}
+
+%-----------------------------------------------------------------------------
+\subsection{Test Infrastructure}
+\label{sec:eval-infra}
+%-----------------------------------------------------------------------------
+
+The CI pipeline validates all three compilers independently:
+
+\begin{enumerate}[nosep]
+  \item \textbf{TypeScript}: \texttt{pnpm test} runs all package-level
+    unit tests and example contract tests via vitest.
+  \item \textbf{Go}: \texttt{go test ./...} with race detection runs
+    compiler tests and native Go contract tests.
+  \item \textbf{Rust}: \texttt{cargo test} runs compiler tests and
+    native Rust contract tests.
+  \item \textbf{Conformance}: A dedicated job (dependent on all three)
+    compiles each conformance test through Go and Rust, comparing hex
+    output against golden files.
+\end{enumerate}
+
+In addition to compilation testing, the BSV SDK script execution tests
+(\texttt{ScriptExecutionContract}) compile contracts with baked constructor
+arguments and execute them through the \texttt{@bsv/sdk} \texttt{Spend}
+class, validating that the generated Bitcoin Script executes correctly in
+a production-grade script interpreter.
+
+%=============================================================================
+\section{Limitations and Threats to Validity}
+\label{sec:limitations}
+%=============================================================================
+
+We identify the following limitations of the current work.
+
+\paragraph{Proof sketches, not mechanized proofs.}
+The correctness properties in Section~\ref{sec:correctness} are stated as
+theorems with proof sketches, not as machine-checked proofs in a proof
+assistant (e.g., Coq or Lean). In particular, the type safety theorem
+(Theorem~\ref{thm:type-safety}) relies on an informal argument about
+type-state propagation through the stack lowerer. A mechanized
+formalization would strengthen these claims but is beyond the current scope.
+
+\paragraph{Conformance is empirical, not proven.}
+Cross-compiler conformance (Theorem~\ref{thm:conformance}) is validated
+by a test suite of 9 golden-file cases plus dynamic discovery over 12
+example contracts. While no discrepancies have been observed, the test
+corpus does not exhaustively cover all language features or their
+combinations. Corner cases involving complex interactions between loop
+unrolling, conditional branches, and property updates may exist that
+are not covered by the current suite.
+
+\paragraph{Limited affine tracking.}
+The affine type discipline applies only to two types
+(\texttt{SigHashPreimage} and \texttt{Sig}). This is a targeted
+constraint rather than a general linear or affine type system. The
+type checker uses a single shared consumption set across conditional
+branches: if an affine value is consumed in the then-branch, the
+else-branch will reject it as already consumed. This is overly
+conservative compared to a split-environment affine system (which would
+permit consumption in both branches, since exactly one executes at
+runtime), but remains sound---it rejects some valid programs rather than
+accepting invalid ones. Additionally, affine tracking only applies when
+values are passed as identifier arguments to consuming functions, not
+to arbitrary expressions.
+
+\paragraph{Loop unrolling size overhead.}
+Full loop unrolling is the only compilation strategy for bounded loops,
+producing $O(n)$ copies of the loop body. For contracts with large
+iteration counts or deeply nested loops, this can result in script sizes
+that are orders of magnitude larger than the source code. Partial
+unrolling or runtime loop constructs (which would require Bitcoin Script
+extensions) could mitigate this, but are not currently supported.
+
+\paragraph{Post-quantum features are experimental.}
+Both WOTS+ and SLH-DSA script generation are implemented across all three
+compilers (TypeScript, Go, Rust) and produce byte-identical output in
+conformance testing. However, the resulting scripts are large:
+SLH-DSA SHA2-128s generates approximately 203~KB of Bitcoin Script
+(Table~\ref{tab:conformance}), and larger parameter sets produce
+proportionally larger scripts. While these sizes are within Bitcoin SV's
+10~MB limit, the practical deployment cost of such large scripts remains
+to be evaluated. The post-quantum APIs are experimental and may change in
+future releases.
+
+\paragraph{Go and Rust frontends are single-compiler.}
+The Go frontend (\texttt{.tsop.go}) is supported only by the Go compiler,
+and the Rust frontend (\texttt{.tsop.rs}) only by the Rust compiler.
+Cross-compiler conformance for these formats would require implementing
+Go and Rust parsers in all three compiler codebases, which is not
+currently planned.
+
+\paragraph{No formal Bitcoin Script semantics.}
+The correctness arguments assume but do not formalize the semantics of
+Bitcoin Script itself. The compiler targets the BSV node's interpreter
+behavior as the de facto specification. Discrepancies between node
+implementations, or future opcode semantics changes, could invalidate
+the compiled output without changes to the \tsop{} compiler.
 
 %=============================================================================
 \section{Related Work}
@@ -1505,7 +1841,8 @@ six-phase pipeline. The key contributions are:
     producing optimal stack manipulation sequences.
   \item \textbf{Static guarantees} of type safety, termination, determinism,
     and UTXO safety through the combination of a restricted type system,
-    bounded iteration, affine resource tracking, and static stack analysis.
+    bounded iteration, targeted affine consumption tracking, and static
+    stack analysis.
   \item \textbf{Post-quantum signature verification} in Bitcoin Script
     via WOTS+, demonstrating that non-trivial cryptographic protocols can
     be compiled from high-level specifications.
@@ -1518,6 +1855,12 @@ multi-frontend design validates that Bitcoin Script's expressiveness is
 independent of surface syntax: the same computational patterns can be
 expressed naturally in TypeScript, Solidity, Move, Go, and Rust idioms,
 all converging onto identical Bitcoin Script bytecode.
+
+As discussed in Section~\ref{sec:limitations}, several avenues remain for
+future work: mechanizing the correctness proofs, expanding the conformance
+test corpus to achieve stronger coverage guarantees, completing the SLH-DSA
+Bitcoin Script codegen, and extending cross-compiler conformance to the Go
+and Rust frontend formats.
 
 %=============================================================================
 % References

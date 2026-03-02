@@ -620,6 +620,48 @@ cargo test --test counter -- --nocapture  # Verbose output
 
 ---
 
+## Post-Quantum Signature Testing (Experimental)
+
+Post-quantum signature verification (WOTS+ and SLH-DSA) has dedicated testing at three levels:
+
+### Reference Implementation Tests
+
+Pure TypeScript implementations in `packages/tsop-testing/src/crypto/`:
+
+- `wots.ts` — WOTS+ keygen, sign, verify (18 unit tests)
+- `slh-dsa.ts` — SLH-DSA for all 6 SHA-256 parameter sets (9 unit tests)
+
+```bash
+npx vitest run packages/tsop-testing/src/crypto/__tests__/
+```
+
+### Interpreter Tests
+
+The interpreter performs real PQ verification (not mocked). Test contracts call `verifyWOTS` or `verifySLHDSA_SHA2_*` and the interpreter executes the actual algorithm:
+
+```typescript
+import { wotsKeygen, wotsSign } from '../crypto/wots.js';
+const { sk, pk } = wotsKeygen(seed);
+const sig = wotsSign(msg, sk);
+const contract = TestContract.fromSource(source, { pubkey: toHex(pk) });
+expect(contract.call('spend', { msg: toHex(msg), sig: toHex(sig) }).success).toBe(true);
+```
+
+### Dual-Oracle Tests
+
+These validate that the compiled Bitcoin Script produces the same result as the interpreter:
+
+- `post-quantum-dual-oracle.test.ts` — WOTS+ (10 KB script)
+- `post-quantum-slh-dual-oracle.test.ts` — SLH-DSA-128s (203 KB script)
+
+Both paths must agree on valid signatures (accept) and invalid signatures (reject).
+
+### Conformance Golden Files
+
+`conformance/tests/post-quantum-wots/` and `conformance/tests/post-quantum-slhdsa/` contain golden `expected-script.hex` files. All three compilers (TS, Go, Rust) must produce byte-identical output.
+
+---
+
 ## Conformance Testing Across Compilers
 
 The conformance suite in `conformance/` ensures all TSOP compilers (TypeScript, Go, Rust) produce identical output.
@@ -689,6 +731,7 @@ TSOP employs a layered testing strategy:
 | **Property-based fuzzing** | Random valid programs compile correctly | fast-check generators |
 | **Differential fuzzing** | Compiler + VM agree with interpreter | `conformance/fuzzer` |
 | **Cross-compiler conformance** | All compilers produce identical output | Golden-file SHA-256 comparison |
+| **Post-quantum dual-oracle** | Compiled PQ script matches interpreter | `TestContract` vs `ScriptExecutionContract` |
 
 The layers build on each other. Unit tests catch obvious regressions. VM tests verify that the compiled script actually works. The interpreter oracle catches subtle semantic bugs. Fuzzing searches for edge cases that hand-written tests miss. Conformance testing ensures the multi-compiler strategy holds together.
 

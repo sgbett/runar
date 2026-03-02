@@ -140,6 +140,21 @@ func VerifyRabinSig(msg ByteString, sig RabinSig, padding ByteString, pk RabinPu
 	return true
 }
 
+// VerifyWOTS always returns true in test mode.
+// Real WOTS+ verification happens in compiled Bitcoin Script.
+func VerifyWOTS(msg ByteString, sig ByteString, pubkey ByteString) bool {
+	return true
+}
+
+// SLH-DSA (SPHINCS+) SHA-256 variants — all return true in test mode.
+
+func VerifySLHDSA_SHA2_128s(msg ByteString, sig ByteString, pubkey ByteString) bool { return true }
+func VerifySLHDSA_SHA2_128f(msg ByteString, sig ByteString, pubkey ByteString) bool { return true }
+func VerifySLHDSA_SHA2_192s(msg ByteString, sig ByteString, pubkey ByteString) bool { return true }
+func VerifySLHDSA_SHA2_192f(msg ByteString, sig ByteString, pubkey ByteString) bool { return true }
+func VerifySLHDSA_SHA2_256s(msg ByteString, sig ByteString, pubkey ByteString) bool { return true }
+func VerifySLHDSA_SHA2_256f(msg ByteString, sig ByteString, pubkey ByteString) bool { return true }
+
 // ---------------------------------------------------------------------------
 // Real hash functions
 // ---------------------------------------------------------------------------

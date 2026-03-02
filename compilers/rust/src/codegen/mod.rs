@@ -8,4 +8,5 @@
 pub mod emit;
 pub mod opcodes;
 pub mod optimizer;
+pub mod slh_dsa;
 pub mod stack;
