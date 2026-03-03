@@ -485,8 +485,8 @@ func TestStateRoundtrip_MixedTypes(t *testing.T) {
 func TestStateEncode_Zero(t *testing.T) {
 	fields := []StateField{{Name: "v", Type: "bigint", Index: 0}}
 	hex := SerializeState(fields, map[string]interface{}{"v": int64(0)})
-	if hex != "0100" {
-		t.Errorf("expected 0100, got %s", hex)
+	if hex != "00" {
+		t.Errorf("expected 00, got %s", hex)
 	}
 }
 
@@ -527,16 +527,16 @@ func TestStateEncode_Neg128(t *testing.T) {
 func TestStateEncode_BoolTrue(t *testing.T) {
 	fields := []StateField{{Name: "flag", Type: "bool", Index: 0}}
 	hex := SerializeState(fields, map[string]interface{}{"flag": true})
-	if hex != "0151" {
-		t.Errorf("expected 0151, got %s", hex)
+	if hex != "51" {
+		t.Errorf("expected 51, got %s", hex)
 	}
 }
 
 func TestStateEncode_BoolFalse(t *testing.T) {
 	fields := []StateField{{Name: "flag", Type: "bool", Index: 0}}
 	hex := SerializeState(fields, map[string]interface{}{"flag": false})
-	if hex != "0100" {
-		t.Errorf("expected 0100, got %s", hex)
+	if hex != "00" {
+		t.Errorf("expected 00, got %s", hex)
 	}
 }
 
@@ -1292,8 +1292,8 @@ func TestBuildUnlockingScript_BoolTrue(t *testing.T) {
 	})
 
 	c := NewRunarContract(artifact, nil)
-	if c.BuildUnlockingScript("check", []interface{}{true}) != "0151" {
-		t.Error("true should encode as 0151")
+	if c.BuildUnlockingScript("check", []interface{}{true}) != "51" {
+		t.Error("true should encode as 51")
 	}
 }
 
@@ -1306,8 +1306,8 @@ func TestBuildUnlockingScript_BoolFalse(t *testing.T) {
 	})
 
 	c := NewRunarContract(artifact, nil)
-	if c.BuildUnlockingScript("check", []interface{}{false}) != "0100" {
-		t.Error("false should encode as 0100")
+	if c.BuildUnlockingScript("check", []interface{}{false}) != "00" {
+		t.Error("false should encode as 00")
 	}
 }
 
@@ -1851,7 +1851,7 @@ func TestMockSigner_GetPublicKey(t *testing.T) {
 
 func TestMockSigner_Sign(t *testing.T) {
 	signer := NewMockSigner("", "")
-	sig, err := signer.Sign("aabb", 0, "51", 10000)
+	sig, err := signer.Sign("aabb", 0, "51", 10000, nil)
 	if err != nil {
 		t.Fatalf("Sign error: %v", err)
 	}

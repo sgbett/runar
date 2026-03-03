@@ -17,8 +17,9 @@ type Signer interface {
 	// inputIndex is the index of the input being signed.
 	// subscript is the locking script of the UTXO being spent (hex).
 	// satoshis is the satoshi value of the UTXO being spent.
+	// sigHashType is the sighash flags (nil defaults to ALL|FORKID = 0x41).
 	// Returns the DER-encoded signature with sighash byte appended, hex-encoded.
-	Sign(txHex string, inputIndex int, subscript string, satoshis int64) (string, error)
+	Sign(txHex string, inputIndex int, subscript string, satoshis int64, sigHashType *int) (string, error)
 }
 
 // ---------------------------------------------------------------------------
@@ -59,7 +60,7 @@ func (s *MockSignerImpl) GetAddress() (string, error) {
 }
 
 // Sign returns a mock DER-encoded signature (72 zero bytes as hex).
-func (s *MockSignerImpl) Sign(txHex string, inputIndex int, subscript string, satoshis int64) (string, error) {
+func (s *MockSignerImpl) Sign(txHex string, inputIndex int, subscript string, satoshis int64, sigHashType *int) (string, error) {
 	// Return a deterministic 72-byte mock signature (all zeros) + sighash byte 0x41
 	return repeatHex("00", 71) + "41", nil
 }
@@ -69,7 +70,7 @@ func (s *MockSignerImpl) Sign(txHex string, inputIndex int, subscript string, sa
 // ---------------------------------------------------------------------------
 
 // SignFunc is a callback function for signing.
-type SignFunc func(txHex string, inputIndex int, subscript string, satoshis int64) (string, error)
+type SignFunc func(txHex string, inputIndex int, subscript string, satoshis int64, sigHashType *int) (string, error)
 
 // ExternalSigner wraps a callback function as a Signer.
 type ExternalSigner struct {
@@ -98,8 +99,8 @@ func (s *ExternalSigner) GetAddress() (string, error) {
 }
 
 // Sign delegates to the callback function.
-func (s *ExternalSigner) Sign(txHex string, inputIndex int, subscript string, satoshis int64) (string, error) {
-	return s.signFn(txHex, inputIndex, subscript, satoshis)
+func (s *ExternalSigner) Sign(txHex string, inputIndex int, subscript string, satoshis int64, sigHashType *int) (string, error) {
+	return s.signFn(txHex, inputIndex, subscript, satoshis, sigHashType)
 }
 
 // ---------------------------------------------------------------------------
