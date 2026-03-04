@@ -21,37 +21,43 @@ Each test case is a directory containing:
 ```
 tests/
 +-- basic-p2pkh/
-|   +-- basic-p2pkh.runar.ts      # Source contract
+|   +-- basic-p2pkh.runar.ts      # Source contract (TypeScript)
+|   +-- basic-p2pkh.runar.sol     # Source contract (Solidity-like)
+|   +-- basic-p2pkh.runar.move    # Source contract (Move-style)
+|   +-- basic-p2pkh.runar.go      # Source contract (Go)
+|   +-- basic-p2pkh.runar.rs      # Source contract (Rust)
+|   +-- basic-p2pkh.runar.json    # Source contract (JSON AST)
 |   +-- expected-ir.json          # Expected ANF IR (canonical JSON)
 |   +-- expected-script.hex       # Expected compiled script (hex string)
 |
 +-- arithmetic/
 |   +-- arithmetic.runar.ts
+|   +-- arithmetic.runar.sol      # (+ .move, .go, .rs, .json variants)
 |   +-- expected-ir.json
 |   +-- expected-script.hex
 |
 +-- boolean-logic/
-|   +-- boolean-logic.runar.ts
+|   +-- boolean-logic.runar.ts    # (+ multi-format variants)
 |   +-- expected-ir.json
 |   +-- expected-script.hex
 |
 +-- if-else/
-|   +-- if-else.runar.ts
+|   +-- if-else.runar.ts          # (+ multi-format variants)
 |   +-- expected-ir.json
 |   +-- expected-script.hex
 |
 +-- bounded-loop/
-|   +-- bounded-loop.runar.ts
+|   +-- bounded-loop.runar.ts     # (+ multi-format variants)
 |   +-- expected-ir.json
 |   +-- expected-script.hex
 |
 +-- multi-method/
-|   +-- multi-method.runar.ts
+|   +-- multi-method.runar.ts     # (+ multi-format variants)
 |   +-- expected-ir.json
 |   +-- expected-script.hex
 |
 +-- stateful/
-|   +-- stateful.runar.ts
+|   +-- stateful.runar.ts         # (+ multi-format variants)
 |   +-- expected-ir.json
 |   +-- expected-script.hex
 |
@@ -65,6 +71,8 @@ tests/
     +-- expected-ir.json
     +-- expected-script.hex
 ```
+
+> **Note:** Most test directories also contain multi-format source variants (`.runar.sol`, `.runar.move`, `.runar.go`, `.runar.rs`, `.runar.json`). All format variants must produce the same ANF IR and script output. The post-quantum tests currently only have `.runar.ts` sources.
 
 ### File Roles
 
@@ -130,8 +138,9 @@ mkdir conformance/tests/my-new-test
 3. Generate the expected IR using the reference compiler:
 
 ```bash
-runar compile conformance/tests/my-new-test/my-new-test.runar.ts --ir --canonical
-# Copy the canonical ANF IR to expected-ir.json
+runar compile conformance/tests/my-new-test/my-new-test.runar.ts --ir
+# Canonical JSON serialization (RFC 8785) is applied automatically.
+# Copy the ANF IR output to expected-ir.json
 ```
 
 4. Optionally generate the expected script:

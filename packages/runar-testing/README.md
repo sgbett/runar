@@ -41,6 +41,15 @@ The package exports the following from `runar-testing`:
 | `expectScriptFailure` | function | Assert script fails |
 | `expectStackTop` | function | Assert specific value on stack top |
 | `expectStackTopNum` | function | Assert specific numeric value on stack top |
+| `VMResult` | type | VM execution result (success, stack, altStack, error, opsExecuted, maxStackDepth) |
+| `VMOptions` | type | VM configuration options (maxOps, maxStackSize, maxScriptSize, flags, checkSigCallback) |
+| `VMFlags` | type | VM behavioural flags (enableSighashForkId, enableOpCodes, strictEncoding) |
+| `RunarValue` | type | Interpreter value type |
+| `InterpreterResult` | type | Interpreter execution result |
+| `TestCallResult` | type | Result from `TestContract.call()` |
+| `OutputSnapshot` | type | Snapshot of a transaction output |
+| `MockPreimage` | type | Mock sighash preimage for testing |
+| `ScriptExecResult` | type | Result from `ScriptExecutionContract` execution |
 
 ---
 
@@ -56,9 +65,12 @@ import { ScriptVM, hexToBytes } from 'runar-testing';
 const vm = new ScriptVM();
 const result = vm.execute(hexToBytes(unlockingScriptHex), hexToBytes(lockingScriptHex));
 
-console.log(result.success);  // true if stack top is truthy
-console.log(result.stack);    // stack state after execution (Uint8Array[])
-console.log(result.error);    // error message if script failed
+console.log(result.success);        // true if stack top is truthy
+console.log(result.stack);          // stack state after execution (Uint8Array[])
+console.log(result.error);          // error message if script failed
+console.log(result.altStack);       // alt stack state after execution (Uint8Array[])
+console.log(result.opsExecuted);    // number of non-push opcodes executed
+console.log(result.maxStackDepth);  // peak stack depth during execution
 ```
 
 ### VM Options

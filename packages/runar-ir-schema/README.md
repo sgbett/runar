@@ -70,7 +70,7 @@ All expressions use a discriminated union on the `kind` field:
 
 | Kind | Fields | Description |
 |---|---|---|
-| `variable_decl` | `name`, `type?`, `init` | `const x = ...` or `let x = ...` |
+| `variable_decl` | `name`, `type?`, `init`, `mutable` | `const x = ...` (`mutable: false`) or `let x = ...` (`mutable: true`) |
 | `assignment` | `target`, `value` | `x = ...` or `this.x = ...` |
 | `if_statement` | `condition`, `then`, `else?` | Conditional |
 | `for_statement` | `init`, `condition`, `update`, `body` | Bounded loop |

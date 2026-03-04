@@ -258,7 +258,7 @@ The compiler is structured as six small, composable nanopass transforms. Each pa
 | 5 | **Stack Lower** | ANF IR | Stack IR |
 | 6 | **Emit** | Stack IR | Bitcoin Script |
 
-The optimizer (constant folding + dead binding elimination) runs between passes 4 and 5.
+The constant folding optimizer (+ dead binding elimination) is available between passes 4 and 5 but is disabled by default to preserve ANF conformance. The peephole optimizer runs between passes 5 and 6 (always enabled).
 
 ### Multi-Compiler Strategy
 
@@ -321,7 +321,7 @@ docs/                 # Documentation + format guides
 ### Prerequisites
 
 - **Node.js** >= 20, **pnpm** 9.15+
-- **Go** 1.26+ (for Go compiler and Go contract tests)
+- **Go** 1.22+ (for Go compiler and Go contract tests)
 - **Rust** 1.75+ (for Rust compiler and Rust contract tests)
 
 ### Build & Test

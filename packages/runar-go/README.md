@@ -215,7 +215,7 @@ State is stored as a suffix of the locking script:
 Type-specific encoding:
 - `int`/`bigint`: OP_0 for zero, otherwise minimally-encoded Script integers (with sign byte)
 - `bool`: OP_0 (`00`) for false, OP_1 (`51`) for true
-- `bytes`/`ByteString`/`PubKey`/`Addr`/`Sha256`: direct pushdata
+- `bytes`/`ByteString`/`PubKey`/`Addr`/`Ripemd160`/`Sha256`: direct pushdata
 
 ---
 
@@ -224,18 +224,24 @@ Type-specific encoding:
 The SDK exports lower-level functions for custom transaction construction:
 
 ```go
-// Select UTXOs (largest-first strategy, optional feeRate in sat/byte)
-selected := runar.SelectUtxos(utxos, targetSatoshis, lockingScriptByteLen, feeRate)
+// Select UTXOs (largest-first strategy)
+// feeRate is variadic ...int64; defaults to 1 sat/byte when omitted
+selected := runar.SelectUtxos(utxos, targetSatoshis, lockingScriptByteLen)           // uses default 1 sat/byte
+selected := runar.SelectUtxos(utxos, targetSatoshis, lockingScriptByteLen, feeRate)  // explicit fee rate
 
-// Estimate deployment fee (optional feeRate in sat/byte, default 1)
-fee := runar.EstimateDeployFee(numInputs, lockingScriptByteLen, feeRate)
+// Estimate deployment fee
+// feeRate is variadic ...int64; defaults to 1 sat/byte when omitted
+fee := runar.EstimateDeployFee(numInputs, lockingScriptByteLen)           // uses default 1 sat/byte
+fee := runar.EstimateDeployFee(numInputs, lockingScriptByteLen, feeRate)  // explicit fee rate
 
-// Build an unsigned deploy transaction (optional feeRate in sat/byte)
+// Build an unsigned deploy transaction
+// feeRate is variadic ...int64; defaults to 1 sat/byte when omitted
 txHex, inputCount, err := runar.BuildDeployTransaction(
     lockingScript, utxos, satoshis, changeAddress, changeScript, feeRate,
 )
 
-// Build a method call transaction (optional feeRate in sat/byte)
+// Build a method call transaction
+// feeRate is variadic ...int64; defaults to 1 sat/byte when omitted
 txHex, inputCount := runar.BuildCallTransaction(
     currentUtxo, unlockingScript, newLockingScript, newSatoshis,
     changeAddress, changeScript, additionalUtxos, feeRate,

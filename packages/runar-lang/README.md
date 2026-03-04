@@ -115,15 +115,15 @@ All domain types are branded TypeScript types. At runtime they are strings (hex-
 
 ```
         ByteString
-       /    |     \      \         \            \
-   PubKey  Sig  Sha256  Ripemd160  Addr  SigHashPreimage
+       /    |     \      \         \            \           \
+   PubKey  Sig  Sha256  Ripemd160  Addr  SigHashPreimage  OpCodeType
                                     ^
                                     | (alias)
                                  Ripemd160
 
         bigint
-       /      \
-  RabinSig  RabinPubKey
+       /      \       \
+  RabinSig  RabinPubKey  SigHashType
 ```
 
 Domain types widen to their parent implicitly: you can pass a `PubKey` where `ByteString` is expected. Narrowing requires an explicit constructor call.
@@ -193,7 +193,7 @@ Supported lengths: 0-16 have direct tuple definitions. Lengths >16 use a recursi
 
 | Function | Signature | Description |
 |---|---|---|
-| `assert` | `(cond: boolean, msg?: string) => void` | Verify condition or fail script |
+| `assert` | `(cond: boolean, msg?: string) => asserts cond` | Verify condition or fail script |
 
 ### Compiler Intrinsics (Class Methods)
 

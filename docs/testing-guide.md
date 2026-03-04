@@ -163,21 +163,26 @@ The reference interpreter (`RunarInterpreter`) evaluates ANF IR directly, withou
 
 ```typescript
 import { RunarInterpreter } from 'runar-testing';
-import type { ANFProgram } from 'runar-ir-schema';
+import type { RunarValue } from 'runar-testing';
+import { compile } from 'runar-compiler';
 
-// Load the ANF IR (from a compiled artifact with --ir flag)
-const anfProgram: ANFProgram = artifact.ir;
+// Compile the contract to get the AST (ContractNode)
+const result = compile(source, { fileName: 'P2PKH.runar.ts' });
+const contract = result.artifact!.ast; // ContractNode
 
-const interpreter = new RunarInterpreter(anfProgram);
-
-// Evaluate a method with arguments
-const result = interpreter.evaluate('unlock', {
-  sig: '3044022...',
-  pubKey: '02abc...',
+// Create interpreter with property values (constructor args)
+const interpreter = new RunarInterpreter({
+  pubKeyHash: { kind: 'bytes', value: hexToBytes('89abcdef...') },
 });
 
-// result.success: boolean
-// result.value: the final value (for private methods)
+// Execute a method with arguments
+const interpResult = interpreter.executeMethod(contract, 'unlock', {
+  sig: { kind: 'bytes', value: hexToBytes('3044022...') },
+  pubKey: { kind: 'bytes', value: hexToBytes('02abc...') },
+});
+
+// interpResult.success: boolean
+// interpResult.returnValue: the final value (for private methods)
 ```
 
 ### Comparing Interpreter and VM Results
@@ -185,7 +190,10 @@ const result = interpreter.evaluate('unlock', {
 ```typescript
 it('compiler and interpreter agree', () => {
   const vmResult = contract.call('unlock', { sig, pubKey });
-  const interpResult = interpreter.evaluate('unlock', { sig, pubKey });
+  const interpResult = interpreter.executeMethod(contractNode, 'unlock', {
+    sig: { kind: 'bytes', value: hexToBytes(sig) },
+    pubKey: { kind: 'bytes', value: hexToBytes(pubKey) },
+  });
 
   // Both should agree on success/failure
   expect(vmResult.success).toBe(interpResult.success);

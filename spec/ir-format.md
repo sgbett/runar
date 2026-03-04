@@ -37,7 +37,8 @@ ANFProgram = {
 ANFProperty = {
     name: string,                 // Property name
     type: ANFType,                // Property type
-    readonly: boolean             // true = immutable, false = stateful
+    readonly: boolean,            // true = immutable, false = stateful
+    initialValue?: string | bigint | boolean  // Optional initial value for the property
 }
 ```
 
@@ -176,8 +177,8 @@ Supported operators:
 | `"<="` | bigint | Less than or equal |
 | `">"` | bigint | Greater than |
 | `">="` | bigint | Greater than or equal |
-| `"&&"` | boolean | Logical AND |
-| `"\|\|"` | boolean | Logical OR |
+| `"&&"` | boolean | Logical AND (eager; lowered to `OP_BOOLAND`, not short-circuit) |
+| `"\|\|"` | boolean | Logical OR (eager; lowered to `OP_BOOLOR`, not short-circuit) |
 | `"&"` | bigint | Bitwise AND |
 | `"\|"` | bigint | Bitwise OR |
 | `"^"` | bigint | Bitwise XOR |

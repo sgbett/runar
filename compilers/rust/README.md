@@ -79,8 +79,9 @@ runar-compiler-rust --ir input-anf.json --hex
 # Output only the script ASM
 runar-compiler-rust --ir input-anf.json --asm
 
-# Write output to a file
+# Write output to a file (-o is shorthand for --output)
 runar-compiler-rust --ir input-anf.json --output artifact.json
+runar-compiler-rust --ir input-anf.json -o artifact.json
 ```
 
 ### Phase 2: Full Compilation
@@ -95,8 +96,9 @@ runar-compiler-rust --source MyContract.runar.ts --hex
 # Dump ANF IR for conformance checking
 runar-compiler-rust --source MyContract.runar.ts --emit-ir
 
-# Write output to a file
+# Write output to a file (-o is shorthand for --output)
 runar-compiler-rust --source MyContract.runar.ts --output artifacts/MyContract.json
+runar-compiler-rust --source MyContract.runar.ts -o artifacts/MyContract.json
 ```
 
 ---

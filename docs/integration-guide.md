@@ -654,7 +654,7 @@ Built-in implementations: `WhatsOnChainProvider` (production), `MockProvider` (t
 interface Signer {
   getPublicKey(): Promise<string>;
   getAddress(): Promise<string>;
-  sign(txHex: string, inputIndex: number, subscript: string, satoshis: number): Promise<string>;
+  sign(txHex: string, inputIndex: number, subscript: string, satoshis: number, sigHashType?: number): Promise<string>;
 }
 ```
 

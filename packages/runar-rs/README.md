@@ -350,7 +350,7 @@ let (tx_hex, input_count) = build_deploy_transaction(
 
 // Build a method call transaction
 let (tx_hex, input_count) = build_call_transaction(
-    &current_utxo, &unlocking_script, new_locking_script, new_satoshis,
+    &current_utxo, &unlocking_script, Some(new_locking_script), Some(new_satoshis),
     Some(change_address), Some(&change_script), Some(&additional_utxos), Some(fee_rate),
 );
 

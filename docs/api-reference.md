@@ -286,12 +286,16 @@ interface Signer {
 
 ### LocalSigner
 
-Signs transactions using a local private key (hex-encoded).
+Signs transactions using a local private key. Accepts either a hex-encoded raw key or a WIF-encoded key.
 
 ```typescript
 import { LocalSigner } from 'runar-sdk';
 
-const signer = new LocalSigner('abc123...'); // 32-byte private key, hex
+// From a 64-char hex string (raw 32-byte private key)
+const signer = new LocalSigner('abc123...def456...');
+
+// From a WIF-encoded private key (Base58Check, starts with 5, K, or L)
+const signerWif = new LocalSigner('KwDiBf89QgGbjEhKnhXJuH7LrciVrZi3qYjgd9M7rFU73sVHnoWn');
 ```
 
 Suitable for server-side applications, CLI tools, and testing.

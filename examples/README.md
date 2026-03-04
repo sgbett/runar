@@ -42,13 +42,13 @@ TypeScript-only contracts (post-quantum):
 ### Single Contract
 
 ```bash
-runar compile examples/ts/p2pkh/P2PKH.runar.ts --outdir artifacts/
+runar compile examples/ts/p2pkh/P2PKH.runar.ts --output artifacts/
 ```
 
 ### All TypeScript Contracts
 
 ```bash
-runar compile examples/ts/**/*.runar.ts --outdir artifacts/
+runar compile examples/ts/**/*.runar.ts --output artifacts/
 ```
 
 ---
@@ -122,8 +122,7 @@ cd examples/rust && cargo test
 runar deploy ./artifacts/P2PKH.json \
   --network testnet \
   --key <your-testnet-WIF> \
-  --satoshis 10000 \
-  --params '{"pubKeyHash": "89abcdef0123456789abcdef0123456789abcdef"}'
+  --satoshis 10000
 ```
 
 3. Verify the deployment:

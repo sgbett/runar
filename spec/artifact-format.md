@@ -43,8 +43,8 @@ When the Rúnar compiler processes a `.ts` source file, it produces a `.json` ar
 
 - **Type**: `string`
 - **Required**: Yes
-- **Description**: Artifact format version. Follows semantic versioning.
-- **Example**: `"0.1.0"`
+- **Description**: Artifact format version. Uses `runar-v` prefix followed by semantic versioning.
+- **Example**: `"runar-v0.1.0"`
 - **Rules**: The SDK MUST reject artifacts with a major version it does not support.
 
 ### 3.2 `compilerVersion`
@@ -152,15 +152,15 @@ Where `name` is the constructor parameter name. When deploying, the SDK replaces
 
 ### 3.8 `ir`
 
-- **Type**: `ANFProgram` object (see `ir-format.md`)
+- **Type**: `{ anf?: ANFProgram; stack?: StackProgram }` (see `ir-format.md` and `stack-ir.md`)
 - **Required**: No (optional, included when compiler flag `--ir` is set)
-- **Description**: The canonical ANF IR for the contract. Useful for debugging and verification.
+- **Description**: Optional IR snapshots for debugging and conformance checking. Contains optional `anf` (the canonical ANF IR) and optional `stack` (the Stack IR) sub-fields.
 
 ### 3.9 `stateFields`
 
 - **Type**: `StateField[]`
-- **Required**: Yes (empty array for stateless contracts)
-- **Description**: Describes the mutable state fields of the contract, their types, and their order in the state serialization.
+- **Required**: No (optional; omitted for stateless contracts)
+- **Description**: Describes the mutable state fields of the contract, their types, and their order in the state serialization. Only present for stateful contracts.
 
 ```json
 [
@@ -185,7 +185,7 @@ Where `name` is the constructor parameter name. When deploying, the SDK replaces
 | `type` | `string` | Rúnar type |
 | `index` | `number` | Position in state serialization (0-based) |
 
-For stateless contracts (no mutable properties), this is an empty array `[]`.
+For stateless contracts (no mutable properties), this field is omitted.
 
 ### 3.10 `constructorSlots`
 
@@ -313,7 +313,7 @@ The SDK handles serialization/deserialization of state using the `stateFields` d
 
 ```json
 {
-    "version": "0.1.0",
+    "version": "runar-v0.1.0",
     "compilerVersion": "0.1.0",
     "contractName": "P2PKH",
     "abi": {
@@ -344,7 +344,6 @@ The SDK handles serialization/deserialization of state using the `stateFields` d
             { "opcodeIndex": 4, "sourceFile": "P2PKH.ts", "line": 13, "column": 8 }
         ]
     },
-    "stateFields": [],
     "buildTimestamp": "2025-06-15T10:30:00Z"
 }
 ```

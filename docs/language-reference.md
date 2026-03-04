@@ -205,18 +205,18 @@ Mixing `bigint` and `ByteString` with `+` is a compile-time error.
 | Operator | Description | Opcode |
 |----------|-------------|--------|
 | `===` / `==` | Equality | `OP_NUMEQUAL` (bigint) or `OP_EQUAL` (bytes) |
-| `!==` / `!=` | Inequality | `OP_NUMNOTEQUAL` (bigint) or `OP_EQUAL OP_NOT` (bytes) |
+| `!==` / `!=` | Inequality | `OP_NUMEQUAL OP_NOT` (bigint) or `OP_EQUAL OP_NOT` (bytes) |
 
 Both `==` and `===` have identical semantics in Rúnar (no type coercion). The compiler recommends `===`.
 
 ### Logical (operands: `boolean`)
 
-| Operator | Description | Notes |
-|----------|-------------|-------|
-| `&&` | Logical AND | Short-circuit evaluated |
-| `\|\|` | Logical OR | Short-circuit evaluated |
+| Operator | Description | Opcode |
+|----------|-------------|--------|
+| `&&` | Logical AND | `OP_BOOLAND` |
+| `\|\|` | Logical OR | `OP_BOOLOR` |
 
-Short-circuit operators are lowered to `OP_IF`/`OP_ELSE`/`OP_ENDIF` in the IR.
+Both operands are always evaluated (eager evaluation). At the ANF IR level, short-circuit lowering is used for control flow, but at the Stack IR/opcode level, these compile to `OP_BOOLAND` and `OP_BOOLOR` respectively.
 
 ### Bitwise (operands: `bigint`)
 

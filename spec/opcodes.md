@@ -185,8 +185,8 @@ Use `OP_PICK` when the value will be needed again later. Use `OP_ROLL` when this
 | `-a` | `OP_NEGATE` |
 | `abs(a)` | `OP_ABS` |
 | `!a` | `OP_NOT` |
-| `a && b` (after short-circuit lowering) | `OP_BOOLAND` or `OP_IF`/`OP_ENDIF` |
-| `a \|\| b` (after short-circuit lowering) | `OP_BOOLOR` or `OP_IF`/`OP_ENDIF` |
+| `a && b` (eager evaluation) | `OP_BOOLAND` |
+| `a \|\| b` (eager evaluation) | `OP_BOOLOR` |
 
 ### 5.2 Bitwise Operations
 
@@ -244,7 +244,7 @@ These are fully available for Rúnar on BSV. They are NOT available on BTC or BC
 |---|---|
 | `a === b` (bigint) | `OP_NUMEQUAL` |
 | `a === b` (ByteString) | `OP_EQUAL` |
-| `a !== b` (bigint) | `OP_NUMNOTEQUAL` |
+| `a !== b` (bigint) | `OP_NUMEQUAL OP_NOT` |
 | `a !== b` (ByteString) | `OP_EQUAL OP_NOT` |
 | `a < b` | `OP_LESSTHAN` |
 | `a > b` | `OP_GREATERTHAN` |
@@ -351,7 +351,7 @@ These opcodes were disabled in BTC but are **re-enabled in BSV**:
 | `a + b` (ByteString) | `OP_CAT` |
 | `ByteString.slice(start, end)` | `OP_SPLIT` (twice if needed) |
 | `len(data)` | `OP_SIZE OP_NIP` |
-| `pack(n)` | `OP_NUM2BIN` |
+| `pack(n)` | No-op (type-level cast) |
 | `unpack(data)` | `OP_BIN2NUM` |
 
 ### 8.2 OP_CAT Significance
@@ -481,7 +481,7 @@ Rúnar's IR is designed to be opcode-agnostic at the ANF level. The `check_preim
 | `abs(a)` | `OP_ABS` | `0x90` |
 | `a === b` (bigint) | `OP_NUMEQUAL` | `0x9c` |
 | `a === b` (bytes) | `OP_EQUAL` | `0x87` |
-| `a !== b` (bigint) | `OP_NUMNOTEQUAL` | `0x9e` |
+| `a !== b` (bigint) | `OP_NUMEQUAL OP_NOT` | `0x9c 0x91` |
 | `a < b` | `OP_LESSTHAN` | `0x9f` |
 | `a <= b` | `OP_LESSTHANOREQUAL` | `0xa1` |
 | `a > b` | `OP_GREATERTHAN` | `0xa0` |
@@ -494,7 +494,7 @@ Rúnar's IR is designed to be opcode-agnostic at the ANF level. The `check_preim
 | `checkMultiSig(...)` | `OP_CHECKMULTISIG` | `0xae` |
 | `assert(x)` (non-final) | `OP_VERIFY` | `0x69` |
 | `len(x)` | `OP_SIZE OP_NIP` | `0x82 0x77` |
-| `pack(n)` | `OP_NUM2BIN` | `0x80` |
+| `pack(n)` | No-op (type-level cast) | — |
 | `unpack(bs)` | `OP_BIN2NUM` | `0x81` |
 | `a & b` | `OP_AND` | `0x84` |
 | `a \| b` | `OP_OR` | `0x85` |
