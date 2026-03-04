@@ -316,7 +316,7 @@ packages/
   runar-lang/          # Language types and builtins (developer imports)
   runar-compiler/      # TypeScript compiler (6 nanopass passes)
   runar-ir-schema/     # Shared IR type definitions and JSON schemas
-  runar-testing/       # TestContract API, Script VM, interpreter
+  runar-testing/       # TestContract API, Script VM, interpreter, fuzzer
   runar-sdk/           # Deployment SDK (providers, signers)
   runar-cli/           # CLI tool
   runar-go/            # Go package: types, mock crypto, real hashes, CompileCheck(), deployment SDK

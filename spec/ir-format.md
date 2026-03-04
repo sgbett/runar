@@ -379,7 +379,7 @@ Add an output to the transaction being constructed (used by stateful contracts f
 
 ## 5. ANF Types
 
-Types are represented as strings or objects in the IR:
+Types are represented as strings in the IR:
 
 | Rúnar Type | ANF Type Representation | Description |
 |---|---|---|
@@ -396,7 +396,7 @@ Types are represented as strings or objects in the IR:
 | `RabinSig` | `"RabinSig"` | Rabin signature value |
 | `RabinPubKey` | `"RabinPubKey"` | Rabin public key |
 | `void` | `"void"` | No value |
-| `FixedArray<T, N>` | `{ "array": T, "size": N }` | Fixed-length array of element type T |
+| `FixedArray<T, N>` | `"FixedArray<T, N>"` | Fixed-length array of element type T |
 
 ---
 
@@ -470,7 +470,7 @@ Both operands are evaluated unconditionally. This differs from TypeScript's shor
 ### Source
 
 ```typescript
-import { SmartContract, assert, checkSig, PubKey, Sig } from 'runar';
+import { SmartContract, assert, checkSig, PubKey, Sig } from 'runar-lang';
 
 export class P2PKH extends SmartContract {
     readonly pubKeyHash: Addr;
@@ -603,7 +603,7 @@ A conforming ANF IR must satisfy:
 1. **Sequential naming**: Bindings use sequential `t{i}` names for compiler-generated temporaries, except for user-declared variables (e.g., `let x = ...` or reassignments) which retain their original names. Named bindings are interleaved with the `t{i}` sequence and do not affect the sequential numbering of temporaries (see Section 3, Naming Convention).
 2. **Forward references only**: A binding may only reference temporaries with smaller indices (i.e., defined earlier in the same body or branch).
 3. **No orphan references**: Every name referenced in an `ANFValue` must be either a method parameter, a property name, or a previously defined temporary.
-4. **Public method assertion**: The last binding in a public method's body must have kind `assert`.
+4. **Public method assertion**: For `SmartContract` (stateless) contracts, the last binding in a public method's body must have kind `assert`. For `StatefulSmartContract` contracts, the compiler auto-injects bindings (preimage check, state continuation) so this rule does not apply.
 
 ---
 

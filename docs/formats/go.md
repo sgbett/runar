@@ -207,6 +207,31 @@ Built-in functions are accessed through the `runar` package with PascalCase name
 | `runar.EcMakePoint(x, y)` | `ecMakePoint(x, y)` |
 | `runar.EcPointX(p)` | `ecPointX(p)` |
 | `runar.EcPointY(p)` | `ecPointY(p)` |
+| `runar.Cat(a, b)` | `cat(a, b)` |
+| `runar.Substr(data, start, len)` | `substr(data, start, len)` |
+| `runar.Split(data, index)` | `split(data, index)` |
+| `runar.Left(data, len)` | `left(data, len)` |
+| `runar.Right(data, len)` | `right(data, len)` |
+| `runar.ReverseBytes(data)` | `reverseBytes(data)` |
+| `runar.Bin2Num(data)` | `bin2num(data)` |
+| `runar.Int2Str(n, size)` | `int2str(n, size)` |
+| `runar.ToByteString(hex)` | `toByteString(hex)` |
+| `runar.ExtractVersion(pre)` | `extractVersion(pre)` |
+| `runar.ExtractHashPrevouts(pre)` | `extractHashPrevouts(pre)` |
+| `runar.ExtractHashSequence(pre)` | `extractHashSequence(pre)` |
+| `runar.ExtractOutpoint(pre)` | `extractOutpoint(pre)` |
+| `runar.ExtractScriptCode(pre)` | `extractScriptCode(pre)` |
+| `runar.ExtractSequence(pre)` | `extractSequence(pre)` |
+| `runar.ExtractSigHashType(pre)` | `extractSigHashType(pre)` |
+| `runar.ExtractInputIndex(pre)` | `extractInputIndex(pre)` |
+| `runar.ExtractOutputs(pre)` | `extractOutputs(pre)` |
+| `runar.VerifyWOTS(msg, sig, pubkey)` | `verifyWOTS(msg, sig, pubkey)` |
+| `runar.VerifySLHDSA_SHA2_128s(msg, sig, pubkey)` | `verifySLHDSA_SHA2_128s(msg, sig, pubkey)` |
+| `runar.VerifySLHDSA_SHA2_128f(msg, sig, pubkey)` | `verifySLHDSA_SHA2_128f(msg, sig, pubkey)` |
+| `runar.VerifySLHDSA_SHA2_192s(msg, sig, pubkey)` | `verifySLHDSA_SHA2_192s(msg, sig, pubkey)` |
+| `runar.VerifySLHDSA_SHA2_192f(msg, sig, pubkey)` | `verifySLHDSA_SHA2_192f(msg, sig, pubkey)` |
+| `runar.VerifySLHDSA_SHA2_256s(msg, sig, pubkey)` | `verifySLHDSA_SHA2_256s(msg, sig, pubkey)` |
+| `runar.VerifySLHDSA_SHA2_256f(msg, sig, pubkey)` | `verifySLHDSA_SHA2_256f(msg, sig, pubkey)` |
 
 EC constants are available as package-level variables:
 

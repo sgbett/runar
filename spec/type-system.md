@@ -96,15 +96,16 @@ The `Point` type is distinct from `PubKey` (33-byte compressed format). Use `ecE
     T <: T             reflexivity
 ```
 
-A domain type value can be **widened** to `ByteString` implicitly. Narrowing (going from `ByteString` to a domain type) requires an explicit cast function:
+A domain type value can be **widened** to `ByteString` implicitly. The type checker also accepts `ByteString` where a domain type is expected (bidirectional compatibility), as well as cross-subtype assignments within the `ByteString` family (e.g., `PubKey` assignable to `Sig`). This permissive approach simplifies common patterns like passing concatenation results or hash outputs to domain-typed parameters.
 
 ```typescript
 const addr: Addr = pubKeyToAddr(pubKey);      // OK: built-in returns Addr
 const bs: ByteString = addr;                   // OK: widening
-const addr2: Addr = bs;                        // ERROR: narrowing without cast
+const addr2: Addr = bs;                        // OK: bidirectional compatibility
+const h: Ripemd160 = addr;                     // OK: cross-subtype within ByteString family
 ```
 
-> **Implementation note:** The current type checker accepts `ByteString` where a domain type is expected (bidirectional compatibility). This is more permissive than the spec's stated narrowing restriction. This relaxation simplifies common patterns like passing concatenation results to domain-typed parameters.
+The same bidirectional compatibility applies to the `bigint` family: `RabinSig` and `RabinPubKey` are mutually compatible with each other and with `bigint`.
 
 ### 2.3 Rabin Types
 

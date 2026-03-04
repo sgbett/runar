@@ -364,7 +364,6 @@ private helper(x: bigint): bigint {
 | `min` | `(a: bigint, b: bigint) => bigint` | `OP_MIN` |
 | `max` | `(a: bigint, b: bigint) => bigint` | `OP_MAX` |
 | `within` | `(x: bigint, lo: bigint, hi: bigint) => boolean` | `OP_WITHIN` |
-| `sign` | `(n: bigint) => bigint` | `OP_DUP OP_IF OP_DUP OP_ABS OP_SWAP OP_DIV OP_ENDIF` — returns -1, 0, or 1 (guards against div-by-zero when n=0) |
 | `bool` | `(n: bigint) => boolean` | `OP_0NOTEQUAL` — converts integer to boolean |
 
 #### Safe Arithmetic
@@ -386,6 +385,7 @@ private helper(x: bigint): bigint {
 
 | Function | Signature | Opcode(s) |
 |----------|-----------|-----------|
+| `sign` | `(n: bigint) => bigint` | `OP_DUP OP_IF OP_DUP OP_ABS OP_SWAP OP_DIV OP_ENDIF` — returns -1, 0, or 1 (guards against div-by-zero when n=0) |
 | `pow` | `(base: bigint, exp: bigint) => bigint` | 32-iteration bounded conditional multiply loop |
 | `sqrt` | `(n: bigint) => bigint` | 16-iteration Newton's method: `guess = (guess + n/guess) / 2` |
 | `gcd` | `(a: bigint, b: bigint) => bigint` | 256-iteration Euclidean algorithm |

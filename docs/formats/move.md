@@ -99,24 +99,28 @@ Both use the macro call syntax (`!`). `assert!` maps to `assert(expr)` and `asse
 
 ### Property Access
 
+The parser recognizes both `self` and `contract` as receivers for property access. Both are converted to `this.property` in the AST:
+
 ```move
-self.pub_key_hash       // access a property
-self.count              // access mutable state
+self.pub_key_hash       // access a property via self
+self.count              // access mutable state via self
+contract.pub_key_hash   // access a property via contract
+contract.count          // access mutable state via contract
 ```
 
-The `self` keyword replaces `this`. The parser converts `self` references to property access expressions.
+The `self` and `contract` keywords are interchangeable. Use whichever style you prefer. `self` is the idiomatic Move convention; `contract` can be passed as a function parameter for explicitness.
 
 ### Reference Stripping
 
-Move uses `&` and `&mut` references extensively. The Rúnar Move parser strips these:
+Move uses `&` and `&mut` references extensively. The Runar Move parser strips these:
 
 ```move
 public fun settle(price: &bigint, sig: &Sig) {
-    // &bigint → bigint, &Sig → Sig in the AST
+    // &bigint -> bigint, &Sig -> Sig in the AST
 }
 ```
 
-References have no semantic effect in the Rúnar compilation model -- there is no heap, no borrow checker, and all values are stack-based.
+References have no semantic effect in the Runar compilation model -- there is no heap, no borrow checker, and all values are stack-based.
 
 ### State Mutation
 
@@ -125,15 +129,19 @@ self.count = self.count + 1;   // explicit assignment
 self.highest_bidder = bidder;
 ```
 
-Unlike TypeScript Rúnar, Move syntax does not have `++` and `--` operators. Use explicit assignment.
+Unlike TypeScript Runar, Move syntax does not have `++` and `--` operators. Use explicit assignment.
 
 ### add_output
 
+The `add_output` function creates transaction outputs for stateful contracts. Both bare calls and receiver-qualified calls are valid:
+
 ```move
-add_output(satoshis, owner, balance);
+add_output(satoshis, owner, balance);          // bare call
+self.add_output(satoshis, owner, balance);     // via self
+contract.add_output(satoshis, owner, balance); // via contract
 ```
 
-The `add_output` function (snake_case) maps to `this.addOutput()` in the AST.
+All three forms map to `this.addOutput()` in the AST. Values are positional, matching mutable properties in declaration order.
 
 ---
 
@@ -292,19 +300,19 @@ module FungibleToken {
         assert!(amount > 0);
         assert!(amount <= self.balance);
 
-        add_output(output_satoshis, to, amount);
-        add_output(output_satoshis, self.owner, self.balance - amount);
+        self.add_output(output_satoshis, to, amount);
+        self.add_output(output_satoshis, self.owner, self.balance - amount);
     }
 
     public fun send(sig: Sig, to: PubKey, output_satoshis: bigint) {
         assert!(check_sig(sig, self.owner));
-        add_output(output_satoshis, to, self.balance);
+        self.add_output(output_satoshis, to, self.balance);
     }
 
     public fun merge(sig: Sig, total_balance: bigint, output_satoshis: bigint) {
         assert!(check_sig(sig, self.owner));
         assert!(total_balance >= self.balance);
-        add_output(output_satoshis, self.owner, total_balance);
+        self.add_output(output_satoshis, self.owner, total_balance);
     }
 }
 ```
@@ -323,7 +331,7 @@ module SimpleNFT {
 
     public fun transfer(sig: Sig, new_owner: PubKey, output_satoshis: bigint) {
         assert!(check_sig(sig, self.owner));
-        add_output(output_satoshis, new_owner);
+        self.add_output(output_satoshis, new_owner);
     }
 
     public fun burn(sig: Sig) {
@@ -336,7 +344,7 @@ module SimpleNFT {
 
 ## Differences from Real Move
 
-| Feature | Real Move (Sui/Aptos) | Rúnar Move-like |
+| Feature | Real Move (Sui/Aptos) | Runar Move-like |
 |---------|----------------------|----------------|
 | Borrow checker | Full ownership and borrowing model | No borrow checker; references stripped |
 | Abilities | `key`, `store`, `copy`, `drop` | Not supported |
@@ -365,23 +373,112 @@ The parser applies these conversions automatically:
 | Contract name | PascalCase | PascalCase (unchanged) |
 | Type names | PascalCase | PascalCase (unchanged) |
 
-Built-in function name mapping:
+The snake_case to camelCase conversion handles underscores before both letters and digits: `hash_160` becomes `hash160`, `num_2_bin` becomes `num2Bin` (then the builtin map normalizes it to `num2bin`).
 
-| Move | Rúnar |
+---
+
+## Built-in Function Name Mapping
+
+### Hashing
+
+| Move | Runar |
+|------|------|
+| `hash_160` / `hash160` | `hash160` |
+| `hash_256` / `hash256` | `hash256` |
+| `sha256` | `sha256` |
+| `ripemd160` | `ripemd160` |
+
+### Signature Verification
+
+| Move | Runar |
 |------|------|
 | `check_sig` | `checkSig` |
 | `check_multi_sig` | `checkMultiSig` |
-| `hash_160` / `hash160` | `hash160` |
-| `hash_256` / `hash256` | `hash256` |
 | `check_preimage` | `checkPreimage` |
+| `verify_rabin_sig` | `verifyRabinSig` |
+
+### Post-Quantum Signature Verification
+
+| Move | Runar |
+|------|------|
+| `verify_wots` | `verifyWOTS` |
+| `verify_slhdsa_sha2_128s` | `verifySLHDSA_SHA2_128s` |
+| `verify_slhdsa_sha2_128f` | `verifySLHDSA_SHA2_128f` |
+| `verify_slhdsa_sha2_192s` | `verifySLHDSA_SHA2_192s` |
+| `verify_slhdsa_sha2_192f` | `verifySLHDSA_SHA2_192f` |
+| `verify_slhdsa_sha2_256s` | `verifySLHDSA_SHA2_256s` |
+| `verify_slhdsa_sha2_256f` | `verifySLHDSA_SHA2_256f` |
+
+The `verify_slh_dsa_sha2_*` spelling (with `slh` and `dsa` as separate words) also works.
+
+### Byte Operations
+
+| Move | Runar |
+|------|------|
+| `cat` | `cat` |
+| `substr` | `substr` |
+| `split` | `split` |
+| `left` | `left` |
+| `right` | `right` |
+| `len` | `len` |
+| `reverse_bytes` / `reverse_byte_string` | `reverseBytes` |
+| `num_2_bin` / `num2bin` | `num2bin` |
+| `bin_2_num` / `bin2num` | `bin2num` |
+| `int_2_str` / `int2str` | `int2str` |
+| `to_byte_string` | `toByteString` |
+| `pack` | `pack` |
+| `unpack` | `unpack` |
+| `bool` | `bool` |
+
+### Preimage Extractors
+
+These functions extract fields from a BIP-143 sighash preimage:
+
+| Move | Runar |
+|------|------|
+| `extract_version` | `extractVersion` |
+| `extract_hash_prevouts` | `extractHashPrevouts` |
+| `extract_hash_sequence` | `extractHashSequence` |
+| `extract_outpoint` | `extractOutpoint` |
+| `extract_script_code` | `extractScriptCode` |
+| `extract_sequence` | `extractSequence` |
+| `extract_sig_hash_type` | `extractSigHashType` |
+| `extract_input_index` | `extractInputIndex` |
+| `extract_outputs` | `extractOutputs` |
+| `extract_amount` | `extractAmount` |
 | `extract_locktime` | `extractLocktime` |
 | `extract_output_hash` | `extractOutputHash` |
-| `extract_amount` | `extractAmount` |
-| `verify_rabin_sig` | `verifyRabinSig` |
-| `num_2_bin` / `num2bin` | `num2bin` |
-| `reverse_byte_string` | `reverseBytes` |
-| `to_byte_string` | `toByteString` |
-| `add_output` | `addOutput` |
+
+### Output Construction
+
+| Move | Runar |
+|------|------|
+| `add_output` / `self.add_output` / `contract.add_output` | `addOutput` |
+
+### Math Builtins
+
+| Move | Runar |
+|------|------|
+| `abs` | `abs` |
+| `min` | `min` |
+| `max` | `max` |
+| `within` | `within` |
+| `safediv` | `safediv` |
+| `safemod` | `safemod` |
+| `clamp` | `clamp` |
+| `sign` | `sign` |
+| `pow` | `pow` |
+| `mul_div` | `mulDiv` |
+| `percent_of` | `percentOf` |
+| `sqrt` | `sqrt` |
+| `gcd` | `gcd` |
+| `divmod` | `divmod` |
+| `log2` | `log2` |
+
+### EC (secp256k1) Builtins
+
+| Move | Runar |
+|------|------|
 | `ec_add` | `ecAdd` |
 | `ec_mul` | `ecMul` |
 | `ec_mul_gen` | `ecMulGen` |
@@ -395,7 +492,7 @@ Built-in function name mapping:
 
 EC constants use UPPER_SNAKE_CASE:
 
-| Move constant | Rúnar constant |
+| Move constant | Runar constant |
 |--------------|---------------|
 | `EC_P` | `EC_P` |
 | `EC_N` | `EC_N` |

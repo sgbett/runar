@@ -215,7 +215,7 @@ Types are encoded as strings in the ABI:
 | `SigHashPreimage` | `"SigHashPreimage"` | Variable-length bytes |
 | `RabinSig` | `"RabinSig"` | Script number |
 | `RabinPubKey` | `"RabinPubKey"` | Script number |
-| `FixedArray<T, N>` | `{"array": "T", "size": N}` | N consecutive push data items |
+| `FixedArray<T, N>` | `"FixedArray<T, N>"` | N consecutive push data items |
 
 ### 5.2 bigint Encoding
 
@@ -356,14 +356,14 @@ When a stateful method modifies state, the compiler generates code to:
 {
     "constructor": {
         "params": [
-            { "name": "pubKeys", "type": { "array": "PubKey", "size": 3 } }
+            { "name": "pubKeys", "type": "FixedArray<PubKey, 3>" }
         ]
     },
     "methods": [
         {
             "name": "unlock",
             "params": [
-                { "name": "sigs", "type": { "array": "Sig", "size": 2 } }
+                { "name": "sigs", "type": "FixedArray<Sig, 2>" }
             ],
             "isPublic": true
         }

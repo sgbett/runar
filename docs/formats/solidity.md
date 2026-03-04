@@ -334,7 +334,10 @@ contract SimpleNFT is StatefulSmartContract {
 
 | Solidity-like type | Rúnar type |
 |-------------------|-----------|
+| `int` | `bigint` |
+| `uint` | `bigint` |
 | `int256` | `bigint` |
+| `uint256` | `bigint` |
 | `bool` | `boolean` |
 | `bytes` | `ByteString` |
 | `PubKey` | `PubKey` |
@@ -379,3 +382,15 @@ Elliptic curve operations on secp256k1 points are available:
 | `EC_P` | secp256k1 field prime |
 | `EC_N` | secp256k1 group order |
 | `EC_G` | Generator point |
+
+### Post-Quantum Signature Verification (Experimental)
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `verifyWOTS` | `(msg: bytes, sig: bytes, pubkey: bytes) => bool` | WOTS+ verification (w=16, SHA-256). One-time use per keypair. |
+| `verifySLHDSA_SHA2_128s` | `(msg: bytes, sig: bytes, pubkey: bytes) => bool` | SLH-DSA-SHA2-128s (FIPS 205). Stateless, multi-use. |
+| `verifySLHDSA_SHA2_128f` | `(msg: bytes, sig: bytes, pubkey: bytes) => bool` | SLH-DSA-SHA2-128f. Fast variant. |
+| `verifySLHDSA_SHA2_192s` | `(msg: bytes, sig: bytes, pubkey: bytes) => bool` | SLH-DSA-SHA2-192s. 192-bit security. |
+| `verifySLHDSA_SHA2_192f` | `(msg: bytes, sig: bytes, pubkey: bytes) => bool` | SLH-DSA-SHA2-192f. Fast variant. |
+| `verifySLHDSA_SHA2_256s` | `(msg: bytes, sig: bytes, pubkey: bytes) => bool` | SLH-DSA-SHA2-256s. 256-bit security. |
+| `verifySLHDSA_SHA2_256f` | `(msg: bytes, sig: bytes, pubkey: bytes) => bool` | SLH-DSA-SHA2-256f. Fast variant. |
