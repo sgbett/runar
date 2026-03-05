@@ -3,7 +3,6 @@ package helpers
 import (
 	"encoding/hex"
 	"fmt"
-	"math"
 	"strings"
 
 	ec "github.com/bsv-blockchain/go-sdk/primitives/ec"
@@ -65,7 +64,16 @@ type UTXO struct {
 }
 
 // FundWallet sends BTC to the wallet, mines a block, and finds the UTXO.
+// On SV Node: uses the built-in wallet (sendtoaddress).
+// On Teranode: builds a raw TX from a coinbase UTXO.
 func FundWallet(w *Wallet, btcAmount float64) (*UTXO, error) {
+	if IsTeranode() {
+		return FundFromCoinbase(w, btcAmount)
+	}
+	return fundWalletSVNode(w, btcAmount)
+}
+
+func fundWalletSVNode(w *Wallet, btcAmount float64) (*UTXO, error) {
 	txid, err := SendToAddress(w.Address, btcAmount)
 	if err != nil {
 		return nil, fmt.Errorf("sendtoaddress: %w", err)
@@ -89,8 +97,7 @@ func FindUTXO(txid, scriptHex string) (*UTXO, error) {
 	for _, v := range vouts {
 		vout := v.(map[string]interface{})
 		n := int(vout["n"].(float64))
-		valueBTC := vout["value"].(float64)
-		sats := int64(math.Round(valueBTC * 1e8))
+		sats := parseSatoshis(vout["value"].(float64))
 
 		sp := vout["scriptPubKey"].(map[string]interface{})
 		outHex := sp["hex"].(string)
@@ -112,8 +119,7 @@ func FindUTXOByIndex(txid string, vout int) (*UTXO, error) {
 		return nil, fmt.Errorf("vout %d not found in tx %s", vout, txid)
 	}
 	v := vouts[vout].(map[string]interface{})
-	valueBTC := v["value"].(float64)
-	sats := int64(math.Round(valueBTC * 1e8))
+	sats := parseSatoshis(v["value"].(float64))
 	sp := v["scriptPubKey"].(map[string]interface{})
 	outHex := sp["hex"].(string)
 	return &UTXO{Txid: txid, Vout: vout, Satoshis: sats, Script: outHex}, nil
