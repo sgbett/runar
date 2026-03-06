@@ -7,6 +7,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const GO_COMPILER_DIR = resolve(__dirname, '../../compilers/go');
 const RUST_COMPILER_DIR = resolve(__dirname, '../../compilers/rust');
+const PYTHON_COMPILER_DIR = resolve(__dirname, '../../compilers/python');
 
 /** Escape a string for safe interpolation into a shell command (single-quote wrapping). */
 function shellEscape(s: string): string {
@@ -29,11 +30,12 @@ function cargoAwareEnv(): NodeJS.ProcessEnv {
 
 export interface ConformanceResult {
   testName: string;
-  /** Source format used (e.g. '.runar.ts', '.runar.yaml', '.runar.sol', '.runar.move', '.runar.go', '.runar.rs') */
+  /** Source format used (e.g. '.runar.ts', '.runar.yaml', '.runar.sol', '.runar.move', '.runar.py', '.runar.go', '.runar.rs') */
   format?: string;
   tsCompiler: CompilerOutput;
   goCompiler?: CompilerOutput;
   rustCompiler?: CompilerOutput;
+  pythonCompiler?: CompilerOutput;
   irMatch: boolean;
   scriptMatch: boolean;
   errors: string[];
@@ -43,11 +45,12 @@ export interface ConformanceResult {
  * Known input format extensions and which compilers support them.
  */
 export const INPUT_FORMATS = [
-  { ext: '.runar.ts',   compilers: ['ts', 'go', 'rust'] as const },
-  { ext: '.runar.sol',  compilers: ['ts', 'go', 'rust'] as const },
-  { ext: '.runar.move', compilers: ['ts', 'go', 'rust'] as const },
-  { ext: '.runar.go',   compilers: ['go'] as const },
-  { ext: '.runar.rs',   compilers: ['rust'] as const },
+  { ext: '.runar.ts',   compilers: ['ts', 'go', 'rust', 'python'] as const },
+  { ext: '.runar.sol',  compilers: ['ts', 'go', 'rust', 'python'] as const },
+  { ext: '.runar.move', compilers: ['ts', 'go', 'rust', 'python'] as const },
+  { ext: '.runar.py',   compilers: ['ts', 'go', 'rust', 'python'] as const },
+  { ext: '.runar.go',   compilers: ['go', 'python'] as const },
+  { ext: '.runar.rs',   compilers: ['rust', 'python'] as const },
 ] as const;
 
 export interface CompilerOutput {
@@ -298,6 +301,69 @@ function runRustCompiler(source: string, sourceFile: string): CompilerOutput | u
   }
 }
 
+/**
+ * Check whether the Python compiler is available (`python3 -m runar_compiler`).
+ */
+function findPythonCompiler(): string | null {
+  if (!existsSync(join(PYTHON_COMPILER_DIR, 'runar_compiler', '__main__.py'))) {
+    return null;
+  }
+  try {
+    execSync('python3 --version', { stdio: 'pipe' });
+    return `python3 -m runar_compiler`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Run the Python compiler on the given source. Returns undefined if the Python
+ * compiler is not available.
+ */
+function runPythonCompiler(source: string, sourceFile: string): CompilerOutput | undefined {
+  const binary = findPythonCompiler();
+  if (!binary) return undefined;
+
+  const start = performance.now();
+  try {
+    const tmpDir = join(__dirname, '..', '.tmp');
+    if (!existsSync(tmpDir)) mkdirSync(tmpDir, { recursive: true });
+    const tmpFile = join(tmpDir, `python-${basename(sourceFile)}`);
+    writeFileSync(tmpFile, source, 'utf-8');
+
+    // Get IR output
+    const irOutput = execSync(
+      `${binary} --source ${shellEscape(tmpFile)} --emit-ir`,
+      { timeout: 30_000, encoding: 'utf-8', cwd: PYTHON_COMPILER_DIR, maxBuffer: 10 * 1024 * 1024 },
+    ).trim();
+
+    // Get script hex output
+    const scriptHexOutput = execSync(
+      `${binary} --source ${shellEscape(tmpFile)} --hex`,
+      { timeout: 30_000, encoding: 'utf-8', cwd: PYTHON_COMPILER_DIR, maxBuffer: 10 * 1024 * 1024 },
+    ).trim();
+
+    const durationMs = performance.now() - start;
+    return {
+      irJson: canonicalizeJson(irOutput),
+      scriptHex: scriptHexOutput,
+      scriptAsm: '',
+      success: true,
+      durationMs,
+    };
+  } catch (err) {
+    const durationMs = performance.now() - start;
+    return {
+      irJson: '',
+      scriptHex: '',
+      scriptAsm: '',
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+      durationMs,
+    };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Output parsing & canonicalization
 // ---------------------------------------------------------------------------
@@ -422,6 +488,7 @@ export async function runConformanceTest(testDir: string): Promise<ConformanceRe
   const tsResult = runTsCompiler(source, sourceFile);
   const goResult = runGoCompiler(source, sourceFile);
   const rustResult = runRustCompiler(source, sourceFile);
+  const pythonResult = runPythonCompiler(source, sourceFile);
 
   if (!tsResult.success) {
     errors.push(`TypeScript compiler failed: ${tsResult.error ?? 'unknown error'}`);
@@ -432,15 +499,18 @@ export async function runConformanceTest(testDir: string): Promise<ConformanceRe
   if (rustResult && !rustResult.success) {
     errors.push(`Rust compiler failed: ${rustResult.error ?? 'unknown error'}`);
   }
+  if (pythonResult && !pythonResult.success) {
+    errors.push(`Python compiler failed: ${pythonResult.error ?? 'unknown error'}`);
+  }
 
   // Cross-compiler IR comparison
-  const irMatch = compareIR(tsResult, goResult, rustResult);
+  const irMatch = compareIR(tsResult, goResult, rustResult, pythonResult);
   if (!irMatch) {
     errors.push('IR mismatch between compilers');
   }
 
   // Cross-compiler script comparison
-  const scriptMatch = compareScript(tsResult, goResult, rustResult);
+  const scriptMatch = compareScript(tsResult, goResult, rustResult, pythonResult);
   if (!scriptMatch) {
     errors.push('Script hex mismatch between compilers');
   }
@@ -459,6 +529,9 @@ export async function runConformanceTest(testDir: string): Promise<ConformanceRe
     }
     if (rustResult?.success && rustResult.irJson && rustResult.irJson !== expectedIr) {
       errors.push('Rust compiler IR does not match golden file');
+    }
+    if (pythonResult?.success && pythonResult.irJson && pythonResult.irJson !== expectedIr) {
+      errors.push('Python compiler IR does not match golden file');
     }
   }
 
@@ -480,6 +553,12 @@ export async function runConformanceTest(testDir: string): Promise<ConformanceRe
         errors.push('Rust compiler script does not match golden file');
       }
     }
+    if (pythonResult?.success && pythonResult.scriptHex) {
+      const pythonScript = pythonResult.scriptHex.toLowerCase().replace(/\s/g, '');
+      if (pythonScript !== expectedScript) {
+        errors.push('Python compiler script does not match golden file');
+      }
+    }
   }
 
   return {
@@ -487,6 +566,7 @@ export async function runConformanceTest(testDir: string): Promise<ConformanceRe
     tsCompiler: tsResult,
     goCompiler: goResult,
     rustCompiler: rustResult,
+    pythonCompiler: pythonResult,
     irMatch,
     scriptMatch,
     errors,
@@ -602,6 +682,10 @@ export async function runConformanceTestForFormat(
     ? runRustCompiler(source, format.sourceFile)
     : undefined;
 
+  const pythonResult = supportedCompilers.includes('python')
+    ? runPythonCompiler(source, format.sourceFile)
+    : undefined;
+
   if (supportedCompilers.includes('ts') && !tsResult.success) {
     errors.push(`TypeScript compiler failed on ${format.ext}: ${tsResult.error ?? 'unknown error'}`);
   }
@@ -611,12 +695,16 @@ export async function runConformanceTestForFormat(
   if (rustResult && !rustResult.success) {
     errors.push(`Rust compiler failed on ${format.ext}: ${rustResult.error ?? 'unknown error'}`);
   }
+  if (pythonResult && !pythonResult.success) {
+    errors.push(`Python compiler failed on ${format.ext}: ${pythonResult.error ?? 'unknown error'}`);
+  }
 
   // Cross-compiler comparison within this format
   const irMatch = compareIR(
     supportedCompilers.includes('ts') ? tsResult : undefined,
     goResult,
     rustResult,
+    pythonResult,
   );
   if (!irMatch) {
     errors.push(`IR mismatch between compilers for ${format.ext}`);
@@ -626,6 +714,7 @@ export async function runConformanceTestForFormat(
     supportedCompilers.includes('ts') ? tsResult : undefined,
     goResult,
     rustResult,
+    pythonResult,
   );
   if (!scriptMatch) {
     errors.push(`Script hex mismatch between compilers for ${format.ext}`);
@@ -638,6 +727,7 @@ export async function runConformanceTestForFormat(
       supportedCompilers.includes('ts') ? tsResult : undefined,
       goResult,
       rustResult,
+      pythonResult,
     ].filter((o): o is CompilerOutput => o !== undefined && o.success && o.irJson !== '');
 
     for (const output of allOutputs) {
@@ -654,6 +744,7 @@ export async function runConformanceTestForFormat(
       supportedCompilers.includes('ts') ? tsResult : undefined,
       goResult,
       rustResult,
+      pythonResult,
     ].filter((o): o is CompilerOutput => o !== undefined && o.success && o.scriptHex !== '');
 
     for (const output of allOutputs) {
@@ -671,6 +762,7 @@ export async function runConformanceTestForFormat(
     tsCompiler: tsResult,
     goCompiler: goResult,
     rustCompiler: rustResult,
+    pythonCompiler: pythonResult,
     irMatch,
     scriptMatch,
     errors,

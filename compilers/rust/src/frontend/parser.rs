@@ -1115,6 +1115,7 @@ fn bigint_to_i64(bigint_lit: &swc::BigInt) -> i64 {
 /// - `.runar.sol` -> Solidity-like parser
 /// - `.runar.move` -> Move-style parser
 /// - `.runar.rs` -> Rust DSL parser
+/// - `.runar.py` -> Python parser
 /// - anything else (including `.runar.ts`) -> TypeScript parser (default)
 pub fn parse_source(source: &str, file_name: Option<&str>) -> ParseResult {
     let name = file_name.unwrap_or("contract.ts");
@@ -1126,6 +1127,9 @@ pub fn parse_source(source: &str, file_name: Option<&str>) -> ParseResult {
     }
     if name.ends_with(".runar.rs") {
         return super::parser_rustmacro::parse_rust_dsl(source, file_name);
+    }
+    if name.ends_with(".runar.py") {
+        return super::parser_python::parse_python(source, file_name);
     }
     // Default: TypeScript parser
     parse(source, file_name)

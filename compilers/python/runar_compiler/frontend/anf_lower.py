@@ -1,0 +1,884 @@
+"""ANF lowering pass for the Runar compiler.
+
+Lowers a type-checked Runar AST to A-Normal Form IR.
+Direct port of ``compilers/go/frontend/anf_lower.go``.
+
+This is the most complex frontend pass. Every expression is recursively
+flattened into a sequence of let-bindings (``ANFBinding``) with fresh temp
+names (``t0``, ``t1``, ...).
+"""
+
+from __future__ import annotations
+
+import json
+
+from runar_compiler.frontend.ast_nodes import (
+    AssignmentStmt,
+    BigIntLiteral,
+    BinaryExpr,
+    BoolLiteral,
+    ByteStringLiteral,
+    CallExpr,
+    ContractNode,
+    CustomType,
+    DecrementExpr,
+    Expression,
+    ExpressionStmt,
+    FixedArrayType,
+    ForStmt,
+    Identifier,
+    IfStmt,
+    IncrementExpr,
+    IndexAccessExpr,
+    MemberExpr,
+    PrimitiveType,
+    PropertyAccessExpr,
+    ReturnStmt,
+    Statement,
+    TernaryExpr,
+    TypeNode,
+    UnaryExpr,
+    VariableDeclStmt,
+)
+from runar_compiler.ir.types import (
+    ANFBinding,
+    ANFMethod,
+    ANFParam,
+    ANFProgram,
+    ANFProperty,
+    ANFValue,
+)
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def lower_to_anf(contract: ContractNode) -> ANFProgram:
+    """Lower a type-checked Runar AST to ANF IR.
+
+    Matches the TypeScript reference compiler's ``04-anf-lower.ts`` exactly.
+    """
+    properties = _lower_properties(contract)
+    methods = _lower_methods(contract)
+
+    return ANFProgram(
+        contract_name=contract.name,
+        properties=properties,
+        methods=methods,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Byte-typed expression detection
+# ---------------------------------------------------------------------------
+
+_BYTE_TYPES: frozenset[str] = frozenset({
+    "ByteString",
+    "PubKey",
+    "Sig",
+    "Sha256",
+    "Ripemd160",
+    "Addr",
+    "SigHashPreimage",
+    "RabinSig",
+    "RabinPubKey",
+    "Point",
+})
+
+_BYTE_RETURNING_FUNCTIONS: frozenset[str] = frozenset({
+    "sha256",
+    "ripemd160",
+    "hash160",
+    "hash256",
+    "cat",
+    "substr",
+    "num2bin",
+    "reverseBytes",
+    "left",
+    "right",
+    "int2str",
+    "toByteString",
+    "pack",
+    "ecAdd",
+    "ecMul",
+    "ecMulGen",
+    "ecNegate",
+    "ecMakePoint",
+    "ecEncodeCompressed",
+})
+
+
+def _is_byte_typed_expr(expr: Expression | None, ctx: _LowerCtx) -> bool:
+    """Return True if *expr* is known to produce a byte-typed value."""
+    if expr is None:
+        return False
+
+    if isinstance(expr, ByteStringLiteral):
+        return True
+
+    if isinstance(expr, Identifier):
+        t = ctx.get_param_type(expr.name)
+        if t is not None and t in _BYTE_TYPES:
+            return True
+        t = ctx.get_property_type(expr.name)
+        if t is not None and t in _BYTE_TYPES:
+            return True
+        return False
+
+    if isinstance(expr, PropertyAccessExpr):
+        t = ctx.get_property_type(expr.property)
+        if t is not None and t in _BYTE_TYPES:
+            return True
+        return False
+
+    if isinstance(expr, MemberExpr):
+        if isinstance(expr.object, Identifier) and expr.object.name == "this":
+            t = ctx.get_property_type(expr.property)
+            if t is not None and t in _BYTE_TYPES:
+                return True
+        return False
+
+    if isinstance(expr, CallExpr):
+        if isinstance(expr.callee, Identifier):
+            if expr.callee.name in _BYTE_RETURNING_FUNCTIONS:
+                return True
+            if len(expr.callee.name) >= 7 and expr.callee.name[:7] == "extract":
+                return True
+        return False
+
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Properties
+# ---------------------------------------------------------------------------
+
+def _lower_properties(contract: ContractNode) -> list[ANFProperty]:
+    return [
+        ANFProperty(
+            name=prop.name,
+            type=_type_node_to_string(prop.type),
+            readonly=prop.readonly,
+        )
+        for prop in contract.properties
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Methods
+# ---------------------------------------------------------------------------
+
+def _lower_methods(contract: ContractNode) -> list[ANFMethod]:
+    result: list[ANFMethod] = []
+
+    # Lower constructor
+    ctor_ctx = _LowerCtx(contract)
+    ctor_ctx.lower_statements(contract.constructor.body)
+    result.append(ANFMethod(
+        name="constructor",
+        params=_lower_params(contract.constructor.params),
+        body=ctor_ctx.bindings,
+        is_public=False,
+    ))
+
+    # Lower each method
+    for method in contract.methods:
+        method_ctx = _LowerCtx(contract)
+
+        if contract.parent_class == "StatefulSmartContract" and method.visibility == "public":
+            # Register txPreimage as an implicit parameter
+            method_ctx.add_param("txPreimage")
+
+            # Inject checkPreimage(txPreimage) at the start
+            preimage_ref = method_ctx.emit(ANFValue(kind="load_param", name="txPreimage"))
+            check_result = method_ctx.emit(ANFValue(kind="check_preimage", preimage=preimage_ref))
+            method_ctx.emit(_make_assert(check_result))
+
+            # Deserialize mutable state from the preimage's scriptCode
+            has_state_prop = any(not p.readonly for p in contract.properties)
+            if has_state_prop:
+                preimage_ref3 = method_ctx.emit(ANFValue(kind="load_param", name="txPreimage"))
+                method_ctx.emit(ANFValue(kind="deserialize_state", preimage=preimage_ref3))
+
+            # Lower the developer's method body
+            method_ctx.lower_statements(method.body)
+
+            # Determine state continuation type
+            add_output_refs = method_ctx.get_add_output_refs()
+            if add_output_refs:
+                # Multi-output continuation
+                accumulated = add_output_refs[0]
+                for i in range(1, len(add_output_refs)):
+                    accumulated = method_ctx.emit(_make_call("cat", [accumulated, add_output_refs[i]]))
+                hash_ref = method_ctx.emit(_make_call("hash256", [accumulated]))
+                preimage_ref2 = method_ctx.emit(ANFValue(kind="load_param", name="txPreimage"))
+                output_hash_ref = method_ctx.emit(_make_call("extractOutputHash", [preimage_ref2]))
+                eq_ref = method_ctx.emit(ANFValue(
+                    kind="bin_op", op="===",
+                    left=hash_ref, right=output_hash_ref,
+                    result_type="bytes",
+                ))
+                method_ctx.emit(_make_assert(eq_ref))
+            elif _method_mutates_state(method, contract):
+                # Single-output continuation
+                state_script_ref = method_ctx.emit(ANFValue(kind="get_state_script"))
+                preimage_ref2 = method_ctx.emit(ANFValue(kind="load_param", name="txPreimage"))
+                hash_ref = method_ctx.emit(_make_call("computeStateOutputHash", [preimage_ref2, state_script_ref]))
+                output_hash_ref = method_ctx.emit(_make_call("extractOutputHash", [preimage_ref2]))
+                eq_ref = method_ctx.emit(ANFValue(
+                    kind="bin_op", op="===",
+                    left=hash_ref, right=output_hash_ref,
+                    result_type="bytes",
+                ))
+                method_ctx.emit(_make_assert(eq_ref))
+
+            # Append implicit txPreimage param
+            augmented_params = _lower_params(method.params) + [
+                ANFParam(name="txPreimage", type="SigHashPreimage"),
+            ]
+
+            result.append(ANFMethod(
+                name=method.name,
+                params=augmented_params,
+                body=method_ctx.bindings,
+                is_public=True,
+            ))
+        else:
+            method_ctx.lower_statements(method.body)
+            result.append(ANFMethod(
+                name=method.name,
+                params=_lower_params(method.params),
+                body=method_ctx.bindings,
+                is_public=method.visibility == "public",
+            ))
+
+    return result
+
+
+def _lower_params(params: list) -> list[ANFParam]:
+    return [
+        ANFParam(name=p.name, type=_type_node_to_string(p.type))
+        for p in params
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Lowering context
+# ---------------------------------------------------------------------------
+
+class _LowerCtx:
+    """Manages temp variable generation and binding emission.
+
+    Mirrors the Go ``lowerCtx`` struct exactly.
+    """
+
+    def __init__(self, contract: ContractNode) -> None:
+        self.bindings: list[ANFBinding] = []
+        self._counter: int = 0
+        self._contract: ContractNode = contract
+        self._local_names: set[str] = set()
+        self._param_names: set[str] = set()
+        self._add_output_refs: list[str] = []
+        self._local_aliases: dict[str, str] = {}
+
+    def fresh_temp(self) -> str:
+        name = f"t{self._counter}"
+        self._counter += 1
+        return name
+
+    def emit(self, value: ANFValue) -> str:
+        name = self.fresh_temp()
+        self.bindings.append(ANFBinding(name=name, value=value))
+        return name
+
+    def emit_named(self, name: str, value: ANFValue) -> None:
+        self.bindings.append(ANFBinding(name=name, value=value))
+
+    def add_local(self, name: str) -> None:
+        self._local_names.add(name)
+
+    def is_local(self, name: str) -> bool:
+        return name in self._local_names
+
+    def add_param(self, name: str) -> None:
+        self._param_names.add(name)
+
+    def is_param(self, name: str) -> bool:
+        return name in self._param_names
+
+    def set_local_alias(self, local_name: str, binding_name: str) -> None:
+        self._local_aliases[local_name] = binding_name
+
+    def get_local_alias(self, local_name: str) -> str:
+        return self._local_aliases.get(local_name, "")
+
+    def add_output_ref(self, ref: str) -> None:
+        self._add_output_refs.append(ref)
+
+    def get_add_output_refs(self) -> list[str]:
+        return self._add_output_refs
+
+    def is_property(self, name: str) -> bool:
+        return any(p.name == name for p in self._contract.properties)
+
+    def get_param_type(self, name: str) -> str | None:
+        for p in self._contract.constructor.params:
+            if p.name == name:
+                return _type_node_to_string(p.type)
+        for method in self._contract.methods:
+            for p in method.params:
+                if p.name == name:
+                    return _type_node_to_string(p.type)
+        return None
+
+    def get_property_type(self, name: str) -> str | None:
+        for p in self._contract.properties:
+            if p.name == name:
+                return _type_node_to_string(p.type)
+        return None
+
+    def sub_context(self) -> _LowerCtx:
+        """Create a sub-context for nested blocks (if/else, loops).
+
+        The counter continues from the parent. Local names and param names
+        are shared (copied).
+        """
+        sub = _LowerCtx(self._contract)
+        sub._counter = self._counter
+        sub._local_names = set(self._local_names)
+        sub._param_names = set(self._param_names)
+        sub._local_aliases = dict(self._local_aliases)
+        return sub
+
+    def sync_counter(self, sub: _LowerCtx) -> None:
+        if sub._counter > self._counter:
+            self._counter = sub._counter
+
+    # -------------------------------------------------------------------
+    # Statement lowering
+    # -------------------------------------------------------------------
+
+    def lower_statements(self, stmts: list[Statement]) -> None:
+        for stmt in stmts:
+            self.lower_statement(stmt)
+
+    def lower_statement(self, stmt: Statement) -> None:
+        if isinstance(stmt, VariableDeclStmt):
+            self._lower_variable_decl(stmt)
+        elif isinstance(stmt, AssignmentStmt):
+            self._lower_assignment(stmt)
+        elif isinstance(stmt, IfStmt):
+            self._lower_if_statement(stmt)
+        elif isinstance(stmt, ForStmt):
+            self._lower_for_statement(stmt)
+        elif isinstance(stmt, ExpressionStmt):
+            self.lower_expr_to_ref(stmt.expr)
+        elif isinstance(stmt, ReturnStmt):
+            if stmt.value is not None:
+                self.lower_expr_to_ref(stmt.value)
+
+    def _lower_variable_decl(self, stmt: VariableDeclStmt) -> None:
+        value_ref = self.lower_expr_to_ref(stmt.init)
+        self.add_local(stmt.name)
+        self.emit_named(stmt.name, _make_load_const_string("@ref:" + value_ref))
+
+    def _lower_assignment(self, stmt: AssignmentStmt) -> None:
+        value_ref = self.lower_expr_to_ref(stmt.value)
+
+        # this.x = expr -> update_prop
+        if isinstance(stmt.target, PropertyAccessExpr):
+            self.emit(_make_update_prop(stmt.target.property, value_ref))
+            return
+
+        # local = expr -> re-bind
+        if isinstance(stmt.target, Identifier):
+            self.emit_named(stmt.target.name, _make_load_const_string("@ref:" + value_ref))
+            return
+
+        # For other targets, lower the target expression
+        self.lower_expr_to_ref(stmt.target)
+
+    def _lower_if_statement(self, stmt: IfStmt) -> None:
+        cond_ref = self.lower_expr_to_ref(stmt.condition)
+
+        # Lower then-block into sub-context
+        then_ctx = self.sub_context()
+        then_ctx.lower_statements(stmt.then)
+        self.sync_counter(then_ctx)
+
+        # Lower else-block into sub-context
+        else_ctx = self.sub_context()
+        if stmt.else_:
+            else_ctx.lower_statements(stmt.else_)
+        self.sync_counter(else_ctx)
+
+        if_name = self.emit(ANFValue(
+            kind="if",
+            cond=cond_ref,
+            then=then_ctx.bindings,
+            else_=else_ctx.bindings,
+        ))
+
+        # If both branches end by reassigning the same local variable,
+        # alias that variable to the if-expression result
+        if then_ctx.bindings and else_ctx.bindings:
+            then_last = then_ctx.bindings[-1]
+            else_last = else_ctx.bindings[-1]
+            if then_last.name == else_last.name and self.is_local(then_last.name):
+                self.set_local_alias(then_last.name, if_name)
+
+    def _lower_for_statement(self, stmt: ForStmt) -> None:
+        count = _extract_loop_count(stmt)
+
+        # Lower body into sub-context
+        body_ctx = self.sub_context()
+        body_ctx.lower_statements(stmt.body)
+        self.sync_counter(body_ctx)
+
+        self.emit(ANFValue(
+            kind="loop",
+            count=count,
+            body=body_ctx.bindings,
+            iter_var=stmt.init.name if stmt.init else "",
+        ))
+
+    # -------------------------------------------------------------------
+    # Expression lowering (the core ANF conversion)
+    # -------------------------------------------------------------------
+
+    def lower_expr_to_ref(self, expr: Expression | None) -> str:
+        if expr is None:
+            return self.emit(_make_load_const_int(0))
+
+        if isinstance(expr, BigIntLiteral):
+            return self.emit(_make_load_const_int(expr.value))
+
+        if isinstance(expr, BoolLiteral):
+            return self.emit(_make_load_const_bool(expr.value))
+
+        if isinstance(expr, ByteStringLiteral):
+            return self.emit(_make_load_const_string(expr.value))
+
+        if isinstance(expr, Identifier):
+            return self._lower_identifier(expr)
+
+        if isinstance(expr, PropertyAccessExpr):
+            # this.txPreimage in StatefulSmartContract -> load_param
+            if self.is_param(expr.property):
+                return self.emit(ANFValue(kind="load_param", name=expr.property))
+            # this.x -> load_prop
+            return self.emit(ANFValue(kind="load_prop", name=expr.property))
+
+        if isinstance(expr, MemberExpr):
+            return self._lower_member_expr(expr)
+
+        if isinstance(expr, BinaryExpr):
+            left_ref = self.lower_expr_to_ref(expr.left)
+            right_ref = self.lower_expr_to_ref(expr.right)
+
+            result_type: str | None = None
+            if (expr.op in ("===", "!==")) and (
+                _is_byte_typed_expr(expr.left, self) or _is_byte_typed_expr(expr.right, self)
+            ):
+                result_type = "bytes"
+
+            return self.emit(ANFValue(
+                kind="bin_op", op=expr.op,
+                left=left_ref, right=right_ref,
+                result_type=result_type,
+            ))
+
+        if isinstance(expr, UnaryExpr):
+            operand_ref = self.lower_expr_to_ref(expr.operand)
+            return self.emit(ANFValue(kind="unary_op", op=expr.op, operand=operand_ref))
+
+        if isinstance(expr, CallExpr):
+            return self._lower_call_expr(expr)
+
+        if isinstance(expr, TernaryExpr):
+            return self._lower_ternary_expr(expr)
+
+        if isinstance(expr, IndexAccessExpr):
+            obj_ref = self.lower_expr_to_ref(expr.object)
+            index_ref = self.lower_expr_to_ref(expr.index)
+            return self.emit(_make_call("__array_access", [obj_ref, index_ref]))
+
+        if isinstance(expr, IncrementExpr):
+            return self._lower_increment_expr(expr)
+
+        if isinstance(expr, DecrementExpr):
+            return self._lower_decrement_expr(expr)
+
+        return self.emit(_make_load_const_int(0))
+
+    def _lower_identifier(self, id_node: Identifier) -> str:
+        name = id_node.name
+
+        # 'this' is not a value in ANF
+        if name == "this":
+            return self.emit(_make_load_const_string("@this"))
+
+        # Check if it's a registered parameter (e.g. txPreimage)
+        if self.is_param(name):
+            return self.emit(ANFValue(kind="load_param", name=name))
+
+        # Check if it's a local variable -- reference it directly
+        # (or use its alias if reassigned by an if-statement)
+        if self.is_local(name):
+            alias = self.get_local_alias(name)
+            if alias:
+                return alias
+            return name
+
+        # Check if it's a contract property
+        if self.is_property(name):
+            return self.emit(ANFValue(kind="load_prop", name=name))
+
+        # Default: treat as parameter (this is how params get loaded lazily)
+        return self.emit(ANFValue(kind="load_param", name=name))
+
+    def _lower_member_expr(self, e: MemberExpr) -> str:
+        # this.x -> load_prop
+        if isinstance(e.object, Identifier) and e.object.name == "this":
+            return self.emit(ANFValue(kind="load_prop", name=e.property))
+
+        # SigHash.ALL etc. -> load constant
+        if isinstance(e.object, Identifier) and e.object.name == "SigHash":
+            sig_hash_values: dict[str, int] = {
+                "ALL":          0x01,
+                "NONE":         0x02,
+                "SINGLE":       0x03,
+                "FORKID":       0x40,
+                "ANYONECANPAY": 0x80,
+            }
+            val = sig_hash_values.get(e.property)
+            if val is not None:
+                return self.emit(_make_load_const_int(val))
+
+        # General member access
+        obj_ref = self.lower_expr_to_ref(e.object)
+        return self.emit(ANFValue(kind="method_call", object=obj_ref, method=e.property))
+
+    def _lower_call_expr(self, e: CallExpr) -> str:
+        callee = e.callee
+
+        # super(...) call — accepts both Identifier("super") and MemberExpr(super, "")
+        is_super = (isinstance(callee, Identifier) and callee.name == "super") or (
+            isinstance(callee, MemberExpr) and isinstance(callee.object, Identifier)
+            and callee.object.name == "super"
+        )
+        if is_super:
+            arg_refs = self._lower_args(e.args)
+            return self.emit(_make_call("super", arg_refs))
+
+        # assert(expr)
+        if isinstance(callee, Identifier) and callee.name == "assert":
+            if len(e.args) >= 1:
+                value_ref = self.lower_expr_to_ref(e.args[0])
+                return self.emit(_make_assert(value_ref))
+            false_ref = self.emit(_make_load_const_bool(False))
+            return self.emit(_make_assert(false_ref))
+
+        # checkPreimage(preimage)
+        if isinstance(callee, Identifier) and callee.name == "checkPreimage":
+            if len(e.args) >= 1:
+                preimage_ref = self.lower_expr_to_ref(e.args[0])
+                return self.emit(ANFValue(kind="check_preimage", preimage=preimage_ref))
+
+        # this.addOutput(satoshis, val1, val2, ...) via PropertyAccessExpr
+        if isinstance(callee, PropertyAccessExpr) and callee.property == "addOutput":
+            arg_refs = self._lower_args(e.args)
+            satoshis = arg_refs[0]
+            state_values = arg_refs[1:]
+            ref = self.emit(ANFValue(kind="add_output", satoshis=satoshis, state_values=state_values))
+            self.add_output_ref(ref)
+            return ref
+
+        # this.addOutput(satoshis, val1, val2, ...) via MemberExpr
+        if isinstance(callee, MemberExpr):
+            if (
+                isinstance(callee.object, Identifier)
+                and callee.object.name == "this"
+                and callee.property == "addOutput"
+            ):
+                arg_refs = self._lower_args(e.args)
+                satoshis = arg_refs[0]
+                state_values = arg_refs[1:]
+                ref = self.emit(ANFValue(kind="add_output", satoshis=satoshis, state_values=state_values))
+                self.add_output_ref(ref)
+                return ref
+
+        # this.getStateScript() via PropertyAccessExpr
+        if isinstance(callee, PropertyAccessExpr) and callee.property == "getStateScript":
+            return self.emit(ANFValue(kind="get_state_script"))
+
+        # this.getStateScript() via MemberExpr
+        if isinstance(callee, MemberExpr):
+            if (
+                isinstance(callee.object, Identifier)
+                and callee.object.name == "this"
+                and callee.property == "getStateScript"
+            ):
+                return self.emit(ANFValue(kind="get_state_script"))
+
+        # this.method(...) via PropertyAccessExpr
+        if isinstance(callee, PropertyAccessExpr):
+            arg_refs = self._lower_args(e.args)
+            this_ref = self.emit(_make_load_const_string("@this"))
+            return self.emit(ANFValue(
+                kind="method_call", object=this_ref,
+                method=callee.property, args=arg_refs,
+            ))
+
+        # this.method(...) via MemberExpr
+        if isinstance(callee, MemberExpr):
+            if isinstance(callee.object, Identifier) and callee.object.name == "this":
+                arg_refs = self._lower_args(e.args)
+                this_ref = self.emit(_make_load_const_string("@this"))
+                return self.emit(ANFValue(
+                    kind="method_call", object=this_ref,
+                    method=callee.property, args=arg_refs,
+                ))
+
+        # Direct function call: sha256(x), checkSig(sig, pk), etc.
+        if isinstance(callee, Identifier):
+            arg_refs = self._lower_args(e.args)
+            return self.emit(_make_call(callee.name, arg_refs))
+
+        # General call
+        callee_ref = self.lower_expr_to_ref(callee)
+        arg_refs = self._lower_args(e.args)
+        return self.emit(ANFValue(
+            kind="method_call", object=callee_ref,
+            method="call", args=arg_refs,
+        ))
+
+    def _lower_args(self, args: list[Expression]) -> list[str]:
+        return [self.lower_expr_to_ref(arg) for arg in args]
+
+    def _lower_ternary_expr(self, e: TernaryExpr) -> str:
+        cond_ref = self.lower_expr_to_ref(e.condition)
+
+        then_ctx = self.sub_context()
+        then_ctx.lower_expr_to_ref(e.consequent)
+        self.sync_counter(then_ctx)
+
+        else_ctx = self.sub_context()
+        else_ctx.lower_expr_to_ref(e.alternate)
+        self.sync_counter(else_ctx)
+
+        return self.emit(ANFValue(
+            kind="if",
+            cond=cond_ref,
+            then=then_ctx.bindings,
+            else_=else_ctx.bindings,
+        ))
+
+    def _lower_increment_expr(self, e: IncrementExpr) -> str:
+        operand_ref = self.lower_expr_to_ref(e.operand)
+        one_ref = self.emit(_make_load_const_int(1))
+        result = self.emit(ANFValue(kind="bin_op", op="+", left=operand_ref, right=one_ref))
+
+        # If the operand is a named variable, update it
+        if isinstance(e.operand, Identifier):
+            self.emit_named(e.operand.name, _make_load_const_string("@ref:" + result))
+        if isinstance(e.operand, PropertyAccessExpr):
+            self.emit(_make_update_prop(e.operand.property, result))
+
+        if e.prefix:
+            return result
+        return operand_ref
+
+    def _lower_decrement_expr(self, e: DecrementExpr) -> str:
+        operand_ref = self.lower_expr_to_ref(e.operand)
+        one_ref = self.emit(_make_load_const_int(1))
+        result = self.emit(ANFValue(kind="bin_op", op="-", left=operand_ref, right=one_ref))
+
+        # If the operand is a named variable, update it
+        if isinstance(e.operand, Identifier):
+            self.emit_named(e.operand.name, _make_load_const_string("@ref:" + result))
+        if isinstance(e.operand, PropertyAccessExpr):
+            self.emit(_make_update_prop(e.operand.property, result))
+
+        if e.prefix:
+            return result
+        return operand_ref
+
+
+# ---------------------------------------------------------------------------
+# ANFValue constructors
+# ---------------------------------------------------------------------------
+
+def _make_load_const_int(val: int) -> ANFValue:
+    raw = json.dumps(val)
+    return ANFValue(
+        kind="load_const",
+        raw_value=raw,
+        const_big_int=val,
+        const_int=val,
+    )
+
+
+def _make_load_const_bool(val: bool) -> ANFValue:
+    raw = json.dumps(val)
+    return ANFValue(
+        kind="load_const",
+        raw_value=raw,
+        const_bool=val,
+    )
+
+
+def _make_load_const_string(val: str) -> ANFValue:
+    raw = json.dumps(val)
+    return ANFValue(
+        kind="load_const",
+        raw_value=raw,
+        const_string=val,
+    )
+
+
+def _make_call(func_name: str, args: list[str]) -> ANFValue:
+    return ANFValue(
+        kind="call",
+        func=func_name,
+        args=args,
+    )
+
+
+def _make_assert(value_ref: str) -> ANFValue:
+    raw = json.dumps(value_ref)
+    return ANFValue(
+        kind="assert",
+        raw_value=raw,
+        value_ref=value_ref,
+    )
+
+
+def _make_update_prop(name: str, value_ref: str) -> ANFValue:
+    raw = json.dumps(value_ref)
+    return ANFValue(
+        kind="update_prop",
+        name=name,
+        raw_value=raw,
+        value_ref=value_ref,
+    )
+
+
+# ---------------------------------------------------------------------------
+# State mutation analysis
+# ---------------------------------------------------------------------------
+
+def _method_mutates_state(method, contract: ContractNode) -> bool:
+    """Determine whether a method mutates any mutable (non-readonly) property.
+
+    Conservative: if ANY code path can mutate state, returns True.
+    """
+    mutable_props: set[str] = {
+        p.name for p in contract.properties if not p.readonly
+    }
+    if not mutable_props:
+        return False
+    return _body_mutates_state(method.body, mutable_props)
+
+
+def _body_mutates_state(stmts: list[Statement], mutable_props: set[str]) -> bool:
+    return any(_stmt_mutates_state(stmt, mutable_props) for stmt in stmts)
+
+
+def _stmt_mutates_state(stmt: Statement, mutable_props: set[str]) -> bool:
+    if isinstance(stmt, AssignmentStmt):
+        if isinstance(stmt.target, PropertyAccessExpr):
+            return stmt.target.property in mutable_props
+        return False
+
+    if isinstance(stmt, ExpressionStmt):
+        return _expr_mutates_state(stmt.expr, mutable_props)
+
+    if isinstance(stmt, IfStmt):
+        if _body_mutates_state(stmt.then, mutable_props):
+            return True
+        if stmt.else_ and _body_mutates_state(stmt.else_, mutable_props):
+            return True
+        return False
+
+    if isinstance(stmt, ForStmt):
+        if stmt.update is not None and _stmt_mutates_state(stmt.update, mutable_props):
+            return True
+        return _body_mutates_state(stmt.body, mutable_props)
+
+    return False
+
+
+def _expr_mutates_state(expr: Expression | None, mutable_props: set[str]) -> bool:
+    if expr is None:
+        return False
+    if isinstance(expr, IncrementExpr):
+        if isinstance(expr.operand, PropertyAccessExpr):
+            return expr.operand.property in mutable_props
+    if isinstance(expr, DecrementExpr):
+        if isinstance(expr.operand, PropertyAccessExpr):
+            return expr.operand.property in mutable_props
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Loop count extraction
+# ---------------------------------------------------------------------------
+
+def _extract_loop_count(stmt: ForStmt) -> int:
+    start_val = _extract_bigint_value(stmt.init.init if stmt.init else None)
+
+    if isinstance(stmt.condition, BinaryExpr):
+        bound_val = _extract_bigint_value(stmt.condition.right)
+
+        if start_val is not None and bound_val is not None:
+            start = start_val
+            bound = bound_val
+            op = stmt.condition.op
+            if op == "<":
+                return max(0, bound - start)
+            if op == "<=":
+                return max(0, bound - start + 1)
+            if op == ">":
+                return max(0, start - bound)
+            if op == ">=":
+                return max(0, start - bound + 1)
+
+        if bound_val is not None:
+            op = stmt.condition.op
+            if op == "<":
+                return bound_val
+            if op == "<=":
+                return bound_val + 1
+
+    return 0
+
+
+def _extract_bigint_value(expr: Expression | None) -> int | None:
+    if expr is None:
+        return None
+    if isinstance(expr, BigIntLiteral):
+        return expr.value
+    if isinstance(expr, UnaryExpr) and expr.op == "-":
+        inner = _extract_bigint_value(expr.operand)
+        if inner is not None:
+            return -inner
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _type_node_to_string(node: TypeNode | None) -> str:
+    """Convert a type node to its string representation."""
+    if node is None:
+        return "<unknown>"
+    if isinstance(node, PrimitiveType):
+        return node.name
+    if isinstance(node, FixedArrayType):
+        return _type_node_to_string(node.element) + "[]"
+    if isinstance(node, CustomType):
+        return node.name
+    return "<unknown>"

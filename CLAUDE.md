@@ -4,7 +4,7 @@
 
 Rúnar compiles a strict subset of TypeScript into Bitcoin SV Script. Developers write smart contracts as TypeScript classes extending `SmartContract` (stateless) or `StatefulSmartContract` (stateful), and the compiler produces Bitcoin Script locking scripts.
 
-Three independent compiler implementations (TypeScript, Go, Rust) must produce identical output for the same input. Contracts can also be written in Solidity-like, Move-style, Go, or Rust DSL syntax — all formats compile to the same AST and produce identical Bitcoin Script.
+Three independent compiler implementations (TypeScript, Go, Rust) must produce identical output for the same input. Contracts can also be written in Solidity-like, Move-style, Go, Rust DSL, or Python syntax — all formats compile to the same AST and produce identical Bitcoin Script.
 
 ## Repository Structure
 
@@ -19,6 +19,7 @@ packages/
   runar-go/            # Go package: types, mock crypto, real hashes, CompileCheck(), deployment SDK
   runar-rs/            # Rust crate: prelude types, mock crypto, real hashes, compile_check(), deployment SDK
   runar-rs-macros/     # Rust proc-macro crate: #[runar::contract], #[public], #[readonly]
+  runar-py/            # Python package: types, mock crypto, real hashes, EC operations, deployment SDK
 compilers/
   go/                 # Go compiler implementation
   rust/               # Rust compiler implementation
@@ -29,11 +30,12 @@ examples/
   rust/               # Rust contracts + cargo test (native Rust tests + Rúnar compile checks)
   sol/                # Solidity-like contracts + vitest tests
   move/               # Move-style contracts + vitest tests
+  python/             # Python contracts + pytest tests
   sdk-usage/          # SDK usage reference docs (not runnable)
 end2end-example/      # End-to-end example (ts, go, rust, sol, move, webapp, webapp-blackjack)
 spec/                 # Language specification (grammar, semantics, type system)
 docs/                 # User-facing documentation
-  formats/            # Format-specific guides (solidity.md, move.md, go.md, rust.md)
+  formats/            # Format-specific guides (solidity.md, move.md, go.md, rust.md, python.md)
 go.work              # Go workspace: compilers/go + conformance + end2end-example/go + end2end-example/webapp + end2end-example/webapp-blackjack + examples/go + packages/runar-go
 ```
 
@@ -49,6 +51,8 @@ cd packages/runar-go && go test ./...           # Run Go SDK + mock package test
 cd packages/runar-rs && cargo test              # Run Rust SDK + crate tests
 cd examples/go && go test ./...                 # Run Go contract tests (business logic + Rúnar compile check)
 cd examples/rust && cargo test                  # Run Rust contract tests (business logic + Rúnar compile check)
+cd packages/runar-py && python3 -m pytest       # Run Python SDK + package tests
+cd examples/python && PYTHONPATH=../../packages/runar-py python3 -m pytest  # Run Python contract tests
 ```
 
 ## Compiler Pipeline
@@ -59,6 +63,7 @@ Each pass is a pure function in `packages/runar-compiler/src/passes/`:
    - `.runar.ts` → TypeScript parser (ts-morph)
    - `.runar.sol` → Solidity-like parser (hand-written recursive descent)
    - `.runar.move` → Move-style parser (hand-written recursive descent)
+   - `.runar.py` → Python parser (hand-written tokenizer with INDENT/DEDENT + recursive descent)
 2. **02-validate.ts** — Language subset constraints (no mutation of the AST)
 3. **03-typecheck.ts** — Type consistency verification. Rejects calls to non-Rúnar functions (Math.floor, console.log, etc.)
 4. **04-anf-lower.ts** — AST → A-Normal Form IR (flattened let-bindings)
@@ -69,8 +74,8 @@ The constant folding optimizer (`src/optimizer/constant-fold.ts`) is available b
 The peephole optimizer (`src/optimizer/peephole.ts`) runs on Stack IR between passes 5 and 6 (always enabled).
 
 Go and Rust compilers have their own parser dispatch:
-- Go: `frontend.ParseSource()` handles `.runar.ts`, `.runar.sol`, `.runar.move`, `.runar.go`
-- Rust: `parser::parse_source()` handles `.runar.ts`, `.runar.sol`, `.runar.move`, `.runar.rs`
+- Go: `frontend.ParseSource()` handles `.runar.ts`, `.runar.sol`, `.runar.move`, `.runar.go`, `.runar.py`
+- Rust: `parser::parse_source()` handles `.runar.ts`, `.runar.sol`, `.runar.move`, `.runar.rs`, `.runar.py`
 
 ## Key Conventions
 
@@ -161,7 +166,21 @@ fn test_compile() {
 }
 ```
 
-`TestContract` uses the interpreter (not the VM) — it tests business logic with mocked crypto (`checkSig` always true, `checkPreimage` always true). Go and Rust tests run contracts as native code with mock types from the `runar` package/crate.
+**Python** (pytest):
+```python
+from conftest import load_contract
+from runar import hash160, mock_sig, mock_pub_key
+
+contract_mod = load_contract("P2PKH.runar.py")
+P2PKH = contract_mod.P2PKH
+
+def test_unlock():
+    pk = mock_pub_key()
+    c = P2PKH(pub_key_hash=hash160(pk))
+    c.unlock(mock_sig(), pk)
+```
+
+`TestContract` uses the interpreter (not the VM) — it tests business logic with mocked crypto (`checkSig` always true, `checkPreimage` always true). Go, Rust, and Python tests run contracts as native code with mock types from the `runar` package/crate.
 
 The `CompileCheck` / `compile_check` functions run the contract through the Rúnar frontend (parse → validate → typecheck) to verify it's valid Rúnar that will compile to Bitcoin Script.
 
@@ -174,6 +193,8 @@ All three languages have equivalent deployment SDKs for interacting with compile
 **Go** (`packages/runar-go/sdk_*.go`): `RunarContract`, `MockProvider`, `LocalSigner` (wraps go-sdk for ECDSA + BIP-143), `MockSignerImpl`/`ExternalSigner`, `BuildDeployTransaction`, `BuildCallTransaction`, state serialization.
 
 **Rust** (`packages/runar-rs/src/sdk/`): `RunarContract`, `MockProvider`, `LocalSigner` (k256 ECDSA + manual BIP-143), `MockSigner`/`ExternalSigner`, `build_deploy_transaction`, `build_call_transaction`, state serialization.
+
+**Python** (`packages/runar-py/runar/sdk/`): `RunarContract`, `MockProvider`, `MockSigner`/`ExternalSigner`, `build_deploy_transaction`, `build_call_transaction`, state serialization. Zero required dependencies (hashlib is stdlib). Python contracts use snake_case names which the parser converts to camelCase in the AST.
 
 Key SDK concepts:
 - `RunarContract` wraps a compiled artifact + constructor args, manages state and UTXO tracking
@@ -191,7 +212,8 @@ Key SDK concepts:
 
 ## Style
 
-- No decorators in the Rúnar language — TypeScript's own keywords (`public`, `private`, `readonly`) provide all expressiveness
+- No decorators in the Rúnar language (except Python format which uses `@public`) — TypeScript's own keywords (`public`, `private`, `readonly`) provide all expressiveness
+- Python contracts use snake_case identifiers which the parser converts to camelCase in the AST (`pub_key_hash` → `pubKeyHash`, `check_sig` → `checkSig`). Uses `Readonly[T]` for readonly properties in stateful contracts, `//` for integer division, `and`/`or`/`not` for boolean operators, and `assert_(expr)` or `assert expr` for assertions
 - One contract class per source file
 - Constructor must call `super(...)` as first statement, passing all properties
 - Public methods are spending entry points; private methods are inlined helpers
