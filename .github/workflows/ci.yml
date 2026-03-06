@@ -83,19 +83,26 @@ jobs:
       - name: Run conformance tests
         run: |
           fail=0
+          # Skip expensive tests (ec-primitives ~3.5MB, post-quantum ~400KB scripts).
+          # Those are covered by each compiler's own test suite.
+          skip="ec-primitives|post-quantum-slhdsa|post-quantum-wots"
           for test in conformance/tests/*/expected-ir.json; do
             dir=$(dirname "$test")
             name=$(basename "$dir")
+            if echo "$name" | grep -qE "^($skip)$"; then
+              echo "=== $name === SKIPPED (expensive)"
+              continue
+            fi
             echo "=== $name ==="
             go_hex=$(./runar-go --ir "$test" --hex)
             rust_hex=$(./runar-compiler-rust --ir "$test" --hex)
-            echo "  Go:   $go_hex"
-            echo "  Rust: $rust_hex"
             if [ "$go_hex" != "$rust_hex" ]; then
-              echo "  MISMATCH between Go and Rust for $name"
+              echo "  MISMATCH between Go and Rust"
+              echo "  Go:   ${go_hex:0:80}..."
+              echo "  Rust: ${rust_hex:0:80}..."
               fail=1
             else
-              echo "  OK"
+              echo "  OK (${#go_hex} hex chars)"
             fi
           done
           exit $fail
