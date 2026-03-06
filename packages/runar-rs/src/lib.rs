@@ -8,8 +8,11 @@
 //! use runar::prelude::*;
 //! ```
 
+pub mod ec;
 pub mod prelude;
 pub mod sdk;
+pub mod slh_dsa;
+pub mod wots;
 
 // Re-export proc-macro attributes so `#[runar::contract]` works.
 pub use runar_lang_macros::{contract, methods, public, stateful_contract};

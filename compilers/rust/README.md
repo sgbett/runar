@@ -139,3 +139,67 @@ cargo test
 ```
 
 Unit tests cover each pass independently, using synthetic IR inputs and asserting structural properties of the output. Integration tests in `tests/compiler_tests.rs` run the full pipeline against conformance test cases. Multi-format tests in `tests/multiformat_tests.rs` verify `.runar.sol`, `.runar.move`, and `.runar.rs` parsing.
+
+---
+
+## Known Limitation: `Bigint = i64` Overflow
+
+### Background
+
+Rúnar's `Bigint` type maps to Bitcoin Script numbers, which are **arbitrary precision** — there is no upper or lower bound on the integers Bitcoin Script can represent. However, the Rust runtime crate (`packages/runar-rs`) aliases `Bigint` to `i64`, which has a range of approximately ±9.2 × 10¹⁸. The Go package (`packages/runar-go`) has the same limitation with `int64`.
+
+### Why not a big-integer type?
+
+Rust, like Go, does not support operator overloading for arbitrary types in the way needed here. While Rust *does* have trait-based operator overloading, using a wrapper type around `num-bigint` would mean:
+
+- Every arithmetic expression requires the wrapper to implement `Add`, `Sub`, `Mul`, `Div`, `Rem`, `Neg`, `BitAnd`, `BitOr`, `BitXor`, `Shl`, `Shr`, plus all `*Assign` variants
+- Comparison with integer literals (`x > 0`) stops working without `From<i64>` conversions everywhere
+- Pattern matching and `match` guards on ranges break
+- The ergonomic cost is high for a test-time convenience that doesn't affect compiled output
+
+The entire point of Rúnar's Rust DSL is that contracts look like normal code with `+`, `-`, `*`, `/` operators. A big-integer wrapper would add friction to every arithmetic expression for a limitation that only exists in native Rust tests.
+
+### What Bitcoin Script actually supports
+
+When your contract is compiled and deployed on-chain, all arithmetic happens in Bitcoin Script's stack machine, which uses **arbitrary-precision integers**. There is no overflow. The i64 limitation exists **only** during native Rust testing — it does not affect the compiled contract.
+
+### What overflow detection covers
+
+Built-in math functions in `packages/runar-rs` include overflow detection and will **panic** instead of silently wrapping:
+
+| Function | What's checked |
+|----------|----------------|
+| `pow(base, exp)` | Accumulation loop overflow (`checked_mul`) |
+| `mul_div(a, b, c)` | Intermediate `a * b` overflow (`checked_mul`) |
+| `percent_of(amount, bps)` | Intermediate `amount * bps` overflow (`checked_mul`) |
+| `sqrt(n)` | Newton's method addition overflow (`checked_add`) |
+| `gcd(a, b)` | `i64::MIN.abs()` not representable (`checked_abs`) |
+
+These panics include a message noting that Bitcoin Script has no such limitation.
+
+### What overflow detection does NOT cover
+
+Direct use of Rust operators (`+`, `*`, `-`) in your contract code is **not** checked in release mode. In debug mode, Rust panics on overflow by default, but release builds silently wrap. There is no way to intercept operator overflow without replacing all operators with function calls or a wrapper type, which defeats the purpose of the DSL.
+
+```rust
+// Debug mode: panics on overflow. Release mode: silently wraps. NOT detected:
+let result = a * b + c;
+
+// This WILL panic on overflow in all modes — detected:
+let result = mul_div(a, b, 1); // use built-in functions for large intermediates
+```
+
+### When you might hit this
+
+- Token amounts exceeding ~9.2 × 10¹⁸ (e.g., tokens with 18 decimals and large supplies)
+- EC scalar arithmetic (secp256k1 field order ≈ 1.16 × 10⁷⁷)
+- Exponentiation with large bases or exponents
+- Intermediate products in financial calculations
+
+### Recommendations
+
+1. **Use built-in math functions** (`pow`, `mul_div`, `percent_of`) instead of raw operators for calculations that might produce large intermediates. These have overflow detection.
+
+2. **Verify numeric correctness with TypeScript tests.** TypeScript uses native `bigint` which has no size limit. If your TS tests pass but Rust tests overflow, the contract is correct — the Rust test environment is the limitation.
+
+3. **Use the deployment SDK for end-to-end testing.** `RunarContract` + `build_deploy_transaction` compiles your contract to Bitcoin Script and deploys it. The on-chain execution uses arbitrary-precision arithmetic regardless of which language you wrote the contract in.

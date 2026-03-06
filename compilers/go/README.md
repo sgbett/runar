@@ -137,3 +137,74 @@ go test ./...
 ```
 
 Unit tests cover each pass independently, using synthetic IR inputs and asserting structural properties of the output. Source compilation tests (`TestSourceCompile_*`) verify the full pipeline against conformance test cases.
+
+---
+
+## Known Limitation: `Bigint = int64` Overflow
+
+### Background
+
+Rúnar's `Bigint` type maps to Bitcoin Script numbers, which are **arbitrary precision** — there is no upper or lower bound on the integers Bitcoin Script can represent. However, the Go runtime package (`packages/runar-go`) aliases `Bigint` to `int64`, which has a range of approximately ±9.2 × 10¹⁸. The Rust crate (`packages/runar-rs`) has the same limitation with `i64`.
+
+### Why not `big.Int`?
+
+Go does not support operator overloading. If `Bigint` were `*big.Int`, contract code could not use natural arithmetic:
+
+```go
+// What you want to write (works with int64):
+total := price * quantity
+
+// What you'd have to write with big.Int:
+total := new(big.Int).Mul(price, quantity)
+```
+
+The entire point of Rúnar's Go (and Rust) DSL is that contracts look like normal code with `+`, `-`, `*`, `/` operators. Using `big.Int` would destroy that ergonomics completely — every arithmetic expression becomes a method-call chain, `==` stops working (you need `.Cmp()`), and the code no longer looks anything like the TypeScript/Solidity/Move equivalents.
+
+This is a fundamental Go language limitation, not a design choice we can work around.
+
+### What Bitcoin Script actually supports
+
+When your contract is compiled and deployed on-chain, all arithmetic happens in Bitcoin Script's stack machine, which uses **arbitrary-precision integers**. There is no overflow. The int64 limitation exists **only** during native Go/Rust testing — it does not affect the compiled contract.
+
+### What overflow detection covers
+
+Built-in math functions in `packages/runar-go` and `packages/runar-rs` include overflow detection and will **panic** instead of silently wrapping:
+
+| Function | What's checked |
+|----------|----------------|
+| `Pow(base, exp)` | Accumulation loop overflow |
+| `MulDiv(a, b, c)` | Intermediate `a * b` overflow |
+| `PercentOf(amount, bps)` | Intermediate `amount * bps` overflow |
+| `Sqrt(n)` | Newton's method addition overflow |
+| `Abs(n)` | `Abs(MinInt64)` not representable |
+| `Gcd(a, b)` | `|MinInt64|` not representable |
+| `Num2Bin(v, length)` | `|MinInt64|` not representable |
+
+These panics include a message pointing here and noting that Bitcoin Script has no such limitation.
+
+### What overflow detection does NOT cover
+
+Direct use of Go operators (`+`, `*`, `-`) in your contract code is **not** checked. Go silently wraps on int64 overflow — there is no way to intercept this without replacing all operators with function calls, which defeats the purpose of the DSL.
+
+```go
+// This will silently wrap if it overflows — NOT detected:
+result := a * b + c
+
+// This WILL panic on overflow — detected:
+result := runar.MulDiv(a, b, 1) // use built-in functions for large intermediates
+```
+
+### When you might hit this
+
+- Token amounts exceeding ~9.2 × 10¹⁸ (e.g., tokens with 18 decimals and large supplies)
+- EC scalar arithmetic (secp256k1 field order ≈ 1.16 × 10⁷⁷)
+- Exponentiation with large bases or exponents
+- Intermediate products in financial calculations
+
+### Recommendations
+
+1. **Use built-in math functions** (`Pow`, `MulDiv`, `PercentOf`) instead of raw operators for calculations that might produce large intermediates. These have overflow detection.
+
+2. **Verify numeric correctness with TypeScript tests.** TypeScript uses native `bigint` which has no size limit. If your TS tests pass but Go tests overflow, the contract is correct — the Go test environment is the limitation.
+
+3. **Use the deployment SDK for end-to-end testing.** `RunarContract` + `BuildDeployTransaction` compiles your contract to Bitcoin Script and deploys it. The on-chain execution uses arbitrary-precision arithmetic regardless of which language you wrote the contract in.
