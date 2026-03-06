@@ -553,11 +553,12 @@ describe('Optimizer: Constant Folding', () => {
         makeMethod('m', [
           b('t0', { kind: 'load_const', value: 1000n }),
           b('t1', { kind: 'load_param', name: 'count' }),
-          b('t2', { kind: 'add_output', satoshis: 't0', stateValues: ['t1'] }),
+          b('pre', { kind: 'check_preimage', preimage: 'dummyPre' }),
+          b('t2', { kind: 'add_output', satoshis: 't0', stateValues: ['t1'], preimage: 'pre' }),
         ]),
       ]);
       const folded = foldConstants(program);
-      expect(folded.methods[0]!.body[2]!.value.kind).toBe('add_output');
+      expect(folded.methods[0]!.body[3]!.value.kind).toBe('add_output');
     });
   });
 });
@@ -655,11 +656,12 @@ describe('Optimizer: Dead Binding Elimination', () => {
       makeMethod('m', [
         b('t0', { kind: 'load_const', value: 1000n }),
         b('t1', { kind: 'load_param', name: 'val' }),
-        b('t2', { kind: 'add_output', satoshis: 't0', stateValues: ['t1'] }),
+        b('pre', { kind: 'check_preimage', preimage: 'dummyPre' }),
+        b('t2', { kind: 'add_output', satoshis: 't0', stateValues: ['t1'], preimage: 'pre' }),
       ]),
     ]);
     const cleaned = eliminateDeadBindings(program);
-    expect(cleaned.methods[0]!.body).toHaveLength(3);
+    expect(cleaned.methods[0]!.body).toHaveLength(4);
   });
 });
 
