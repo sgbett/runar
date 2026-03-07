@@ -1135,6 +1135,9 @@ pub fn parse_source(source: &str, file_name: Option<&str>) -> ParseResult {
     if name.ends_with(".runar.py") {
         return super::parser_python::parse_python(source, file_name);
     }
+    if name.ends_with(".runar.rb") {
+        return super::parser_ruby::parse_ruby(source, file_name);
+    }
     // Default: TypeScript parser
     parse(source, file_name)
 }

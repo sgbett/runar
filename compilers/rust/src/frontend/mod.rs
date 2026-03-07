@@ -12,6 +12,7 @@ pub mod ast;
 pub mod parser;
 pub mod parser_move;
 pub mod parser_python;
+pub mod parser_ruby;
 pub mod parser_rustmacro;
 pub mod parser_sol;
 pub mod typecheck;
