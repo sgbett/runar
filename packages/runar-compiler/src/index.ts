@@ -15,6 +15,7 @@ export type { ParseResult } from './passes/01-parse.js';
 export { parseSolSource } from './passes/01-parse-sol.js';
 export { parseMoveSource } from './passes/01-parse-move.js';
 export { parsePythonSource } from './passes/01-parse-python.js';
+export { parseRubySource } from './passes/01-parse-ruby.js';
 
 export { validate } from './passes/02-validate.js';
 export type { ValidationResult } from './passes/02-validate.js';
