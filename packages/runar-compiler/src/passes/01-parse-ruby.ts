@@ -625,6 +625,21 @@ class RbParser {
       constructor = this.autoGenerateConstructor(properties);
     }
 
+    // Back-fill constructor param types from prop declarations.
+    // In Ruby, `def initialize(pub_key_hash)` has no type annotations —
+    // we infer them from the matching `prop :pub_key_hash, Addr` declarations.
+    if (constructor) {
+      const propTypeMap = new Map(properties.map(p => [p.name, p.type]));
+      for (const param of constructor.params) {
+        if (param.type.kind === 'custom_type' && (param.type as any).name === 'unknown') {
+          const propType = propTypeMap.get(param.name);
+          if (propType) {
+            param.type = propType;
+          }
+        }
+      }
+    }
+
     return {
       kind: 'contract',
       name: contractName,

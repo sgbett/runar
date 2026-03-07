@@ -794,6 +794,21 @@ func (p *rbParser) parseContract() (*ContractNode, error) {
 		constructor = &ctor
 	}
 
+	// Back-fill constructor param types from prop declarations.
+	// In Ruby, `def initialize(pub_key_hash)` has no type annotations —
+	// we infer them from the matching `prop :pub_key_hash, Addr` declarations.
+	propTypeMap := make(map[string]TypeNode)
+	for _, prop := range properties {
+		propTypeMap[prop.Name] = prop.Type
+	}
+	for i := range constructor.Params {
+		if ct, ok := constructor.Params[i].Type.(CustomType); ok && ct.Name == "unknown" {
+			if pt, found := propTypeMap[constructor.Params[i].Name]; found {
+				constructor.Params[i].Type = pt
+			}
+		}
+	}
+
 	return &ContractNode{
 		Name:        contractName,
 		ParentClass: parentClass,
