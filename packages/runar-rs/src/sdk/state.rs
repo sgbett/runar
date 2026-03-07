@@ -94,8 +94,9 @@ pub fn find_last_op_return(script_hex: &str) -> Option<usize> {
         let opcode = u8::from_str_radix(&script_hex[offset..offset + 2], 16).unwrap_or(0);
 
         if opcode == 0x6a {
-            last_pos = Some(offset);
-            offset += 2;
+            // OP_RETURN at a real opcode boundary. Everything after is
+            // raw state data (not opcodes), so stop walking immediately.
+            return Some(offset);
         } else if opcode >= 0x01 && opcode <= 0x4b {
             // Direct push: opcode is the number of bytes
             offset += 2 + opcode as usize * 2;

@@ -600,10 +600,10 @@ describe('M2: SDK boolean encoding mismatch', () => {
     expect(unlockScript).toBe('00');
   });
 
-  it('encodeStateValue(true, "bool") produces 51 via serializeState', () => {
+  it('encodeStateValue(true, "bool") produces 01 (raw byte) via serializeState', () => {
     const fields: StateField[] = [{ name: 'flag', type: 'bool', index: 0 }];
     const hex = serializeState(fields, { flag: true });
-    expect(hex).toBe('51');
+    expect(hex).toBe('01');
   });
 
   it('encodeStateValue(false, "bool") produces 00 via serializeState', () => {
@@ -630,10 +630,10 @@ describe('M2: SDK boolean encoding mismatch', () => {
 // ---------------------------------------------------------------------------
 
 describe('m9: encodeScriptInt zero encoding', () => {
-  it('state serialization of zero bigint produces 00 (OP_0)', () => {
+  it('state serialization of zero bigint produces 8-byte NUM2BIN zeros', () => {
     const fields: StateField[] = [{ name: 'count', type: 'bigint', index: 0 }];
     const hex = serializeState(fields, { count: 0n });
-    expect(hex).toBe('00');
+    expect(hex).toBe('0000000000000000');
   });
 
   it('zero bigint roundtrips correctly through serialize/deserialize', () => {

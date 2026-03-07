@@ -97,9 +97,9 @@ export function findLastOpReturn(scriptHex: string): number {
     const opcode = parseInt(scriptHex.slice(offset, offset + 2), 16);
 
     if (opcode === 0x6a) {
-      // OP_RETURN at a real opcode boundary
-      lastPos = offset;
-      offset += 2;
+      // OP_RETURN at a real opcode boundary. Everything after OP_RETURN is
+      // raw state data (not opcodes), so stop walking immediately.
+      return offset;
     } else if (opcode >= 0x01 && opcode <= 0x4b) {
       // Direct push: opcode is the number of bytes to push
       offset += 2 + opcode * 2;
@@ -152,10 +152,19 @@ function encodeStateValue(value: unknown, type: string): string {
     case 'bool': {
       return value ? '01' : '00'; // 1 raw byte
     }
-    default: {
-      // bytes, ByteString, PubKey, Addr, Ripemd160, Sha256, Point, etc.
-      // Already the correct raw hex representation.
+    case 'PubKey':
+    case 'Addr':
+    case 'Ripemd160':
+    case 'Sha256':
+    case 'Point':
+      // Fixed-size byte types: raw hex, no framing needed.
       return String(value);
+    default: {
+      // Variable-length types (bytes, ByteString, etc.): use push-data
+      // encoding so the decoder can determine the length.
+      const hex = String(value);
+      if (hex.length === 0) return '00'; // OP_0
+      return encodePushDataState(hex);
     }
   }
 }
@@ -181,6 +190,27 @@ function encodeNum2Bin(n: bigint, width: number): string {
   return Array.from(bytes)
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
+}
+
+/**
+ * Encode variable-length data as Bitcoin Script push data (with length prefix).
+ */
+function encodePushDataState(dataHex: string): string {
+  const len = dataHex.length / 2;
+  if (len <= 75) {
+    return len.toString(16).padStart(2, '0') + dataHex;
+  } else if (len <= 0xff) {
+    return '4c' + len.toString(16).padStart(2, '0') + dataHex;
+  } else if (len <= 0xffff) {
+    const lo = (len & 0xff).toString(16).padStart(2, '0');
+    const hi = ((len >> 8) & 0xff).toString(16).padStart(2, '0');
+    return '4d' + lo + hi + dataHex;
+  }
+  const b0 = (len & 0xff).toString(16).padStart(2, '0');
+  const b1 = ((len >> 8) & 0xff).toString(16).padStart(2, '0');
+  const b2 = ((len >> 16) & 0xff).toString(16).padStart(2, '0');
+  const b3 = ((len >> 24) & 0xff).toString(16).padStart(2, '0');
+  return '4e' + b0 + b1 + b2 + b3 + dataHex;
 }
 
 // ---------------------------------------------------------------------------

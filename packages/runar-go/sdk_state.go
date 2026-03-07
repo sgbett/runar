@@ -82,8 +82,9 @@ func FindLastOpReturn(scriptHex string) int {
 		opcode := hexByteValAt(scriptHex, offset)
 
 		if opcode == 0x6a {
-			lastPos = offset
-			offset += 2
+			// OP_RETURN at a real opcode boundary. Everything after is
+			// raw state data (not opcodes), so stop walking immediately.
+			return offset
 		} else if opcode >= 0x01 && opcode <= 0x4b {
 			// Direct push: opcode is the number of bytes
 			offset += 2 + int(opcode)*2
@@ -149,10 +150,17 @@ func encodeStateValue(value interface{}, fieldType string) string {
 			return "01"
 		}
 		return "00"
-	default:
-		// bytes, ByteString, PubKey, Addr, Ripemd160, Sha256, Point, etc.
-		// These are already the correct raw hex representation.
+	case "PubKey", "Addr", "Ripemd160", "Sha256", "Point":
+		// Fixed-size byte types: raw hex, no framing needed.
 		return fmt.Sprintf("%v", value)
+	default:
+		// Variable-length types (bytes, ByteString, etc.): use push-data
+		// encoding so the decoder can determine the length.
+		hex := fmt.Sprintf("%v", value)
+		if len(hex) == 0 {
+			return "00" // OP_0
+		}
+		return EncodePushData(hex)
 	}
 }
 

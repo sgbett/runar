@@ -50,8 +50,9 @@ def find_last_op_return(script_hex: str) -> int:
         opcode = int(script_hex[offset:offset + 2], 16)
 
         if opcode == 0x6A:
-            last_pos = offset
-            offset += 2
+            # OP_RETURN at a real opcode boundary. Everything after is
+            # raw state data (not opcodes), so stop walking immediately.
+            return offset
         elif 0x01 <= opcode <= 0x4B:
             offset += 2 + opcode * 2
         elif opcode == 0x4C:

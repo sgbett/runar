@@ -485,50 +485,54 @@ func TestStateRoundtrip_MixedTypes(t *testing.T) {
 func TestStateEncode_Zero(t *testing.T) {
 	fields := []StateField{{Name: "v", Type: "bigint", Index: 0}}
 	hex := SerializeState(fields, map[string]interface{}{"v": int64(0)})
-	if hex != "00" {
-		t.Errorf("expected 00, got %s", hex)
+	// NUM2BIN(0, 8) → 8 zero bytes
+	if hex != "0000000000000000" {
+		t.Errorf("expected 0000000000000000, got %s", hex)
 	}
 }
 
 func TestStateEncode_42(t *testing.T) {
 	fields := []StateField{{Name: "v", Type: "bigint", Index: 0}}
 	hex := SerializeState(fields, map[string]interface{}{"v": int64(42)})
-	if hex != "012a" {
-		t.Errorf("expected 012a, got %s", hex)
+	// 42 = 0x2a → LE 8 bytes
+	if hex != "2a00000000000000" {
+		t.Errorf("expected 2a00000000000000, got %s", hex)
 	}
 }
 
 func TestStateEncode_1000(t *testing.T) {
 	fields := []StateField{{Name: "v", Type: "bigint", Index: 0}}
 	hex := SerializeState(fields, map[string]interface{}{"v": int64(1000)})
-	if hex != "02e803" {
-		t.Errorf("expected 02e803, got %s", hex)
+	// 1000 = 0x03E8 → LE 8 bytes
+	if hex != "e803000000000000" {
+		t.Errorf("expected e803000000000000, got %s", hex)
 	}
 }
 
 func TestStateEncode_128(t *testing.T) {
 	fields := []StateField{{Name: "v", Type: "bigint", Index: 0}}
 	hex := SerializeState(fields, map[string]interface{}{"v": int64(128)})
-	// 128 = 0x80, high bit set, needs 0x00 sign byte: 02 80 00
-	if hex != "028000" {
-		t.Errorf("expected 028000, got %s", hex)
+	// 128 = 0x80 → LE 8 bytes, sign bit in byte[7] is 0x00 (positive)
+	if hex != "8000000000000000" {
+		t.Errorf("expected 8000000000000000, got %s", hex)
 	}
 }
 
 func TestStateEncode_Neg128(t *testing.T) {
 	fields := []StateField{{Name: "v", Type: "bigint", Index: 0}}
 	hex := SerializeState(fields, map[string]interface{}{"v": int64(-128)})
-	// -128: abs=0x80, high bit set, needs 0x80 sign byte: 02 80 80
-	if hex != "028080" {
-		t.Errorf("expected 028080, got %s", hex)
+	// -128: magnitude=0x80, sign bit in byte[7]
+	if hex != "8000000000000080" {
+		t.Errorf("expected 8000000000000080, got %s", hex)
 	}
 }
 
 func TestStateEncode_BoolTrue(t *testing.T) {
 	fields := []StateField{{Name: "flag", Type: "bool", Index: 0}}
 	hex := SerializeState(fields, map[string]interface{}{"flag": true})
-	if hex != "51" {
-		t.Errorf("expected 51, got %s", hex)
+	// Raw byte 0x01
+	if hex != "01" {
+		t.Errorf("expected 01, got %s", hex)
 	}
 }
 
@@ -544,10 +548,9 @@ func TestStateEncode_PubKey(t *testing.T) {
 	pubkey := strings.Repeat("ff", 33)
 	fields := []StateField{{Name: "pk", Type: "PubKey", Index: 0}}
 	hex := SerializeState(fields, map[string]interface{}{"pk": pubkey})
-	// 33 = 0x21
-	expected := "21" + pubkey
-	if hex != expected {
-		t.Errorf("expected %s, got %s", expected, hex)
+	// Raw 33 bytes, no push-data prefix
+	if hex != pubkey {
+		t.Errorf("expected %s, got %s", pubkey, hex)
 	}
 }
 
@@ -555,10 +558,9 @@ func TestStateEncode_Addr(t *testing.T) {
 	addr := strings.Repeat("aa", 20)
 	fields := []StateField{{Name: "a", Type: "Addr", Index: 0}}
 	hex := SerializeState(fields, map[string]interface{}{"a": addr})
-	// 20 = 0x14
-	expected := "14" + addr
-	if hex != expected {
-		t.Errorf("expected %s, got %s", expected, hex)
+	// Raw 20 bytes, no push-data prefix
+	if hex != addr {
+		t.Errorf("expected %s, got %s", addr, hex)
 	}
 }
 
@@ -692,10 +694,10 @@ func TestExtractState_BigintValue106(t *testing.T) {
 		a.StateFields = fields
 	})
 
-	// 106 = 0x6a → state encoding: push 1 byte 0x6a → "016a"
+	// 106 = 0x6a → NUM2BIN(8): "6a00000000000000"
 	stateHex := SerializeState(fields, map[string]interface{}{"count": int64(106)})
-	if stateHex != "016a" {
-		t.Fatalf("expected state hex 016a, got %s", stateHex)
+	if stateHex != "6a00000000000000" {
+		t.Fatalf("expected state hex 6a00000000000000, got %s", stateHex)
 	}
 	fullScript := "51ac" + "6a" + stateHex
 
