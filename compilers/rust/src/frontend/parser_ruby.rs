@@ -866,8 +866,19 @@ impl<'a> RbParser<'a> {
         self.match_tok(&Token::End); // end of class
 
         // Auto-generate constructor if not provided
-        let constructor =
+        let mut constructor =
             constructor.unwrap_or_else(|| build_constructor(&properties, self.file));
+
+        // Back-fill constructor param types from prop declarations.
+        // In Ruby, `def initialize(pub_key_hash)` has no type annotations —
+        // we infer them from the matching `prop :pub_key_hash, Addr` declarations.
+        for param in &mut constructor.params {
+            if matches!(&param.param_type, TypeNode::Custom(n) if n == "unknown") {
+                if let Some(prop) = properties.iter().find(|p| p.name == param.name) {
+                    param.param_type = prop.prop_type.clone();
+                }
+            }
+        }
 
         Some(ContractNode {
             name: contract_name,
