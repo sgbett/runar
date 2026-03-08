@@ -980,7 +980,7 @@ end
         ['Counter', COUNTER_RB],
         ['FungibleToken', FUNGIBLE_TOKEN_RB],
         ['Escrow', ESCROW_RB],
-      ]) {
+      ] as const) {
         const result = parseRubySource(src, `${name}.runar.rb`);
         const errors = result.errors.filter(e => e.severity === 'error');
         expect(errors).toEqual([]);

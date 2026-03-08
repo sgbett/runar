@@ -809,6 +809,16 @@ func (p *rbParser) parseContract() (*ContractNode, error) {
 		}
 	}
 
+	// Convert bare calls to declared methods into this.method() calls.
+	// In Ruby, `compute_threshold(a, b)` is equivalent to `self.compute_threshold(a, b)`.
+	methodNames := make(map[string]bool)
+	for _, m := range methods {
+		methodNames[m.Name] = true
+	}
+	for i := range methods {
+		rewriteBareMethodCallsGo(methods[i].Body, methodNames)
+	}
+
 	return &ContractNode{
 		Name:        contractName,
 		ParentClass: parentClass,
@@ -1774,3 +1784,69 @@ func parseRbNumber(s string) Expression {
 
 // Ensure the unicode import is used
 var _ = unicode.ToUpper
+
+// rewriteBareMethodCallsGo converts bare function calls to declared contract methods
+// into this.method() calls (PropertyAccessExpr as callee).
+func rewriteBareMethodCallsGo(stmts []Statement, methodNames map[string]bool) {
+	for i := range stmts {
+		rewriteStmtGo(&stmts[i], methodNames)
+	}
+}
+
+func rewriteExprGo(expr Expression, methodNames map[string]bool) Expression {
+	switch e := expr.(type) {
+	case CallExpr:
+		for i := range e.Args {
+			e.Args[i] = rewriteExprGo(e.Args[i], methodNames)
+		}
+		if ident, ok := e.Callee.(Identifier); ok {
+			if methodNames[ident.Name] {
+				e.Callee = PropertyAccessExpr{Property: ident.Name}
+			}
+		} else {
+			e.Callee = rewriteExprGo(e.Callee, methodNames)
+		}
+		return e
+	case BinaryExpr:
+		e.Left = rewriteExprGo(e.Left, methodNames)
+		e.Right = rewriteExprGo(e.Right, methodNames)
+		return e
+	case UnaryExpr:
+		e.Operand = rewriteExprGo(e.Operand, methodNames)
+		return e
+	case TernaryExpr:
+		e.Condition = rewriteExprGo(e.Condition, methodNames)
+		e.Consequent = rewriteExprGo(e.Consequent, methodNames)
+		e.Alternate = rewriteExprGo(e.Alternate, methodNames)
+		return e
+	}
+	return expr
+}
+
+func rewriteStmtGo(stmt *Statement, methodNames map[string]bool) {
+	switch s := (*stmt).(type) {
+	case ExpressionStmt:
+		s.Expr = rewriteExprGo(s.Expr, methodNames)
+		*stmt = s
+	case VariableDeclStmt:
+		s.Init = rewriteExprGo(s.Init, methodNames)
+		*stmt = s
+	case AssignmentStmt:
+		s.Value = rewriteExprGo(s.Value, methodNames)
+		*stmt = s
+	case ReturnStmt:
+		if s.Value != nil {
+			val := rewriteExprGo(s.Value, methodNames)
+			s.Value = val
+			*stmt = s
+		}
+	case IfStmt:
+		s.Condition = rewriteExprGo(s.Condition, methodNames)
+		rewriteBareMethodCallsGo(s.Then, methodNames)
+		rewriteBareMethodCallsGo(s.Else, methodNames)
+		*stmt = s
+	case ForStmt:
+		rewriteBareMethodCallsGo(s.Body, methodNames)
+		*stmt = s
+	}
+}

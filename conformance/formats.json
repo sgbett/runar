@@ -35,6 +35,13 @@
       "description": "Rust attribute-macro contract syntax",
       "compilers": ["rust"],
       "status": "experimental"
+    },
+    {
+      "extension": ".runar.rb",
+      "name": "Ruby",
+      "description": "Ruby DSL contract syntax",
+      "compilers": ["ts", "go", "rust"],
+      "status": "experimental"
     }
   ]
 }
