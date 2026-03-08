@@ -47,8 +47,10 @@ export function mapTypeToTS(abiType: string): string {
  * - SigHashPreimage: auto-computed for stateful contracts
  * - _changePKH, _changeAmount: auto-injected by SDK for stateful contracts
  *
- * Hidden params don't appear in the generated method signature but are passed
- * as `null` in the args array so the SDK can auto-compute them.
+ * Hidden params don't appear in the generated method signature.
+ * Of these, Sig params are included in the args array as `null` (the SDK
+ * auto-computes them), while SigHashPreimage/_changePKH/_changeAmount are
+ * entirely SDK-internal and excluded from the args array.
  */
 export function classifyParams(method: ABIMethod, isStateful: boolean): ClassifiedParam[] {
   return method.params.map((p) => {
@@ -73,6 +75,21 @@ export function classifyParams(method: ABIMethod, isStateful: boolean): Classifi
  */
 export function getUserParams(method: ABIMethod, isStateful: boolean): ClassifiedParam[] {
   return classifyParams(method, isStateful).filter((p) => !p.hidden);
+}
+
+/**
+ * Get params that match the SDK's args array — all params except the ones
+ * the SDK handles entirely internally (SigHashPreimage, _changePKH,
+ * _changeAmount) for stateful contracts.
+ *
+ * Sig params ARE included (passed as null for auto-computation by the SDK).
+ * This matches the SDK's `userParams` filtering in `call()`/`prepareCall()`.
+ */
+export function getSdkArgParams(method: ABIMethod, isStateful: boolean): ClassifiedParam[] {
+  return classifyParams(method, isStateful).filter((p) => {
+    if (!isStateful) return true;
+    return p.abiType !== 'SigHashPreimage' && p.name !== '_changePKH' && p.name !== '_changeAmount';
+  });
 }
 
 // ---------------------------------------------------------------------------

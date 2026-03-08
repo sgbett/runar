@@ -4,8 +4,8 @@
 
 import type { RunarArtifact } from 'runar-ir-schema';
 import {
-  classifyParams,
   getUserParams,
+  getSdkArgParams,
   isTerminalMethod,
   isStatefulArtifact,
   getPublicMethods,
@@ -164,10 +164,12 @@ export function generateTypescript(artifact: RunarArtifact): string {
       emit('  ): Promise<CallResult> {');
     }
 
-    // Build args array: null for hidden (auto-computed) params, name for visible
-    const allClassified = classifyParams(method, isStateful);
+    // Build args array: only SDK-visible params (excludes SigHashPreimage,
+    // _changePKH, _changeAmount which the SDK handles internally).
+    // Sig params are included as null (auto-computed by SDK).
+    const sdkArgs = getSdkArgParams(method, isStateful);
     const argParts: string[] = [];
-    for (const p of allClassified) {
+    for (const p of sdkArgs) {
       argParts.push(p.hidden ? 'null' : p.name);
     }
     const argsExpr = `[${argParts.join(', ')}]`;
@@ -190,7 +192,7 @@ export function generateTypescript(artifact: RunarArtifact): string {
     // -----------------------------------------------------------------
     // prepareX / finalizeX — multi-signer support for methods with Sig params
     // -----------------------------------------------------------------
-    const sigParams = allClassified.filter((p) => p.abiType === 'Sig');
+    const sigParams = sdkArgs.filter((p) => p.abiType === 'Sig');
     if (sigParams.length > 0) {
       blank();
 
@@ -252,10 +254,10 @@ export function generateTypescript(artifact: RunarArtifact): string {
       }
 
       // Build signatures map: { argIndex: sigParamName }
-      // argIndex is the Sig param's position in allClassified (= the args array)
+      // argIndex is the Sig param's position in sdkArgs (= the args array)
       const sigEntries: string[] = [];
       for (const sp of sigParams) {
-        const idx = allClassified.findIndex((p) => p.name === sp.name);
+        const idx = sdkArgs.findIndex((p) => p.name === sp.name);
         sigEntries.push(`${idx}: ${sp.name}`);
       }
       emit(`    return this.inner.finalizeCall(prepared, { ${sigEntries.join(', ')} });`);

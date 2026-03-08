@@ -8,6 +8,7 @@ export { generateTypescript } from './gen-typescript.js';
 export {
   classifyParams,
   getUserParams,
+  getSdkArgParams,
   isTerminalMethod,
   isStatefulArtifact,
   getPublicMethods,

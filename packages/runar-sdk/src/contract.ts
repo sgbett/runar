@@ -247,7 +247,6 @@ export class RunarContract {
   ): Promise<{ txid: string; tx: Transaction }> {
     // If explicit provider/signer passed, temporarily connect them for
     // prepareCall / finalizeCall which use the connected references.
-    let tempConnected = false;
     if (maybeSigner !== undefined) {
       const prevProvider = this._provider;
       const prevSigner = this._signer;

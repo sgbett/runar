@@ -8,6 +8,7 @@ import { generateTypescript } from '../codegen/index.js';
 import {
   classifyParams,
   getUserParams,
+  getSdkArgParams,
   isTerminalMethod,
   isStatefulArtifact,
   safeMethodName,
@@ -183,6 +184,26 @@ describe('codegen/common', () => {
     });
   });
 
+  describe('getSdkArgParams', () => {
+    it('excludes SigHashPreimage, _changePKH, _changeAmount for stateful', () => {
+      const method = statefulArtifact.abi.methods[0]!; // bid
+      const sdkArgs = getSdkArgParams(method, true);
+      expect(sdkArgs.map((p) => p.name)).toEqual(['sig', 'bidder', 'bidAmount']);
+    });
+
+    it('keeps all params for stateless contracts', () => {
+      const method = statelessArtifact.abi.methods[0]!; // unlock
+      const sdkArgs = getSdkArgParams(method, false);
+      expect(sdkArgs.map((p) => p.name)).toEqual(['sig', 'pubKey']);
+    });
+
+    it('keeps Sig but excludes SigHashPreimage for terminal stateful', () => {
+      const method = statefulArtifact.abi.methods[1]!; // close
+      const sdkArgs = getSdkArgParams(method, true);
+      expect(sdkArgs.map((p) => p.name)).toEqual(['sig']);
+    });
+  });
+
   describe('safeMethodName', () => {
     it('renames reserved names', () => {
       expect(safeMethodName('connect')).toBe('callConnect');
@@ -241,12 +262,13 @@ describe('generateTypescript', () => {
     expect(code).toContain('bidder: string | null');
     expect(code).toContain('bidAmount: bigint');
     expect(code).toContain('options?: AuctionStatefulCallOptions');
-    // Args: null for sig, visible for bidder/bidAmount, null for hidden stateful params
-    expect(code).toContain("this.inner.call('bid', [null, bidder, bidAmount, null, null, null], options)");
+    // Args: null for sig, visible for bidder/bidAmount (SDK-implicit params excluded)
+    expect(code).toContain("this.inner.call('bid', [null, bidder, bidAmount], options)");
 
     // Terminal method — no user params (sig hidden), takes outputs
+    // Args: only sig as null (txPreimage is SDK-implicit, excluded)
     expect(code).toContain('async close(outputs: TerminalOutput[])');
-    expect(code).toContain("this.inner.call('close', [null, null], {");
+    expect(code).toContain("this.inner.call('close', [null], {");
     expect(code).toContain('terminalOutputs: AuctionContract.resolveOutputs(outputs)');
 
     // JSDoc annotations
@@ -255,13 +277,13 @@ describe('generateTypescript', () => {
 
     // prepare/finalize for state-mutating method (bid)
     expect(code).toContain('async prepareBid(');
-    expect(code).toContain("this.inner.prepareCall('bid', [null, bidder, bidAmount, null, null, null], options)");
+    expect(code).toContain("this.inner.prepareCall('bid', [null, bidder, bidAmount], options)");
     expect(code).toContain('async finalizeBid(prepared: PreparedCall, sig: string): Promise<CallResult>');
     expect(code).toContain("this.inner.finalizeCall(prepared, { 0: sig })");
 
     // prepare/finalize for terminal method (close)
     expect(code).toContain('async prepareClose(outputs: TerminalOutput[]): Promise<PreparedCall>');
-    expect(code).toContain("this.inner.prepareCall('close', [null, null], {");
+    expect(code).toContain("this.inner.prepareCall('close', [null], {");
     expect(code).toContain('async finalizeClose(prepared: PreparedCall, sig: string): Promise<CallResult>');
   });
 
@@ -351,8 +373,9 @@ describe('generateTypescript', () => {
     const code = generateTypescript(multiSigArtifact);
 
     // prepareCancel takes outputs (terminal stateful), no Sig params
+    // Args: [null, null] for sigX + sigO (txPreimage is SDK-implicit, excluded)
     expect(code).toContain('async prepareCancel(outputs: TerminalOutput[]): Promise<PreparedCall>');
-    expect(code).toContain("this.inner.prepareCall('cancel', [null, null, null], {");
+    expect(code).toContain("this.inner.prepareCall('cancel', [null, null], {");
 
     // finalizeCancel takes both Sig params as strings
     expect(code).toContain('async finalizeCancel(prepared: PreparedCall, sigX: string, sigO: string): Promise<CallResult>');
