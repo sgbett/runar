@@ -2,9 +2,16 @@
  * Bitcoin regtest node helpers — JSON-RPC communication, mining, wallet funding.
  */
 
-const RPC_URL = process.env.RPC_URL ?? 'http://localhost:18332';
-const RPC_USER = process.env.RPC_USER ?? 'bitcoin';
-const RPC_PASS = process.env.RPC_PASS ?? 'bitcoin';
+import { RPCProvider } from 'runar-sdk';
+
+export const RPC_URL = process.env.RPC_URL ?? 'http://localhost:18332';
+export const RPC_USER = process.env.RPC_USER ?? 'bitcoin';
+export const RPC_PASS = process.env.RPC_PASS ?? 'bitcoin';
+
+/** Create an RPCProvider using env-configured credentials. */
+export function createProvider(): RPCProvider {
+  return new RPCProvider(RPC_URL, RPC_USER, RPC_PASS, { autoMine: true, network: 'testnet' });
+}
 
 export async function rpcCall(method: string, ...params: unknown[]): Promise<unknown> {
   const body = JSON.stringify({

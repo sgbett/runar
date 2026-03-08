@@ -7,16 +7,10 @@
 
 import { describe, it, expect } from 'vitest';
 import { compileSource } from './helpers/compile.js';
-import { RunarContract, RPCProvider } from 'runar-sdk';
+import { RunarContract } from 'runar-sdk';
 import { createFundedWallet } from './helpers/wallet.js';
 import { ecMulGen, encodePoint, EC_N, EC_P, EC_GX, EC_GY } from './helpers/crypto.js';
-
-function createProvider() {
-  return new RPCProvider('http://localhost:18332', 'bitcoin', 'bitcoin', {
-    autoMine: true,
-    network: 'testnet',
-  });
-}
+import { createProvider } from './helpers/node.js';
 
 describe('EC Isolation', () => {
   it('ecOnCurve: should compile and deploy a contract checking point validity', async () => {

@@ -31,17 +31,11 @@
 
 import { describe, it, expect } from 'vitest';
 import { compileContract } from './helpers/compile.js';
-import { RunarContract, RPCProvider } from 'runar-sdk';
+import { RunarContract } from 'runar-sdk';
 import { createFundedWallet } from './helpers/wallet.js';
 import { wotsKeygen, wotsSign, wotsPubKeyHex } from './helpers/crypto.js';
 import { createHash } from 'node:crypto';
-
-function createProvider() {
-  return new RPCProvider('http://localhost:18332', 'bitcoin', 'bitcoin', {
-    autoMine: true,
-    network: 'testnet',
-  });
-}
+import { createProvider } from './helpers/node.js';
 
 function hash160hex(data: Buffer): string {
   const sha = createHash('sha256').update(data).digest();

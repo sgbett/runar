@@ -9,16 +9,10 @@
 
 import { describe, it, expect } from 'vitest';
 import { compileContract } from './helpers/compile.js';
-import { RunarContract, RPCProvider } from 'runar-sdk';
+import { RunarContract } from 'runar-sdk';
 import { createFundedWallet } from './helpers/wallet.js';
 import { ecMulGen, encodePoint, EC_N } from './helpers/crypto.js';
-
-function createProvider() {
-  return new RPCProvider('http://localhost:18332', 'bitcoin', 'bitcoin', {
-    autoMine: true,
-    network: 'testnet',
-  });
-}
+import { createProvider } from './helpers/node.js';
 
 /**
  * Generate test data for ConvergenceProof:

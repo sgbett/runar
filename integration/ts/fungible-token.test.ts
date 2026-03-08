@@ -17,11 +17,9 @@
 
 import { describe, it, expect } from 'vitest';
 import { compileContract } from './helpers/compile.js';
-import {
-  RunarContract,
-  RPCProvider,
-} from 'runar-sdk';
+import { RunarContract } from 'runar-sdk';
 import { createFundedWallet, createWallet } from './helpers/wallet.js';
+import { createProvider } from './helpers/node.js';
 
 /**
  * Build allPrevouts hex from a list of outpoints (txid + outputIndex).
@@ -38,13 +36,6 @@ function buildAllPrevouts(utxos: Array<{ txid: string; outputIndex: number }>): 
     hex += txidLE + voutLE;
   }
   return hex;
-}
-
-function createProvider() {
-  return new RPCProvider('http://localhost:18332', 'bitcoin', 'bitcoin', {
-    autoMine: true,
-    network: 'testnet',
-  });
 }
 
 describe('FungibleToken', () => {

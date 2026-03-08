@@ -32,17 +32,11 @@
 
 import { describe, it, expect } from 'vitest';
 import { compileContract } from './helpers/compile.js';
-import { RunarContract, RPCProvider } from 'runar-sdk';
+import { RunarContract } from 'runar-sdk';
 import { createFundedWallet } from './helpers/wallet.js';
 import { ecMulGen, encodePoint, EC_N } from './helpers/crypto.js';
 import { createHash } from 'crypto';
-
-function createProvider() {
-  return new RPCProvider('http://localhost:18332', 'bitcoin', 'bitcoin', {
-    autoMine: true,
-    network: 'testnet',
-  });
-}
+import { createProvider } from './helpers/node.js';
 
 /**
  * Derive the Fiat-Shamir challenge e = bin2num(hash256(R || P)).
