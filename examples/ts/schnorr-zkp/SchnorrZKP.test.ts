@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TestContract } from 'runar-testing';
@@ -63,11 +64,41 @@ function makePointHex(x: bigint, y: bigint): string {
 }
 
 // ---------------------------------------------------------------------------
+// Fiat-Shamir helpers
+// ---------------------------------------------------------------------------
+
+function sha256(hex: string): string {
+  return createHash('sha256').update(Buffer.from(hex, 'hex')).digest('hex').toUpperCase();
+}
+
+function hash256Hex(hex: string): string {
+  return sha256(sha256(hex));
+}
+
+/** bin2num: interpret hex bytes as little-endian signed integer (Bitcoin script number). */
+function bin2num(hex: string): bigint {
+  const bytes = Buffer.from(hex, 'hex');
+  if (bytes.length === 0) return 0n;
+  const negative = (bytes[bytes.length - 1] & 0x80) !== 0;
+  const last = bytes[bytes.length - 1] & 0x7f;
+  let result = BigInt(last);
+  for (let i = bytes.length - 2; i >= 0; i--) {
+    result = (result << 8n) | BigInt(bytes[i]);
+  }
+  return negative ? -result : result;
+}
+
+/** Derive Fiat-Shamir challenge: e = bin2num(hash256(R || P)) */
+function deriveChallenge(rHex: string, pubKeyHex: string): bigint {
+  return bin2num(hash256Hex(rHex + pubKeyHex));
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe('SchnorrZKP contract', () => {
-  it('verifies a valid Schnorr ZKP proof', () => {
+  it('verifies a valid Schnorr ZKP proof with Fiat-Shamir challenge', () => {
     const privKey = 42n;
     const [pubX, pubY] = scalarMul(GX, GY, privKey);
     const pubKeyHex = makePointHex(pubX, pubY);
@@ -76,11 +107,12 @@ describe('SchnorrZKP contract', () => {
     const [rX, rY] = scalarMul(GX, GY, r);
     const rHex = makePointHex(rX, rY);
 
-    const e = 7n;
+    // Challenge derived via Fiat-Shamir: e = bin2num(hash256(R || P))
+    const e = deriveChallenge(rHex, pubKeyHex);
     const s = mod(r + e * privKey, EC_N);
 
     const c = TestContract.fromSource(source, { pubKey: pubKeyHex });
-    const result = c.call('verify', { rPoint: rHex, s, e });
+    const result = c.call('verify', { rPoint: rHex, s });
     expect(result.success).toBe(true);
   });
 
@@ -93,29 +125,32 @@ describe('SchnorrZKP contract', () => {
     const [rX, rY] = scalarMul(GX, GY, r);
     const rHex = makePointHex(rX, rY);
 
-    const e = 7n;
+    const e = deriveChallenge(rHex, pubKeyHex);
     const s = mod(r + e * privKey, EC_N);
 
     const c = TestContract.fromSource(source, { pubKey: pubKeyHex });
-    const result = c.call('verify', { rPoint: rHex, s: s + 1n, e });
+    const result = c.call('verify', { rPoint: rHex, s: s + 1n });
     expect(result.success).toBe(false);
   });
 
-  it('rejects a proof with wrong challenge', () => {
+  it('rejects a proof with wrong R point (tampered commitment)', () => {
     const privKey = 42n;
     const [pubX, pubY] = scalarMul(GX, GY, privKey);
     const pubKeyHex = makePointHex(pubX, pubY);
 
+    // Compute valid proof for one R
     const r = 12345n;
     const [rX, rY] = scalarMul(GX, GY, r);
     const rHex = makePointHex(rX, rY);
-
-    const e = 7n;
+    const e = deriveChallenge(rHex, pubKeyHex);
     const s = mod(r + e * privKey, EC_N);
 
-    // Use wrong challenge
+    // Use a different R — the on-chain challenge will differ, breaking the proof
+    const [rX2, rY2] = scalarMul(GX, GY, 99999n);
+    const rHex2 = makePointHex(rX2, rY2);
+
     const c = TestContract.fromSource(source, { pubKey: pubKeyHex });
-    const result = c.call('verify', { rPoint: rHex, s, e: e + 1n });
+    const result = c.call('verify', { rPoint: rHex2, s });
     expect(result.success).toBe(false);
   });
 
@@ -128,11 +163,11 @@ describe('SchnorrZKP contract', () => {
     const [rX, rY] = scalarMul(GX, GY, r);
     const rHex = makePointHex(rX, rY);
 
-    const e = 0x42n;
+    const e = deriveChallenge(rHex, pubKeyHex);
     const s = mod(r + e * privKey, EC_N);
 
     const c = TestContract.fromSource(source, { pubKey: pubKeyHex });
-    const result = c.call('verify', { rPoint: rHex, s, e });
+    const result = c.call('verify', { rPoint: rHex, s });
     expect(result.success).toBe(true);
   });
 });

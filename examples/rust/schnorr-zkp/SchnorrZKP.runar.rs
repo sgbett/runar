@@ -1,19 +1,20 @@
 use runar::prelude::*;
 
-/// Schnorr zero-knowledge proof verifier.
+/// Schnorr zero-knowledge proof verifier (non-interactive, Fiat-Shamir).
 ///
 /// Proves knowledge of a private key `k` such that `P = k*G` without
-/// revealing `k`. Uses the Schnorr identification protocol:
+/// revealing `k`. Uses the Schnorr identification protocol with the
+/// Fiat-Shamir heuristic to derive the challenge on-chain:
 ///
 /// ```text
-/// Prover: picks random r, sends R = r*G
-/// Verifier: sends challenge e
+/// Prover: picks random r, computes R = r*G
+/// Challenge: e = bin2num(hash256(R || P))  (derived on-chain)
 /// Prover: sends s = r + e*k (mod n)
 /// Verifier: checks s*G === R + e*P
 /// ```
 ///
-/// In a Bitcoin contract context, the prover provides (R, s, e) in the
-/// unlocking script, and the contract verifies the proof on-chain.
+/// The challenge is derived deterministically from the commitment and
+/// public key, preventing the prover from choosing a convenient e.
 #[runar::contract]
 pub struct SchnorrZKP {
     #[readonly]
@@ -26,11 +27,13 @@ impl SchnorrZKP {
     ///
     /// - `r_point` - The commitment R = r*G (prover's nonce point)
     /// - `s` - The response s = r + e*k (mod n)
-    /// - `e` - The challenge value
     #[public]
-    pub fn verify(&self, r_point: &Point, s: Bigint, e: Bigint) {
+    pub fn verify(&self, r_point: &Point, s: Bigint) {
         // Verify R is on the curve
         assert!(ec_on_curve(r_point));
+
+        // Derive challenge via Fiat-Shamir: e = bin2num(hash256(R || P))
+        let e = bin2num(&hash256(&cat(r_point, &self.pub_key)));
 
         // Left side: s*G
         let s_g = ec_mul_gen(s);

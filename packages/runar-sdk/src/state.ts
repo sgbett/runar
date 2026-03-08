@@ -89,7 +89,6 @@ export function extractStateFromScript(
  * Returns the hex-char offset of the last OP_RETURN, or -1 if not found.
  */
 export function findLastOpReturn(scriptHex: string): number {
-  let lastPos = -1;
   let offset = 0;
   const len = scriptHex.length;
 
@@ -130,7 +129,7 @@ export function findLastOpReturn(scriptHex: string): number {
     }
   }
 
-  return lastPos;
+  return -1;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,6 @@
 //! Crypto helpers for integration tests — WOTS+, Rabin, EC scalar math.
 
+use k256::elliptic_curve::PrimeField;
 use sha2::{Digest, Sha256};
 
 // ---------------------------------------------------------------------------
@@ -294,7 +295,7 @@ pub fn ec_mul_gen_scalar(k: u64) -> (k256::Scalar, k256::ProjectivePoint) {
     (scalar, point)
 }
 
-/// Schnorr ZKP proof generation helper.
+/// Schnorr ZKP proof generation helper (legacy — with caller-supplied challenge).
 /// Given private key k (as u64), returns (pub_key_hex, r_point_hex, s_hex, e_hex)
 /// where the proof satisfies s*G = R + e*P.
 #[allow(dead_code)]
@@ -332,4 +333,67 @@ pub fn generate_schnorr_proof(k: u64, r_nonce: u64, e_challenge: u64) -> (String
     let e_hex: String = e_bytes.iter().map(|b| format!("{:02x}", b)).collect();
 
     (pub_key_hex, r_point_hex, s_hex, e_hex)
+}
+
+/// Schnorr ZKP proof generation with Fiat-Shamir challenge derivation.
+/// The challenge e is derived as bin2num(hash256(R || P)), matching the on-chain
+/// Fiat-Shamir computation.
+///
+/// Returns (pub_key_hex, r_point_hex, s_script_num_hex) where s is encoded as
+/// a Bitcoin Script number (LE signed magnitude) for use with SdkValue::Bytes.
+#[allow(dead_code)]
+pub fn generate_schnorr_proof_fs(k: u64, r_nonce: u64) -> (String, String, String) {
+    use k256::elliptic_curve::sec1::ToEncodedPoint;
+    use k256::{FieldBytes, ProjectivePoint, Scalar};
+
+    let k_scalar = Scalar::from(k);
+    let r_scalar = Scalar::from(r_nonce);
+
+    // P = k*G (public key)
+    let p_affine = (ProjectivePoint::GENERATOR * k_scalar).to_affine();
+    let p_enc = p_affine.to_encoded_point(false);
+    let px: String = p_enc.x().unwrap().iter().map(|b| format!("{:02x}", b)).collect();
+    let py: String = p_enc.y().unwrap().iter().map(|b| format!("{:02x}", b)).collect();
+    let pub_key_hex = format!("{}{}", pad64(&px), pad64(&py));
+
+    // R = r*G (nonce commitment)
+    let r_affine = (ProjectivePoint::GENERATOR * r_scalar).to_affine();
+    let r_enc = r_affine.to_encoded_point(false);
+    let rx: String = r_enc.x().unwrap().iter().map(|b| format!("{:02x}", b)).collect();
+    let ry: String = r_enc.y().unwrap().iter().map(|b| format!("{:02x}", b)).collect();
+    let r_point_hex = format!("{}{}", pad64(&rx), pad64(&ry));
+
+    // Fiat-Shamir: e = bin2num(hash256(R || P))
+    let combined_hex = format!("{}{}", r_point_hex, pub_key_hex);
+    let combined_bytes: Vec<u8> = (0..combined_hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&combined_hex[i..i + 2], 16).unwrap())
+        .collect();
+
+    let h1 = Sha256::digest(&combined_bytes);
+    let h2 = Sha256::digest(&h1);
+    let mut hash_data = h2.to_vec(); // 32 bytes
+
+    // bin2num: LE signed-magnitude
+    let is_neg = (hash_data[31] & 0x80) != 0;
+    hash_data[31] &= 0x7f;
+
+    // Convert LE to BE for k256 Scalar
+    hash_data.reverse();
+
+    // Magnitude is < 2^255 < n, so from_repr always succeeds
+    let bytes_array: [u8; 32] = hash_data.try_into().unwrap();
+    let e_magnitude: Scalar = Scalar::from_repr_vartime(FieldBytes::from(bytes_array))
+        .expect("255-bit magnitude always < secp256k1 order");
+    let e_scalar = if is_neg { -e_magnitude } else { e_magnitude };
+
+    // s = r + e*k mod n
+    let s_scalar = r_scalar + e_scalar * k_scalar;
+
+    // Convert s to script number hex (LE signed magnitude) for SdkValue::Bytes
+    let s_be_bytes = s_scalar.to_bytes();
+    let s_bigint = BigInt::from_bytes_be(num_bigint::Sign::Plus, &s_be_bytes);
+    let s_script_hex = bigint_to_script_num_hex(&s_bigint);
+
+    (pub_key_hex, r_point_hex, s_script_hex)
 }

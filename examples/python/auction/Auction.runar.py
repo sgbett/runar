@@ -46,7 +46,7 @@ class Auction(StatefulSmartContract):
         self.deadline = deadline
 
     @public
-    def bid(self, bidder: PubKey, bid_amount: Bigint):
+    def bid(self, sig: Sig, bidder: PubKey, bid_amount: Bigint):
         """Submit a new bid that outbids the current highest.
 
         State-mutating: the compiler auto-injects ``checkPreimage`` at entry and
@@ -54,9 +54,12 @@ class Auction(StatefulSmartContract):
         the updated ``highest_bidder`` and ``highest_bid``.
 
         Args:
+            sig: Bidder's signature proving they authorized this bid.
             bidder: Public key of the new bidder.
             bid_amount: Bid in satoshis; must exceed the current highest bid.
         """
+        # Verify the bidder authorized this bid (prevents griefing)
+        assert_(check_sig(sig, bidder))
         # Reject bids that do not exceed the current highest
         assert_(bid_amount > self.highest_bid)
         # Enforce that the auction is still open: nLockTime must be before deadline

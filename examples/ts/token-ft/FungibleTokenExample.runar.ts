@@ -58,6 +58,7 @@ class FungibleToken extends StatefulSmartContract {
    */
   public transfer(sig: Sig, to: PubKey, amount: bigint, outputSatoshis: bigint) {
     assert(checkSig(sig, this.owner));
+    assert(outputSatoshis >= 1n);
     const totalBalance = this.balance + this.mergeBalance;
     assert(amount > 0n);
     assert(amount <= totalBalance);
@@ -73,6 +74,7 @@ class FungibleToken extends StatefulSmartContract {
    */
   public send(sig: Sig, to: PubKey, outputSatoshis: bigint) {
     assert(checkSig(sig, this.owner));
+    assert(outputSatoshis >= 1n);
 
     this.addOutput(outputSatoshis, to, this.balance + this.mergeBalance, 0n);
   }
@@ -111,6 +113,7 @@ class FungibleToken extends StatefulSmartContract {
    */
   public merge(sig: Sig, otherBalance: bigint, allPrevouts: ByteString, outputSatoshis: bigint) {
     assert(checkSig(sig, this.owner));
+    assert(outputSatoshis >= 1n);
     assert(otherBalance >= 0n);
 
     // Verify allPrevouts is authentic (matches the actual transaction inputs)

@@ -36,6 +36,7 @@ contract SimpleNFT is StatefulSmartContract {
     /// @param outputSatoshis Satoshis to fund the continuation UTXO
     function transfer(Sig sig, PubKey newOwner, bigint outputSatoshis) public {
         require(checkSig(sig, this.owner));
+        require(outputSatoshis >= 1);
         this.addOutput(outputSatoshis, newOwner);
     }
 

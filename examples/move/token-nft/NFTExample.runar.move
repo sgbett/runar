@@ -37,6 +37,7 @@ module SimpleNFT {
     //   output_satoshis: satoshis to fund the continuation UTXO
     public fun transfer(contract: &mut SimpleNFT, sig: Sig, new_owner: PubKey, output_satoshis: bigint) {
         assert!(check_sig(sig, contract.owner), 0);
+        assert!(output_satoshis >= 1, 0);
         contract.add_output(output_satoshis, new_owner);
     }
 

@@ -119,9 +119,12 @@ func TestCovenantVault_ValidSpend(t *testing.T) {
 	// Get UTXO from SDK contract, convert for raw spending
 	utxo := helpers.SDKUtxoToHelper(contract.GetCurrentUtxo())
 
-	// Build spend TX
-	receiverScript := owner.P2PKHScript()
-	spendTx, err := helpers.BuildSpendTx(utxo, receiverScript, 4500)
+	// Build spend TX with the EXACT output the covenant expects:
+	// A P2PKH output to the recipient for minAmount satoshis.
+	// The covenant verifies hash256(expectedOutput) == extractOutputHash(txPreimage),
+	// where expectedOutput = num2bin(minAmount, 8) || "1976a914" || recipient || "88ac"
+	recipientScript := recipient.P2PKHScript()
+	spendTx, err := helpers.BuildSpendTx(utxo, recipientScript, minAmount)
 	if err != nil {
 		t.Fatalf("build spend: %v", err)
 	}
@@ -141,13 +144,11 @@ func TestCovenantVault_ValidSpend(t *testing.T) {
 	opPushTxSigBytes, _ := hex.DecodeString(opPushTxSigHex)
 	preimageBytes, _ := hex.DecodeString(preimageHex)
 
-	// spend(sig: Sig, amount: bigint, txPreimage: SigHashPreimage)
+	// spend(sig: Sig, txPreimage: SigHashPreimage)
 	// Compiler inserts implicit _opPushTxSig before declared params.
-	// Unlocking script order: <opPushTxSig> <sig> <amount> <txPreimage>
-	amount := int64(2000) // >= minAmount (1000)
+	// Unlocking script order: <opPushTxSig> <sig> <txPreimage>
 	unlockHex := helpers.EncodePushBytes(opPushTxSigBytes) +
 		helpers.EncodePushBytes(sigBytes) +
-		helpers.EncodePushInt(amount) +
 		helpers.EncodePushBytes(preimageBytes)
 
 	unlockScript, _ := script.NewFromHex(unlockHex)
@@ -157,7 +158,9 @@ func TestCovenantVault_ValidSpend(t *testing.T) {
 	helpers.AssertTxInBlock(t, txid)
 }
 
-func TestCovenantVault_BelowMinAmount_Rejected(t *testing.T) {
+// TestCovenantVault_WrongOutput_Rejected verifies the covenant rejects a transaction
+// whose output doesn't match the expected P2PKH to the registered recipient.
+func TestCovenantVault_WrongOutput_Rejected(t *testing.T) {
 	owner := helpers.NewWallet()
 	recipient := helpers.NewWallet()
 	minAmount := int64(1000)
@@ -166,7 +169,11 @@ func TestCovenantVault_BelowMinAmount_Rejected(t *testing.T) {
 
 	utxo := helpers.SDKUtxoToHelper(contract.GetCurrentUtxo())
 
-	spendTx, err := helpers.BuildSpendTx(utxo, owner.P2PKHScript(), 4500)
+	// Build TX with wrong output: send to OWNER instead of RECIPIENT.
+	// The covenant expects output to recipient — this should fail the
+	// hash256(expectedOutput) == extractOutputHash(txPreimage) check.
+	wrongScript := owner.P2PKHScript()
+	spendTx, err := helpers.BuildSpendTx(utxo, wrongScript, minAmount)
 	if err != nil {
 		t.Fatalf("build spend: %v", err)
 	}
@@ -184,12 +191,9 @@ func TestCovenantVault_BelowMinAmount_Rejected(t *testing.T) {
 	opPushTxSigBytes, _ := hex.DecodeString(opPushTxSigHex)
 	preimageBytes, _ := hex.DecodeString(preimageHex)
 
-	// Amount 500 < minAmount 1000 — should fail assert
-	// Unlocking script order: <opPushTxSig> <sig> <amount> <txPreimage>
-	amount := int64(500)
+	// Unlocking script order: <opPushTxSig> <sig> <txPreimage>
 	unlockHex := helpers.EncodePushBytes(opPushTxSigBytes) +
 		helpers.EncodePushBytes(sigBytes) +
-		helpers.EncodePushInt(amount) +
 		helpers.EncodePushBytes(preimageBytes)
 
 	unlockScript, _ := script.NewFromHex(unlockHex)

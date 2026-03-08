@@ -38,7 +38,7 @@ import { generateRabinKeyPair, rabinSign } from './helpers/crypto.js';
 import { createHash } from 'crypto';
 
 function createProvider() {
-  return new RPCProvider('http://localhost:18332', 'regtest', 'regtest', {
+  return new RPCProvider('http://localhost:18332', 'bitcoin', 'bitcoin', {
     autoMine: true,
     network: 'testnet',
   });

@@ -52,6 +52,7 @@ type FungibleToken struct {
 //   - outputSatoshis: satoshis to fund each output UTXO
 func (c *FungibleToken) Transfer(sig runar.Sig, to runar.PubKey, amount runar.Bigint, outputSatoshis runar.Bigint) {
 	runar.Assert(runar.CheckSig(sig, c.Owner))
+	runar.Assert(outputSatoshis >= 1)
 	totalBalance := c.Balance + c.MergeBalance
 	runar.Assert(amount > 0)
 	runar.Assert(amount <= totalBalance)
@@ -75,6 +76,7 @@ func (c *FungibleToken) Transfer(sig runar.Sig, to runar.PubKey, amount runar.Bi
 //   - outputSatoshis: satoshis to fund the output UTXO
 func (c *FungibleToken) Send(sig runar.Sig, to runar.PubKey, outputSatoshis runar.Bigint) {
 	runar.Assert(runar.CheckSig(sig, c.Owner))
+	runar.Assert(outputSatoshis >= 1)
 
 	c.AddOutput(outputSatoshis, to, c.Balance+c.MergeBalance, 0)
 }
@@ -113,6 +115,7 @@ func (c *FungibleToken) Send(sig runar.Sig, to runar.PubKey, outputSatoshis runa
 //   - outputSatoshis: satoshis to fund the merged output UTXO
 func (c *FungibleToken) Merge(sig runar.Sig, otherBalance runar.Bigint, allPrevouts runar.ByteString, outputSatoshis runar.Bigint) {
 	runar.Assert(runar.CheckSig(sig, c.Owner))
+	runar.Assert(outputSatoshis >= 1)
 	runar.Assert(otherBalance >= 0)
 
 	// Verify allPrevouts is authentic (matches the actual transaction inputs)

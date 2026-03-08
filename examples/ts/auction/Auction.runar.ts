@@ -51,10 +51,14 @@ class Auction extends StatefulSmartContract {
    * appends a state-continuation output at exit, creating a new UTXO with
    * the updated `highestBidder` and `highestBid`.
    *
+   * @param sig       - Bidder's signature proving they authorized this bid.
    * @param bidder    - Public key of the new bidder.
    * @param bidAmount - Bid in satoshis; must exceed the current highest bid.
    */
-  public bid(bidder: PubKey, bidAmount: bigint) {
+  public bid(sig: Sig, bidder: PubKey, bidAmount: bigint) {
+    // Verify the bidder authorized this bid (prevents griefing by bidding on others' behalf)
+    assert(checkSig(sig, bidder));
+
     // Reject bids that do not exceed the current highest
     assert(bidAmount > this.highestBid);
 

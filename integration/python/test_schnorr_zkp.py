@@ -8,13 +8,19 @@ SchnorrZKP implements a Schnorr zero-knowledge proof verifier on-chain.
 The contract locks funds to an EC public key P, and spending requires proving
 knowledge of the discrete logarithm k (i.e., P = k*G) without revealing k.
 
+The challenge e is derived on-chain via the Fiat-Shamir heuristic:
+    e = bin2num(hash256(cat(rPoint, pubKey)))
+
+This makes the proof non-interactive and prevents the prover from choosing
+a convenient challenge.
+
 Constructor
     - pubKey: Point -- the EC public key (64-byte uncompressed x[32] || y[32])
 
-Method: verify(rPoint: Point, s: bigint, e: bigint)
+Method: verify(rPoint: Point, s: bigint)
     The prover generates a proof:
         1. Pick random nonce r, compute R = r*G (commitment)
-        2. Pick challenge e
+        2. e is derived on-chain: e = bin2num(hash256(R || P))
         3. Compute s = r + e*k (mod n) (response)
     The contract checks: s*G === R + e*P (Schnorr verification equation)
 
@@ -28,6 +34,7 @@ Important Notes
     - The contract is stateless (SmartContract base class)
 """
 
+import hashlib
 import pytest
 
 from conftest import (
@@ -35,6 +42,26 @@ from conftest import (
     ec_mul_gen, encode_point, EC_N,
 )
 from runar.sdk import RunarContract, DeployOptions
+
+
+def derive_fiat_shamir_challenge(r_point_hex: str, pub_key_hex: str) -> int:
+    """Derive Fiat-Shamir challenge: e = bin2num(hash256(R || P)).
+
+    hash256 is double-SHA256. bin2num interprets the result as a Bitcoin Script
+    number (little-endian signed-magnitude).
+    """
+    combined = bytes.fromhex(r_point_hex + pub_key_hex)
+    h1 = hashlib.sha256(combined).digest()
+    h2 = hashlib.sha256(h1).digest()
+    data = bytearray(h2)  # 32 bytes
+
+    # bin2num: LE signed-magnitude
+    is_neg = (data[31] & 0x80) != 0
+    data[31] &= 0x7F
+
+    # LE bytes to integer
+    magnitude = int.from_bytes(data, byteorder="little")
+    return -magnitude if is_neg else magnitude
 
 
 class TestSchnorrZKP:
@@ -95,9 +122,9 @@ class TestSchnorrZKP:
         The proof satisfies the Schnorr verification equation s*G = R + e*P:
             1. Private key k=42, public key P = k*G
             2. Nonce r=7777, commitment R = r*G
-            3. Challenge e=12345
+            3. Challenge e = bin2num(hash256(R || P)) (Fiat-Shamir)
             4. Response s = r + e*k mod n
-            5. Call verify(R, s, e)
+            5. Call verify(R, s) -- e is derived on-chain
         """
         artifact = compile_contract("examples/ts/schnorr-zkp/SchnorrZKP.runar.ts")
 
@@ -105,9 +132,7 @@ class TestSchnorrZKP:
         wallet = create_funded_wallet(provider)
 
         # --- Step 1: Generate keypair ---
-        # Private key k (the secret we're proving knowledge of)
         k = 42
-        # Public key P = k*G (deployed into the contract)
         px, py = ec_mul_gen(k)
         pub_key_hex = encode_point(px, py)
 
@@ -115,24 +140,20 @@ class TestSchnorrZKP:
         contract.deploy(provider, wallet["signer"], DeployOptions(satoshis=50000))
 
         # --- Step 2: Generate the Schnorr ZKP proof ---
-        # Pick a nonce r (deterministic for tests)
         r = 7777
-        # Compute R = r*G (nonce commitment)
         rx, ry = ec_mul_gen(r)
         r_point_hex = encode_point(rx, ry)
 
-        # Challenge e (in a real protocol, e = H(R || P || message))
-        e = 12345
+        # Fiat-Shamir challenge: e = bin2num(hash256(R || P))
+        e = derive_fiat_shamir_challenge(r_point_hex, pub_key_hex)
 
         # Response s = r + e*k (mod n)
-        # This encodes knowledge of k: s*G = r*G + e*k*G = R + e*P
         s = (r + e * k) % EC_N
 
-        # --- Step 3: Call verify(rPoint, s, e) ---
-        # The contract checks s*G === R + e*P (always true for valid proof)
+        # --- Step 3: Call verify(rPoint, s) ---
         call_txid, _ = contract.call(
             "verify",
-            [r_point_hex, s, e],
+            [r_point_hex, s],
             provider, wallet["signer"],
         )
         assert call_txid
@@ -156,7 +177,8 @@ class TestSchnorrZKP:
         rx, ry = ec_mul_gen(r)
         r_point_hex = encode_point(rx, ry)
 
-        e = 12345
+        # Fiat-Shamir challenge
+        e = derive_fiat_shamir_challenge(r_point_hex, pub_key_hex)
         s = (r + e * k) % EC_N
 
         # Tamper s by adding 1
@@ -165,6 +187,6 @@ class TestSchnorrZKP:
         with pytest.raises(Exception):
             contract.call(
                 "verify",
-                [r_point_hex, tampered_s, e],
+                [r_point_hex, tampered_s],
                 provider, wallet["signer"],
             )

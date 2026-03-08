@@ -14,14 +14,17 @@ import runar "github.com/icellan/runar/packages/runar-go"
 //  2. Preimage verification -- CheckPreimage (OP_PUSH_TX) proves the
 //     contract is inspecting the real spending transaction, enabling
 //     on-chain introspection of its fields.
-//  3. Covenant rule -- the output amount must be >= MinAmount, which
-//     constrains the transaction structure itself.
+//  3. Covenant rule -- the contract constructs the expected P2PKH output
+//     on-chain (recipient address + MinAmount satoshis) and verifies its
+//     hash against the transaction's hashOutputs field. This constrains
+//     both the destination and the amount at the consensus level.
 //
 // Script layout (simplified):
 //
-//	Unlocking: <sig> <amount> <txPreimage>
+//	Unlocking: <opPushTxSig> <sig> <txPreimage>
 //	Locking:   <pubKey> OP_CHECKSIG OP_VERIFY <checkPreimage>
-//	           <amount >= minAmount> OP_VERIFY
+//	           <buildP2PKH(recipient)> <num2bin(minAmount,8)> OP_CAT
+//	           OP_HASH256 <extractOutputHash(preimage)> OP_EQUAL OP_VERIFY
 //
 // Use cases for this pattern include withdrawal limits, time-locked vaults,
 // rate-limited spending, and enforced change addresses.
@@ -41,24 +44,18 @@ type CovenantVault struct {
 	MinAmount runar.Bigint `runar:"readonly"`
 }
 
-// Spend unlocks funds held by this covenant. The caller must supply three
-// pieces of evidence:
+// Spend unlocks funds held by this covenant. Constructs the expected P2PKH
+// output on-chain and verifies it against the transaction's hashOutputs.
+//
+// Parameters:
 //   - sig:        ECDSA signature from the owner (~72 bytes DER).
-//   - amount:     Declared output amount; must be >= MinAmount.
-//   - txPreimage: Sighash preimage (variable length) used by CheckPreimage
-//     to verify the spending transaction.
-func (c *CovenantVault) Spend(sig runar.Sig, amount runar.Bigint, txPreimage runar.SigHashPreimage) {
-	// Layer 1: Owner authorization -- verify the ECDSA signature against
-	// the owner's public key. This proves the rightful owner is spending.
+//   - txPreimage: Sighash preimage (variable length) used by CheckPreimage.
+func (c *CovenantVault) Spend(sig runar.Sig, txPreimage runar.SigHashPreimage) {
 	runar.Assert(runar.CheckSig(sig, c.Owner))
-
-	// Layer 2: Preimage verification -- OP_PUSH_TX proves the contract is
-	// inspecting the actual spending transaction, not a forgery. Without
-	// this, the covenant rule below could be trivially bypassed.
 	runar.Assert(runar.CheckPreimage(txPreimage))
 
-	// Layer 3: Covenant rule -- enforce a minimum output amount. This is
-	// the core covenant constraint: it restricts how funds are spent,
-	// not just who can spend them.
-	runar.Assert(amount >= c.MinAmount)
+	// Construct expected P2PKH output and verify against hashOutputs
+	p2pkhScript := runar.Cat(runar.Cat("1976a914", c.Recipient), "88ac")
+	expectedOutput := runar.Cat(runar.Num2Bin(c.MinAmount, 8), p2pkhScript)
+	runar.Assert(runar.Hash256(expectedOutput) == runar.ExtractOutputHash(txPreimage))
 }

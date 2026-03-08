@@ -239,6 +239,32 @@ pub fn num2bin(v: &Bigint, length: usize) -> ByteString {
     buf
 }
 
+/// Converts a byte string (Bitcoin Script LE signed-magnitude) back to an integer.
+/// Inverse of `num2bin`.
+pub fn bin2num(data: &[u8]) -> Bigint {
+    if data.is_empty() {
+        return 0;
+    }
+    let last = data[data.len() - 1];
+    let negative = (last & 0x80) != 0;
+    let mut result: u64 = (last & 0x7f) as u64;
+    for i in (0..data.len() - 1).rev() {
+        result = (result << 8) | data[i] as u64;
+    }
+    if negative {
+        -(result as i64)
+    } else {
+        result as i64
+    }
+}
+
+/// Concatenates two byte strings.
+pub fn cat(a: &[u8], b: &[u8]) -> ByteString {
+    let mut result = a.to_vec();
+    result.extend_from_slice(b);
+    result
+}
+
 // ---------------------------------------------------------------------------
 // Math functions
 // ---------------------------------------------------------------------------

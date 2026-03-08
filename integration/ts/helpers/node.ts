@@ -3,8 +3,8 @@
  */
 
 const RPC_URL = process.env.RPC_URL ?? 'http://localhost:18332';
-const RPC_USER = process.env.RPC_USER ?? 'regtest';
-const RPC_PASS = process.env.RPC_PASS ?? 'regtest';
+const RPC_USER = process.env.RPC_USER ?? 'bitcoin';
+const RPC_PASS = process.env.RPC_PASS ?? 'bitcoin';
 
 export async function rpcCall(method: string, ...params: unknown[]): Promise<unknown> {
   const body = JSON.stringify({

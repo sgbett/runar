@@ -26,7 +26,7 @@ fi
 
 echo ""
 echo "=== Go integration tests ==="
-if (cd go && RPC_USER=regtest RPC_PASS=regtest go test -tags integration -v -timeout 600s); then
+if (cd go && go test -tags integration -v -timeout 600s); then
   echo "--- Go: PASSED ---"
 else
   echo "--- Go: FAILED ---"

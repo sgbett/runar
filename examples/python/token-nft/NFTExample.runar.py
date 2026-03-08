@@ -49,6 +49,7 @@ class SimpleNFT(StatefulSmartContract):
             output_satoshis: Satoshis to fund the continuation UTXO.
         """
         assert_(check_sig(sig, self.owner))
+        assert_(output_satoshis >= 1)
         self.add_output(output_satoshis, new_owner)
 
     @public

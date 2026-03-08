@@ -40,9 +40,13 @@ module Auction {
     // the updated highest_bidder and highest_bid.
     //
     // Parameters:
+    //   sig        - Bidder's signature proving they authorized this bid.
     //   bidder     - Public key of the new bidder.
     //   bid_amount - Bid in satoshis; must exceed the current highest bid.
-    public fun bid(contract: &mut Auction, bidder: PubKey, bid_amount: bigint) {
+    public fun bid(contract: &mut Auction, sig: Sig, bidder: PubKey, bid_amount: bigint) {
+        // Verify the bidder authorized this bid (prevents griefing)
+        assert!(check_sig(sig, bidder), 0);
+
         // Reject bids that do not exceed the current highest
         assert!(bid_amount > contract.highest_bid, 0);
 

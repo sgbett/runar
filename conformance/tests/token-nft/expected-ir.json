@@ -178,106 +178,136 @@
         {
           "name": "t10",
           "value": {
-            "kind": "load_param",
-            "name": "newOwner"
+            "kind": "load_const",
+            "value": 1
           }
         },
         {
           "name": "t11",
           "value": {
-            "kind": "load_param",
-            "name": "txPreimage"
+            "kind": "bin_op",
+            "left": "t9",
+            "op": ">=",
+            "right": "t10"
           }
         },
         {
           "name": "t12",
           "value": {
-            "kind": "add_output",
-            "preimage": "t11",
-            "satoshis": "t9",
-            "stateValues": [
-              "t10"
-            ]
+            "kind": "assert",
+            "value": "t11"
           }
         },
         {
           "name": "t13",
           "value": {
             "kind": "load_param",
-            "name": "_changePKH"
+            "name": "outputSatoshis"
           }
         },
         {
           "name": "t14",
           "value": {
             "kind": "load_param",
-            "name": "_changeAmount"
+            "name": "newOwner"
           }
         },
         {
           "name": "t15",
-          "value": {
-            "args": [
-              "t13",
-              "t14"
-            ],
-            "func": "buildChangeOutput",
-            "kind": "call"
-          }
-        },
-        {
-          "name": "t16",
-          "value": {
-            "args": [
-              "t12",
-              "t15"
-            ],
-            "func": "cat",
-            "kind": "call"
-          }
-        },
-        {
-          "name": "t17",
-          "value": {
-            "args": [
-              "t16"
-            ],
-            "func": "hash256",
-            "kind": "call"
-          }
-        },
-        {
-          "name": "t18",
           "value": {
             "kind": "load_param",
             "name": "txPreimage"
           }
         },
         {
+          "name": "t16",
+          "value": {
+            "kind": "add_output",
+            "preimage": "t15",
+            "satoshis": "t13",
+            "stateValues": [
+              "t14"
+            ]
+          }
+        },
+        {
+          "name": "t17",
+          "value": {
+            "kind": "load_param",
+            "name": "_changePKH"
+          }
+        },
+        {
+          "name": "t18",
+          "value": {
+            "kind": "load_param",
+            "name": "_changeAmount"
+          }
+        },
+        {
           "name": "t19",
           "value": {
             "args": [
+              "t17",
               "t18"
             ],
-            "func": "extractOutputHash",
+            "func": "buildChangeOutput",
             "kind": "call"
           }
         },
         {
           "name": "t20",
           "value": {
-            "kind": "bin_op",
-            "left": "t17",
-            "op": "===",
-            "result_type": "bytes",
-            "right": "t19"
+            "args": [
+              "t16",
+              "t19"
+            ],
+            "func": "cat",
+            "kind": "call"
           }
         },
         {
           "name": "t21",
           "value": {
+            "args": [
+              "t20"
+            ],
+            "func": "hash256",
+            "kind": "call"
+          }
+        },
+        {
+          "name": "t22",
+          "value": {
+            "kind": "load_param",
+            "name": "txPreimage"
+          }
+        },
+        {
+          "name": "t23",
+          "value": {
+            "args": [
+              "t22"
+            ],
+            "func": "extractOutputHash",
+            "kind": "call"
+          }
+        },
+        {
+          "name": "t24",
+          "value": {
+            "kind": "bin_op",
+            "left": "t21",
+            "op": "===",
+            "result_type": "bytes",
+            "right": "t23"
+          }
+        },
+        {
+          "name": "t25",
+          "value": {
             "kind": "assert",
-            "value": "t20"
+            "value": "t24"
           }
         }
       ],

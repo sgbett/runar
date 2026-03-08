@@ -1,4 +1,4 @@
-import { SmartContract, assert, PubKey, Sig, Addr, ByteString, SigHashPreimage, checkSig, checkPreimage, hash160, extractOutputHash, hash256 } from 'runar-lang';
+import { SmartContract, assert, PubKey, Sig, Addr, ByteString, SigHashPreimage, checkSig, checkPreimage, extractOutputHash, hash256, num2bin, cat } from 'runar-lang';
 
 /**
  * CovenantVault -- a stateless Bitcoin covenant contract.
@@ -13,13 +13,16 @@ import { SmartContract, assert, PubKey, Sig, Addr, ByteString, SigHashPreimage, 
  *   2. Preimage verification -- `checkPreimage` (OP_PUSH_TX) proves the
  *      contract is inspecting the real spending transaction, enabling
  *      on-chain introspection of its fields.
- *   3. Covenant rule -- the output amount must be >= `minAmount`, which
- *      constrains the transaction structure itself.
+ *   3. Covenant rule -- the contract constructs the expected P2PKH output
+ *      on-chain (recipient address + `minAmount` satoshis) and verifies its
+ *      hash against the transaction's `hashOutputs` field. This constrains
+ *      both the destination and the amount at the consensus level.
  *
  * Script layout (simplified):
- *   Unlocking: <sig> <amount> <txPreimage>
+ *   Unlocking: <opPushTxSig> <sig> <txPreimage>
  *   Locking:   <pubKey> OP_CHECKSIG OP_VERIFY <checkPreimage>
- *              <amount >= minAmount> OP_VERIFY
+ *              <buildP2PKH(recipient)> <num2bin(minAmount,8)> OP_CAT
+ *              OP_HASH256 <extractOutputHash(preimage)> OP_EQUAL OP_VERIFY
  *
  * Use cases for this pattern include withdrawal limits, time-locked vaults,
  * rate-limited spending, and enforced change addresses.
@@ -51,26 +54,26 @@ class CovenantVault extends SmartContract {
   /**
    * Spend funds held by this covenant.
    *
-   * The caller must supply three pieces of evidence:
+   * Enforces that the spending transaction creates a P2PKH output to
+   * the designated recipient with at least `minAmount` satoshis. The
+   * output is constructed on-chain and verified against the sighash
+   * preimage's hashOutputs field, ensuring the covenant is enforced
+   * at the consensus level.
    *
    * @param sig        - ECDSA signature from the owner (~72 bytes DER).
-   * @param amount     - Declared output amount; must be >= `minAmount`.
    * @param txPreimage - Sighash preimage (variable length) used by
    *                     `checkPreimage` to verify the spending transaction.
    */
-  public spend(sig: Sig, amount: bigint, txPreimage: SigHashPreimage) {
-    // Layer 1: Owner authorization -- verify the ECDSA signature against
-    // the owner's public key. This proves the rightful owner is spending.
+  public spend(sig: Sig, txPreimage: SigHashPreimage) {
     assert(checkSig(sig, this.owner));
-
-    // Layer 2: Preimage verification -- OP_PUSH_TX proves the contract is
-    // inspecting the actual spending transaction, not a forgery. Without
-    // this, the covenant rule below could be trivially bypassed.
     assert(checkPreimage(txPreimage));
 
-    // Layer 3: Covenant rule -- enforce a minimum output amount. This is
-    // the core covenant constraint: it restricts *how* funds are spent,
-    // not just *who* can spend them.
-    assert(amount >= this.minAmount);
+    // Construct the expected P2PKH output on-chain:
+    // <8-byte LE amount> <varint(25)> <OP_DUP OP_HASH160 OP_PUSH(20) recipient OP_EQUALVERIFY OP_CHECKSIG>
+    const p2pkhScript = cat(cat('1976a914', this.recipient), '88ac');
+    const expectedOutput = cat(num2bin(this.minAmount, 8n), p2pkhScript);
+
+    // Verify the transaction's outputs match exactly
+    assert(hash256(expectedOutput) === extractOutputHash(txPreimage));
   }
 }

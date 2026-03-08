@@ -1,4 +1,3 @@
-import pytest
 from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -10,21 +9,11 @@ Escrow = contract_mod.Escrow
 from runar import mock_sig, mock_pub_key
 
 
-def test_release_by_seller():
+def test_release():
     c = Escrow(buyer=mock_pub_key(), seller=mock_pub_key(), arbiter=mock_pub_key())
-    c.release_by_seller(mock_sig())
+    c.release(mock_sig(), mock_sig())
 
 
-def test_release_by_arbiter():
+def test_refund():
     c = Escrow(buyer=mock_pub_key(), seller=mock_pub_key(), arbiter=mock_pub_key())
-    c.release_by_arbiter(mock_sig())
-
-
-def test_refund_to_buyer():
-    c = Escrow(buyer=mock_pub_key(), seller=mock_pub_key(), arbiter=mock_pub_key())
-    c.refund_to_buyer(mock_sig())
-
-
-def test_refund_by_arbiter():
-    c = Escrow(buyer=mock_pub_key(), seller=mock_pub_key(), arbiter=mock_pub_key())
-    c.refund_by_arbiter(mock_sig())
+    c.refund(mock_sig(), mock_sig())

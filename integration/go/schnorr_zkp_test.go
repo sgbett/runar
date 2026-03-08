@@ -4,6 +4,7 @@ package integration
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"fmt"
 	"math/big"
 	"testing"
@@ -88,6 +89,66 @@ func ecAddPoints(px, py, qx, qy *big.Int) (*big.Int, *big.Int) {
 	ry.Sub(ry, py)
 	ry.Mod(ry, ecP)
 	return rx, ry
+}
+
+// deriveFiatShamirChallenge computes e = bin2num(hash256(R || P)).
+// hash256 is double-SHA256. bin2num interprets the result as a Bitcoin Script
+// number (little-endian signed-magnitude).
+func deriveFiatShamirChallenge(rx, ry, px, py *big.Int) *big.Int {
+	rHex := fmt.Sprintf("%064x%064x", rx, ry)
+	pHex := fmt.Sprintf("%064x%064x", px, py)
+	combined := make([]byte, 0, 128)
+	for i := 0; i < len(rHex); i += 2 {
+		b := hexByte(rHex[i], rHex[i+1])
+		combined = append(combined, b)
+	}
+	for i := 0; i < len(pHex); i += 2 {
+		b := hexByte(pHex[i], pHex[i+1])
+		combined = append(combined, b)
+	}
+
+	// hash256 = SHA256(SHA256(data))
+	h1 := sha256.Sum256(combined)
+	h2 := sha256.Sum256(h1[:])
+
+	// bin2num: little-endian signed-magnitude decode
+	data := h2[:]
+	if len(data) == 0 {
+		return big.NewInt(0)
+	}
+
+	lastByte := data[len(data)-1]
+	isNeg := (lastByte & 0x80) != 0
+	data[len(data)-1] = lastByte & 0x7f
+
+	// Build big-endian representation from LE data
+	reversed := make([]byte, len(data))
+	for i, b := range data {
+		reversed[len(data)-1-i] = b
+	}
+
+	result := new(big.Int).SetBytes(reversed)
+	if isNeg {
+		result.Neg(result)
+	}
+	return result
+}
+
+func hexByte(hi, lo byte) byte {
+	return hexNibble(hi)<<4 | hexNibble(lo)
+}
+
+func hexNibble(c byte) byte {
+	switch {
+	case c >= '0' && c <= '9':
+		return c - '0'
+	case c >= 'a' && c <= 'f':
+		return c - 'a' + 10
+	case c >= 'A' && c <= 'F':
+		return c - 'A' + 10
+	default:
+		return 0
+	}
 }
 
 func TestSchnorr_Compile(t *testing.T) {
@@ -231,8 +292,7 @@ func TestSchnorr_ValidProof(t *testing.T) {
 		t.Skip("Schnorr EC math is slow, skipping in short mode")
 	}
 
-	// Generate keypair and proof parameters.
-	// The ecMul codegen uses k+3n trick so any scalar in [1, n-1] works.
+	// Generate keypair: k is the secret, P = k*G is the public key
 	k, _ := rand.Int(rand.Reader, ecN)
 	k.Add(k, big.NewInt(1)) // ensure k >= 1
 	if k.Cmp(ecN) >= 0 {
@@ -240,6 +300,7 @@ func TestSchnorr_ValidProof(t *testing.T) {
 	}
 	px, py := ecMul(ecGx, ecGy, k)
 
+	// Generate random nonce r, compute R = r*G
 	r2, _ := rand.Int(rand.Reader, ecN)
 	r2.Add(r2, big.NewInt(1))
 	if r2.Cmp(ecN) >= 0 {
@@ -247,9 +308,10 @@ func TestSchnorr_ValidProof(t *testing.T) {
 	}
 	rx, ry := ecMul(ecGx, ecGy, r2)
 
-	e := big.NewInt(12345)
+	// Derive Fiat-Shamir challenge: e = bin2num(hash256(R || P))
+	e := deriveFiatShamirChallenge(rx, ry, px, py)
 
-	// s = r + e*k mod n
+	// Compute s = r + e*k (mod n)
 	s := new(big.Int).Mul(e, k)
 	s.Add(s, r2)
 	s.Mod(s, ecN)
@@ -266,10 +328,9 @@ func TestSchnorr_ValidProof(t *testing.T) {
 		t.Fatalf("no current UTXO after deploy")
 	}
 
-	// Unlocking: <rPoint> <s> <e>
+	// Unlocking: <rPoint> <s>  (e is derived on-chain via Fiat-Shamir)
 	unlockHex := helpers.EncodePushPoint(rx, ry) +
-		helpers.EncodePushBigInt(s) +
-		helpers.EncodePushBigInt(e)
+		helpers.EncodePushBigInt(s)
 
 	spendHex, err := helpers.SpendContract(contractUTXO, unlockHex, funder.P2PKHScript(), 49000)
 	if err != nil {
@@ -293,7 +354,8 @@ func TestSchnorr_InvalidS_Rejected(t *testing.T) {
 	r.Add(r, big.NewInt(1))
 	rx, ry := ecMul(ecGx, ecGy, r)
 
-	e := big.NewInt(12345)
+	// Derive proper Fiat-Shamir challenge
+	e := deriveFiatShamirChallenge(rx, ry, px, py)
 	s := new(big.Int).Mul(e, k)
 	s.Add(s, r)
 	s.Mod(s, ecN)
@@ -313,9 +375,9 @@ func TestSchnorr_InvalidS_Rejected(t *testing.T) {
 		t.Fatalf("no current UTXO after deploy")
 	}
 
+	// Unlocking: <rPoint> <sBad>
 	unlockHex := helpers.EncodePushPoint(rx, ry) +
-		helpers.EncodePushBigInt(sBad) +
-		helpers.EncodePushBigInt(e)
+		helpers.EncodePushBigInt(sBad)
 
 	spendHex, err := helpers.SpendContract(contractUTXO, unlockHex, funder.P2PKHScript(), 49000)
 	if err != nil {

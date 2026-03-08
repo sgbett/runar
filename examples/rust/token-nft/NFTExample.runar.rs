@@ -48,6 +48,7 @@ impl SimpleNFT {
     #[public]
     pub fn transfer(&mut self, sig: &Sig, new_owner: PubKey, output_satoshis: Bigint) {
         assert!(check_sig(sig, &self.owner));
+        assert!(output_satoshis >= 1);
         self.add_output(output_satoshis, new_owner);
     }
 

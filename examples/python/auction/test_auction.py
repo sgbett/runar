@@ -18,7 +18,7 @@ def test_bid_higher():
         deadline=1000,
     )
     new_bidder = b'\x03' + b'\x01' * 32
-    c.bid(new_bidder, 200)
+    c.bid(mock_sig(), new_bidder, 200)
     assert c.highest_bidder == new_bidder
     assert c.highest_bid == 200
 
@@ -31,7 +31,7 @@ def test_bid_lower_fails():
         deadline=1000,
     )
     with pytest.raises(AssertionError):
-        c.bid(mock_pub_key(), 50)
+        c.bid(mock_sig(), mock_pub_key(), 50)
 
 
 def test_close():

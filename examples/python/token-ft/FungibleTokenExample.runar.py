@@ -66,6 +66,7 @@ class FungibleToken(StatefulSmartContract):
             output_satoshis: Satoshis to fund each output UTXO.
         """
         assert_(check_sig(sig, self.owner))
+        assert_(output_satoshis >= 1)
         total_balance = self.balance + self.merge_balance
         assert_(amount > 0)
         assert_(amount <= total_balance)
@@ -87,6 +88,7 @@ class FungibleToken(StatefulSmartContract):
             output_satoshis: Satoshis to fund the output UTXO.
         """
         assert_(check_sig(sig, self.owner))
+        assert_(output_satoshis >= 1)
         self.add_output(output_satoshis, to, self.balance + self.merge_balance, 0)
 
     @public
@@ -124,6 +126,7 @@ class FungibleToken(StatefulSmartContract):
             output_satoshis: Satoshis to fund the merged output UTXO.
         """
         assert_(check_sig(sig, self.owner))
+        assert_(output_satoshis >= 1)
         assert_(other_balance >= 0)
 
         # Verify all_prevouts is authentic (matches the actual transaction inputs)

@@ -66,6 +66,7 @@ impl FungibleToken {
     #[public]
     pub fn transfer(&mut self, sig: &Sig, to: PubKey, amount: Bigint, output_satoshis: Bigint) {
         assert!(check_sig(sig, &self.owner));
+        assert!(output_satoshis >= 1);
         let total_balance = self.balance + self.merge_balance;
         assert!(amount > 0);
         assert!(amount <= total_balance);
@@ -91,6 +92,7 @@ impl FungibleToken {
     #[public]
     pub fn send(&mut self, sig: &Sig, to: PubKey, output_satoshis: Bigint) {
         assert!(check_sig(sig, &self.owner));
+        assert!(output_satoshis >= 1);
         self.add_output(output_satoshis, to, self.balance + self.merge_balance, 0);
     }
 
@@ -130,6 +132,7 @@ impl FungibleToken {
     #[public]
     pub fn merge(&mut self, sig: &Sig, other_balance: Bigint, all_prevouts: ByteString, output_satoshis: Bigint) {
         assert!(check_sig(sig, &self.owner));
+        assert!(output_satoshis >= 1);
         assert!(other_balance >= 0);
 
         // Verify all_prevouts is authentic (matches the actual transaction inputs)

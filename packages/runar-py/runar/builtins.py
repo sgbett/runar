@@ -205,6 +205,18 @@ def num2bin(v: int, length: int) -> bytes:
         result.append(0)
     return bytes(result[:length])
 
+def bin2num(data: bytes) -> int:
+    """Convert a byte string (Bitcoin Script LE signed-magnitude) to an integer.
+    Inverse of num2bin."""
+    if len(data) == 0:
+        return 0
+    last = data[-1]
+    negative = (last & 0x80) != 0
+    result = last & 0x7F
+    for i in range(len(data) - 2, -1, -1):
+        result = (result << 8) | data[i]
+    return -result if negative else result
+
 def cat(a: bytes, b: bytes) -> bytes:
     return a + b
 

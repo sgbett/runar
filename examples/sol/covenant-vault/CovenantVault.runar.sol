@@ -14,13 +14,16 @@ pragma runar ^0.1.0;
 ///   2. Preimage verification -- checkPreimage (OP_PUSH_TX) proves the
 ///      contract is inspecting the real spending transaction, enabling
 ///      on-chain introspection of its fields.
-///   3. Covenant rule -- the output amount must be >= minAmount, which
-///      constrains the transaction structure itself.
+///   3. Covenant rule -- the contract constructs the expected P2PKH output
+///      on-chain (recipient address + minAmount satoshis) and verifies its
+///      hash against the transaction's hashOutputs field. This constrains
+///      both the destination and the amount at the consensus level.
 ///
 /// Script layout (simplified):
-///   Unlocking: <sig> <amount> <txPreimage>
+///   Unlocking: <opPushTxSig> <sig> <txPreimage>
 ///   Locking:   <pubKey> OP_CHECKSIG OP_VERIFY <checkPreimage>
-///              <amount >= minAmount> OP_VERIFY
+///              <buildP2PKH(recipient)> <num2bin(minAmount,8)> OP_CAT
+///              OP_HASH256 <extractOutputHash(preimage)> OP_EQUAL OP_VERIFY
 ///
 /// Use cases for this pattern include withdrawal limits, time-locked vaults,
 /// rate-limited spending, and enforced change addresses.
@@ -45,21 +48,17 @@ contract CovenantVault is SmartContract {
     }
 
     /// @notice Spend funds held by this covenant.
+    /// @dev Constructs the expected P2PKH output on-chain and verifies it against
+    /// the transaction's hashOutputs from the sighash preimage.
     /// @param sig        ECDSA signature from the owner (~72 bytes DER).
-    /// @param amount     Declared output amount; must be >= minAmount.
     /// @param txPreimage Sighash preimage (variable length) for checkPreimage.
-    function spend(Sig sig, bigint amount, SigHashPreimage txPreimage) public {
-        // Layer 1: Owner authorization -- verify the ECDSA signature against
-        // the owner's public key.
+    function spend(Sig sig, SigHashPreimage txPreimage) public {
         require(checkSig(sig, this.owner));
-
-        // Layer 2: Preimage verification -- OP_PUSH_TX proves the contract is
-        // inspecting the actual spending transaction, not a forgery.
         require(checkPreimage(txPreimage));
 
-        // Layer 3: Covenant rule -- enforce a minimum output amount. This is
-        // the core covenant constraint: it restricts how funds are spent,
-        // not just who can spend them.
-        require(amount >= this.minAmount);
+        // Construct expected P2PKH output and verify against hashOutputs
+        ByteString p2pkhScript = cat(cat(0x1976a914, this.recipient), 0x88ac);
+        ByteString expectedOutput = cat(num2bin(this.minAmount, 8), p2pkhScript);
+        require(hash256(expectedOutput) == extractOutputHash(txPreimage));
     }
 }

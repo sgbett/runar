@@ -8,13 +8,13 @@
  *   - deadline: bigint (readonly)
  *
  * Methods:
- *   - bid(bidder: PubKey, bidAmount: bigint) — no Sig, but uses extractLocktime
- *   - close(sig: Sig) — requires Sig
+ *   - bid(sig: Sig, bidder: PubKey, bidAmount: bigint) — requires bidder's Sig + extractLocktime
+ *   - close(sig: Sig) — requires auctioneer's Sig
  *
- * The bid() method does not take a Sig parameter, but it checks
+ * The bid() method requires the bidder's signature (prevents griefing) and checks
  * extractLocktime(this.txPreimage) < this.deadline, which constrains the
- * transaction's nLockTime. The close() method requires a Sig. Both paths
- * are complex enough to warrant raw tx construction for spending. We test
+ * transaction's nLockTime. The close() method requires the auctioneer's Sig. Both
+ * bid paths are complex enough to warrant raw tx construction for spending. We test
  * compile + deploy via the SDK. Full spending tests are covered by the Go
  * integration suite (auction_test.go).
  */
@@ -25,7 +25,7 @@ import { RunarContract, RPCProvider } from 'runar-sdk';
 import { createFundedWallet, createWallet } from './helpers/wallet.js';
 
 function createProvider() {
-  return new RPCProvider('http://localhost:18332', 'regtest', 'regtest', {
+  return new RPCProvider('http://localhost:18332', 'bitcoin', 'bitcoin', {
     autoMine: true,
     network: 'testnet',
   });

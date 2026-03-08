@@ -51,6 +51,7 @@ module FungibleToken {
     //   output_satoshis: satoshis to fund each output UTXO
     public fun transfer(contract: &mut FungibleToken, sig: Sig, to: PubKey, amount: bigint, output_satoshis: bigint) {
         assert!(check_sig(sig, contract.owner), 0);
+        assert!(output_satoshis >= 1, 0);
         let total_balance: bigint = contract.balance + contract.merge_balance;
         assert!(amount > 0, 0);
         assert!(amount <= total_balance, 0);
@@ -73,6 +74,7 @@ module FungibleToken {
     //   output_satoshis: satoshis to fund the output UTXO
     public fun send(contract: &mut FungibleToken, sig: Sig, to: PubKey, output_satoshis: bigint) {
         assert!(check_sig(sig, contract.owner), 0);
+        assert!(output_satoshis >= 1, 0);
 
         contract.add_output(output_satoshis, to, contract.balance + contract.merge_balance, 0);
     }
@@ -110,6 +112,7 @@ module FungibleToken {
     //   output_satoshis: satoshis to fund the merged output UTXO
     public fun merge(contract: &mut FungibleToken, sig: Sig, other_balance: bigint, all_prevouts: ByteString, output_satoshis: bigint) {
         assert!(check_sig(sig, contract.owner), 0);
+        assert!(output_satoshis >= 1, 0);
         assert!(other_balance >= 0, 0);
 
         // Verify all_prevouts is authentic (matches the actual transaction inputs)

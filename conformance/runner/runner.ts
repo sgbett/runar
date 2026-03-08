@@ -466,9 +466,15 @@ function compareScript(...outputs: (CompilerOutput | undefined)[]): boolean {
 function resolveSourceFile(testDir: string, testName: string): string {
   const configFile = join(testDir, 'source.json');
   if (existsSync(configFile)) {
-    const config = JSON.parse(readFileSync(configFile, 'utf-8')) as { path?: string };
+    const config = JSON.parse(readFileSync(configFile, 'utf-8')) as {
+      path?: string;
+      sources?: Record<string, string>;
+    };
     if (config.path) {
       return resolve(testDir, config.path);
+    }
+    if (config.sources?.['.runar.ts']) {
+      return resolve(testDir, config.sources['.runar.ts']);
     }
   }
   return join(testDir, `${testName}.runar.ts`);
@@ -652,16 +658,49 @@ export async function updateGoldenFiles(testDir: string): Promise<void> {
 /**
  * Discover all input format source files in a test directory.
  *
+ * Checks `source.json` for external references first, then scans for local
+ * files. This allows tests to reference sources in `examples/` instead of
+ * duplicating them.
+ *
  * Returns an array of { ext, sourceFile } for each format found.
  */
 function discoverFormats(testDir: string, testName: string): { ext: string; sourceFile: string }[] {
   const found: { ext: string; sourceFile: string }[] = [];
+
+  // Check source.json for external references
+  const configFile = join(testDir, 'source.json');
+  if (existsSync(configFile)) {
+    const config = JSON.parse(readFileSync(configFile, 'utf-8')) as {
+      path?: string;
+      sources?: Record<string, string>;
+    };
+    if (config.sources) {
+      // Multi-format: { sources: { ".runar.ts": "path", ".runar.sol": "path", ... } }
+      for (const [ext, relPath] of Object.entries(config.sources)) {
+        const sourceFile = resolve(testDir, relPath);
+        if (existsSync(sourceFile)) {
+          found.push({ ext, sourceFile });
+        }
+      }
+    } else if (config.path) {
+      // Single-format: { path: "path/to/file.runar.ts" }
+      const sourceFile = resolve(testDir, config.path);
+      if (existsSync(sourceFile)) {
+        const ext = INPUT_FORMATS.find(f => sourceFile.endsWith(f.ext))?.ext ?? '.runar.ts';
+        found.push({ ext, sourceFile });
+      }
+    }
+  }
+
+  // Also check local files (skip formats already found via source.json)
   for (const { ext } of INPUT_FORMATS) {
+    if (found.some(f => f.ext === ext)) continue;
     const sourceFile = join(testDir, `${testName}${ext}`);
     if (existsSync(sourceFile)) {
       found.push({ ext, sourceFile });
     }
   }
+
   return found;
 }
 

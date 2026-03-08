@@ -1,7 +1,11 @@
-//! Escrow integration test — stateless contract with checkSig.
+//! Escrow integration test — stateless contract with dual-signature checkSig.
 //!
-//! Escrow locks funds and allows release or refund via four methods, each
-//! requiring a signature from the appropriate party. We verify compile + deploy.
+//! Escrow locks funds and allows release or refund via two methods, each
+//! requiring signatures from two parties (dual-sig):
+//!   - release(sellerSig, arbiterSig) — seller + arbiter must both sign
+//!   - refund(buyerSig, arbiterSig) — buyer + arbiter must both sign
+//!
+//! This ensures no party can act alone. The arbiter serves as the trust anchor.
 
 use crate::helpers::*;
 use runar_lang::sdk::{DeployOptions, RunarContract, SdkValue};
@@ -73,23 +77,25 @@ fn test_escrow_deploy_same_key_multiple_roles() {
     assert!(!deploy_txid.is_empty());
 }
 
+/// release(sellerSig, arbiterSig) — method index 0
+/// Uses the same key for both seller and arbiter roles so the SDK
+/// auto-computes both signatures from the single signer.
 #[test]
 #[ignore]
-fn test_escrow_release_by_seller() {
+fn test_escrow_release() {
     skip_if_no_node();
 
     let artifact = compile_contract("examples/ts/escrow/Escrow.runar.ts");
 
     let mut provider = create_provider();
-    // Seller is also our funded signer, so the auto-computed sig matches
-    let (signer, seller_wallet) = create_funded_wallet(&mut provider);
     let buyer = create_wallet();
-    let arbiter = create_wallet();
+    // Use the funded signer as both seller and arbiter
+    let (signer, signer_wallet) = create_funded_wallet(&mut provider);
 
     let mut contract = RunarContract::new(artifact, vec![
         SdkValue::Bytes(buyer.pub_key_hex),
-        SdkValue::Bytes(seller_wallet.pub_key_hex.clone()),
-        SdkValue::Bytes(arbiter.pub_key_hex),
+        SdkValue::Bytes(signer_wallet.pub_key_hex.clone()),
+        SdkValue::Bytes(signer_wallet.pub_key_hex.clone()),
     ]);
 
     contract
@@ -99,76 +105,38 @@ fn test_escrow_release_by_seller() {
         })
         .expect("deploy failed");
 
-    // Auto Sig is computed by the SDK from the signer (who is the seller)
+    // release(sellerSig=Auto, arbiterSig=Auto) — both auto-computed from signer
     let (call_txid, _tx) = contract
         .call(
-            "releaseBySeller",
-            &[SdkValue::Auto],
+            "release",
+            &[SdkValue::Auto, SdkValue::Auto],
             &mut provider,
             &*signer,
             None,
         )
-        .expect("releaseBySeller failed");
+        .expect("release failed");
     assert!(!call_txid.is_empty());
     assert_eq!(call_txid.len(), 64);
 }
 
+/// refund(buyerSig, arbiterSig) — method index 1
+/// Uses the same key for both buyer and arbiter roles.
 #[test]
 #[ignore]
-fn test_escrow_release_by_arbiter() {
-    skip_if_no_node();
-
-    let artifact = compile_contract("examples/ts/escrow/Escrow.runar.ts");
-
-    let mut provider = create_provider();
-    let buyer = create_wallet();
-    let seller = create_wallet();
-    // Arbiter is the funded signer so the auto-computed sig matches
-    let (signer, arbiter_wallet) = create_funded_wallet(&mut provider);
-
-    let mut contract = RunarContract::new(artifact, vec![
-        SdkValue::Bytes(buyer.pub_key_hex),
-        SdkValue::Bytes(seller.pub_key_hex),
-        SdkValue::Bytes(arbiter_wallet.pub_key_hex.clone()),
-    ]);
-
-    contract
-        .deploy(&mut provider, &*signer, &DeployOptions {
-            satoshis: 5000,
-            change_address: None,
-        })
-        .expect("deploy failed");
-
-    let (call_txid, _tx) = contract
-        .call(
-            "releaseByArbiter",
-            &[SdkValue::Auto],
-            &mut provider,
-            &*signer,
-            None,
-        )
-        .expect("releaseByArbiter failed");
-    assert!(!call_txid.is_empty());
-    assert_eq!(call_txid.len(), 64);
-}
-
-#[test]
-#[ignore]
-fn test_escrow_refund_to_buyer() {
+fn test_escrow_refund() {
     skip_if_no_node();
 
     let artifact = compile_contract("examples/ts/escrow/Escrow.runar.ts");
 
     let mut provider = create_provider();
     let seller = create_wallet();
-    let arbiter = create_wallet();
-    // Buyer is the funded signer so the auto-computed sig matches
-    let (signer, buyer_wallet) = create_funded_wallet(&mut provider);
+    // Use the funded signer as both buyer and arbiter
+    let (signer, signer_wallet) = create_funded_wallet(&mut provider);
 
     let mut contract = RunarContract::new(artifact, vec![
-        SdkValue::Bytes(buyer_wallet.pub_key_hex.clone()),
+        SdkValue::Bytes(signer_wallet.pub_key_hex.clone()),
         SdkValue::Bytes(seller.pub_key_hex),
-        SdkValue::Bytes(arbiter.pub_key_hex),
+        SdkValue::Bytes(signer_wallet.pub_key_hex.clone()),
     ]);
 
     contract
@@ -178,75 +146,36 @@ fn test_escrow_refund_to_buyer() {
         })
         .expect("deploy failed");
 
+    // refund(buyerSig=Auto, arbiterSig=Auto)
     let (call_txid, _tx) = contract
         .call(
-            "refundToBuyer",
-            &[SdkValue::Auto],
+            "refund",
+            &[SdkValue::Auto, SdkValue::Auto],
             &mut provider,
             &*signer,
             None,
         )
-        .expect("refundToBuyer failed");
+        .expect("refund failed");
     assert!(!call_txid.is_empty());
     assert_eq!(call_txid.len(), 64);
 }
 
 #[test]
 #[ignore]
-fn test_escrow_refund_by_arbiter() {
+fn test_escrow_release_wrong_signer_rejected() {
     skip_if_no_node();
 
     let artifact = compile_contract("examples/ts/escrow/Escrow.runar.ts");
 
     let mut provider = create_provider();
     let buyer = create_wallet();
-    let seller = create_wallet();
-    // Arbiter is the funded signer so the auto-computed sig matches
-    let (signer, arbiter_wallet) = create_funded_wallet(&mut provider);
-
-    let mut contract = RunarContract::new(artifact, vec![
-        SdkValue::Bytes(buyer.pub_key_hex),
-        SdkValue::Bytes(seller.pub_key_hex),
-        SdkValue::Bytes(arbiter_wallet.pub_key_hex.clone()),
-    ]);
-
-    contract
-        .deploy(&mut provider, &*signer, &DeployOptions {
-            satoshis: 5000,
-            change_address: None,
-        })
-        .expect("deploy failed");
-
-    let (call_txid, _tx) = contract
-        .call(
-            "refundByArbiter",
-            &[SdkValue::Auto],
-            &mut provider,
-            &*signer,
-            None,
-        )
-        .expect("refundByArbiter failed");
-    assert!(!call_txid.is_empty());
-    assert_eq!(call_txid.len(), 64);
-}
-
-#[test]
-#[ignore]
-fn test_escrow_wrong_signer_rejected() {
-    skip_if_no_node();
-
-    let artifact = compile_contract("examples/ts/escrow/Escrow.runar.ts");
-
-    let mut provider = create_provider();
-    let buyer = create_wallet();
-    let arbiter = create_wallet();
-    // Deploy with seller=walletA
+    // Deploy with seller=arbiter=walletA
     let (signer_a, wallet_a) = create_funded_wallet(&mut provider);
 
     let mut contract = RunarContract::new(artifact, vec![
         SdkValue::Bytes(buyer.pub_key_hex),
         SdkValue::Bytes(wallet_a.pub_key_hex.clone()),
-        SdkValue::Bytes(arbiter.pub_key_hex),
+        SdkValue::Bytes(wallet_a.pub_key_hex.clone()),
     ]);
 
     contract
@@ -256,14 +185,51 @@ fn test_escrow_wrong_signer_rejected() {
         })
         .expect("deploy failed");
 
-    // Call releaseBySeller with a different signer — should be rejected
+    // Call release with walletB — checkSig should fail
     let (signer_b, _wallet_b) = create_funded_wallet(&mut provider);
     let result = contract.call(
-        "releaseBySeller",
-        &[SdkValue::Auto],
+        "release",
+        &[SdkValue::Auto, SdkValue::Auto],
         &mut provider,
         &*signer_b,
         None,
     );
-    assert!(result.is_err(), "releaseBySeller with wrong signer should be rejected");
+    assert!(result.is_err(), "release with wrong signer should be rejected");
+}
+
+#[test]
+#[ignore]
+fn test_escrow_refund_wrong_signer_rejected() {
+    skip_if_no_node();
+
+    let artifact = compile_contract("examples/ts/escrow/Escrow.runar.ts");
+
+    let mut provider = create_provider();
+    let seller = create_wallet();
+    // Deploy with buyer=arbiter=walletA
+    let (signer_a, wallet_a) = create_funded_wallet(&mut provider);
+
+    let mut contract = RunarContract::new(artifact, vec![
+        SdkValue::Bytes(wallet_a.pub_key_hex.clone()),
+        SdkValue::Bytes(seller.pub_key_hex),
+        SdkValue::Bytes(wallet_a.pub_key_hex.clone()),
+    ]);
+
+    contract
+        .deploy(&mut provider, &*signer_a, &DeployOptions {
+            satoshis: 5000,
+            change_address: None,
+        })
+        .expect("deploy failed");
+
+    // Call refund with walletB — checkSig should fail
+    let (signer_b, _wallet_b) = create_funded_wallet(&mut provider);
+    let result = contract.call(
+        "refund",
+        &[SdkValue::Auto, SdkValue::Auto],
+        &mut provider,
+        &*signer_b,
+        None,
+    );
+    assert!(result.is_err(), "refund with wrong signer should be rejected");
 }

@@ -12,7 +12,7 @@ import { createFundedWallet } from './helpers/wallet.js';
 import { ecMulGen, encodePoint, EC_N, EC_P, EC_GX, EC_GY } from './helpers/crypto.js';
 
 function createProvider() {
-  return new RPCProvider('http://localhost:18332', 'regtest', 'regtest', {
+  return new RPCProvider('http://localhost:18332', 'bitcoin', 'bitcoin', {
     autoMine: true,
     network: 'testnet',
   });

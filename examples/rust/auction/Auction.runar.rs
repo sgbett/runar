@@ -55,10 +55,14 @@ impl Auction {
     ///
     /// # Arguments
     ///
+    /// * `sig`        - Bidder's signature proving they authorized this bid.
     /// * `bidder`     - Public key of the new bidder.
     /// * `bid_amount` - Bid in satoshis; must exceed the current highest bid.
     #[public]
-    pub fn bid(&mut self, bidder: PubKey, bid_amount: Bigint) {
+    pub fn bid(&mut self, sig: &Sig, bidder: PubKey, bid_amount: Bigint) {
+        // Verify the bidder authorized this bid (prevents griefing)
+        assert!(check_sig(sig, &bidder));
+
         // Reject bids that do not exceed the current highest
         assert!(bid_amount > self.highest_bid);
         // Enforce that the auction is still open: nLockTime must be before the deadline

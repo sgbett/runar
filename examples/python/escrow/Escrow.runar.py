@@ -4,30 +4,24 @@ from runar import SmartContract, PubKey, Sig, public, assert_, check_sig
 class Escrow(SmartContract):
     """Three-party escrow contract for marketplace payment protection.
 
-    Holds funds in a UTXO until the buyer, seller, or arbiter authorizes
-    release. The buyer deposits funds by sending to this contract's locking
-    script. Four spending paths allow either party to move funds depending on
-    the transaction outcome:
+    Holds funds in a UTXO until two parties jointly authorize a spend. The buyer
+    deposits funds by sending to this contract's locking script. Two spending
+    paths allow funds to move depending on the transaction outcome:
 
-    - release_by_seller  -- seller confirms delivery, releases funds to themselves.
-    - release_by_arbiter -- arbiter resolves a dispute in the seller's favor.
-    - refund_to_buyer    -- buyer cancels before delivery (self-authorized).
-    - refund_by_arbiter  -- arbiter resolves a dispute in the buyer's favor.
+    - release -- seller + arbiter both sign to release funds to the seller
+      (e.g., goods delivered successfully).
+    - refund  -- buyer + arbiter both sign to refund funds to the buyer
+      (e.g., dispute resolved in buyer's favor).
 
-    This is a stateless contract (SmartContract). The three public keys are
-    readonly constructor parameters baked into the locking script at deploy time.
+    The arbiter serves as the trust anchor -- no single party can act alone.
+    Both paths require two signatures (dual-sig), ensuring the arbiter must
+    co-sign every spend. This prevents unilateral action by either party.
 
     Script layout::
 
-        Unlocking: <methodIndex> <sig>
-        Locking:   OP_IF <release paths> OP_ELSE <refund paths> OP_ENDIF
-
-    Each public method becomes an OP_IF branch selected by the method index in
-    the unlocking script.
-
-    Design note: Each path requires only one signature. A production escrow
-    might use 2-of-3 multisig for stronger guarantees, but this contract
-    demonstrates the multi-method spending pattern clearly.
+        Unlocking: <methodIndex> <sig1> <sig2>
+        Locking:   OP_IF <seller checkSig> <arbiter checkSig>
+                   OP_ELSE <buyer checkSig> <arbiter checkSig> OP_ENDIF
 
     Args:
         buyer:   Buyer's compressed public key (33 bytes).
@@ -46,37 +40,27 @@ class Escrow(SmartContract):
         self.arbiter = arbiter
 
     @public
-    def release_by_seller(self, sig: Sig):
-        """Seller confirms delivery and releases the escrowed funds.
+    def release(self, seller_sig: Sig, arbiter_sig: Sig):
+        """Release escrowed funds to the seller.
+
+        Requires both the seller's and arbiter's signatures.
 
         Args:
-            sig: Seller's signature (~72 bytes).
+            seller_sig: Seller's signature.
+            arbiter_sig: Arbiter's signature.
         """
-        assert_(check_sig(sig, self.seller))
+        assert_(check_sig(seller_sig, self.seller))
+        assert_(check_sig(arbiter_sig, self.arbiter))
 
     @public
-    def release_by_arbiter(self, sig: Sig):
-        """Arbiter resolves a dispute in the seller's favor, releasing funds.
+    def refund(self, buyer_sig: Sig, arbiter_sig: Sig):
+        """Refund escrowed funds to the buyer.
+
+        Requires both the buyer's and arbiter's signatures.
 
         Args:
-            sig: Arbiter's signature (~72 bytes).
+            buyer_sig: Buyer's signature.
+            arbiter_sig: Arbiter's signature.
         """
-        assert_(check_sig(sig, self.arbiter))
-
-    @public
-    def refund_to_buyer(self, sig: Sig):
-        """Buyer cancels the transaction before delivery and reclaims funds.
-
-        Args:
-            sig: Buyer's signature (~72 bytes).
-        """
-        assert_(check_sig(sig, self.buyer))
-
-    @public
-    def refund_by_arbiter(self, sig: Sig):
-        """Arbiter resolves a dispute in the buyer's favor, refunding funds.
-
-        Args:
-            sig: Arbiter's signature (~72 bytes).
-        """
-        assert_(check_sig(sig, self.arbiter))
+        assert_(check_sig(buyer_sig, self.buyer))
+        assert_(check_sig(arbiter_sig, self.arbiter))

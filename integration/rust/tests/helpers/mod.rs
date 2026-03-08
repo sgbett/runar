@@ -59,8 +59,8 @@ pub fn compile_source(source: &str, file_name: &str) -> RunarArtifact {
 /// Create an RPCProvider configured for regtest.
 pub fn create_provider() -> RPCProvider {
     let url = std::env::var("RPC_URL").unwrap_or_else(|_| "http://localhost:18332".to_string());
-    let user = std::env::var("RPC_USER").unwrap_or_else(|_| "regtest".to_string());
-    let pass = std::env::var("RPC_PASS").unwrap_or_else(|_| "regtest".to_string());
+    let user = std::env::var("RPC_USER").unwrap_or_else(|_| "bitcoin".to_string());
+    let pass = std::env::var("RPC_PASS").unwrap_or_else(|_| "bitcoin".to_string());
     RPCProvider::new_regtest(&url, &user, &pass)
 }
 
@@ -87,8 +87,8 @@ pub fn is_node_available() -> bool {
 /// Make a raw JSON-RPC call to the Bitcoin node.
 pub fn rpc_call(method: &str, params: &[serde_json::Value]) -> Result<serde_json::Value, String> {
     let url = std::env::var("RPC_URL").unwrap_or_else(|_| "http://localhost:18332".to_string());
-    let user = std::env::var("RPC_USER").unwrap_or_else(|_| "regtest".to_string());
-    let pass = std::env::var("RPC_PASS").unwrap_or_else(|_| "regtest".to_string());
+    let user = std::env::var("RPC_USER").unwrap_or_else(|_| "bitcoin".to_string());
+    let pass = std::env::var("RPC_PASS").unwrap_or_else(|_| "bitcoin".to_string());
 
     let body = serde_json::json!({
         "jsonrpc": "1.0",

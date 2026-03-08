@@ -41,9 +41,13 @@ type Auction struct {
 // HighestBidder and HighestBid.
 //
 // Parameters:
+//   - sig:       bidder's signature proving they authorized this bid.
 //   - bidder:    public key of the new bidder.
 //   - bidAmount: bid in satoshis; must exceed the current highest bid.
-func (c *Auction) Bid(bidder runar.PubKey, bidAmount runar.Bigint) {
+func (c *Auction) Bid(sig runar.Sig, bidder runar.PubKey, bidAmount runar.Bigint) {
+	// Verify the bidder authorized this bid (prevents griefing)
+	runar.Assert(runar.CheckSig(sig, bidder))
+
 	// Reject bids that do not exceed the current highest
 	runar.Assert(bidAmount > c.HighestBid)
 

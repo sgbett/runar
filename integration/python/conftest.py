@@ -5,7 +5,7 @@ Run with:
     PYTHONPATH=../../compilers/python:../../packages/runar-py pytest -v
 
 Requires:
-    - A BSV regtest node at localhost:18332 (user=regtest, pass=regtest)
+    - A BSV regtest node at localhost:18332 (user=bitcoin, pass=bitcoin)
     - bsv-sdk pip package for real ECDSA signing
 """
 
@@ -40,8 +40,8 @@ PROJECT_ROOT = _THIS_DIR.parent.parent
 # ---------------------------------------------------------------------------
 
 RPC_URL = os.environ.get("RPC_URL", "http://localhost:18332")
-RPC_USER = os.environ.get("RPC_USER", "regtest")
-RPC_PASS = os.environ.get("RPC_PASS", "regtest")
+RPC_USER = os.environ.get("RPC_USER", "bitcoin")
+RPC_PASS = os.environ.get("RPC_PASS", "bitcoin")
 
 
 # ---------------------------------------------------------------------------

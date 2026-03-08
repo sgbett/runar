@@ -51,6 +51,7 @@ contract FungibleToken is StatefulSmartContract {
     /// @param outputSatoshis Satoshis to fund each output UTXO
     function transfer(Sig sig, PubKey to, bigint amount, bigint outputSatoshis) public {
         require(checkSig(sig, this.owner));
+        require(outputSatoshis >= 1);
         bigint totalBalance = this.balance + this.mergeBalance;
         require(amount > 0);
         require(amount <= totalBalance);
@@ -70,6 +71,7 @@ contract FungibleToken is StatefulSmartContract {
     /// @param outputSatoshis Satoshis to fund the output UTXO
     function send(Sig sig, PubKey to, bigint outputSatoshis) public {
         require(checkSig(sig, this.owner));
+        require(outputSatoshis >= 1);
 
         this.addOutput(outputSatoshis, to, this.balance + this.mergeBalance, 0);
     }
@@ -106,6 +108,7 @@ contract FungibleToken is StatefulSmartContract {
     /// @param outputSatoshis Satoshis to fund the merged output UTXO
     function merge(Sig sig, bigint otherBalance, ByteString allPrevouts, bigint outputSatoshis) public {
         require(checkSig(sig, this.owner));
+        require(outputSatoshis >= 1);
         require(otherBalance >= 0);
 
         // Verify allPrevouts is authentic (matches the actual transaction inputs)

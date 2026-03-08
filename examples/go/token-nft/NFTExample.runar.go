@@ -38,6 +38,7 @@ type SimpleNFT struct {
 //   - outputSatoshis: satoshis to fund the continuation UTXO
 func (c *SimpleNFT) Transfer(sig runar.Sig, newOwner runar.PubKey, outputSatoshis runar.Bigint) {
 	runar.Assert(runar.CheckSig(sig, c.Owner))
+	runar.Assert(outputSatoshis >= 1)
 	c.AddOutput(outputSatoshis, newOwner)
 }
 

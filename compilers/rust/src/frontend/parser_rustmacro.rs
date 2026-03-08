@@ -203,6 +203,19 @@ fn tokenize(source: &str) -> Vec<Token> {
             continue;
         }
 
+        // String literal (double-quoted) — treated as hex ByteString like in TS/Sol/Move
+        if ch == '"' {
+            let mut val = String::new();
+            pos += 1; col += 1;
+            while pos < chars.len() && chars[pos] != '"' {
+                val.push(chars[pos]);
+                pos += 1; col += 1;
+            }
+            if pos < chars.len() { pos += 1; col += 1; } // skip closing quote
+            tokens.push(Token { typ: TokenType::HexString(val), line: l, col: c });
+            continue;
+        }
+
         pos += 1; col += 1;
     }
 

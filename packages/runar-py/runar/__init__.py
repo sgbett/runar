@@ -15,7 +15,7 @@ from runar.builtins import (
     extract_locktime, extract_output_hash, extract_amount,
     extract_version, extract_sequence,
     extract_hash_prevouts, extract_outpoint,
-    num2bin, cat, substr, reverse_bytes, len_,
+    num2bin, bin2num, cat, substr, reverse_bytes, len_,
     verify_rabin_sig,
     safediv, safemod, clamp, sign, pow_, mul_div, percent_of,
     sqrt, gcd, divmod_, log2, bool_cast,
@@ -71,7 +71,7 @@ __all__ = [
     'extract_version', 'extract_sequence',
     'extract_hash_prevouts', 'extract_outpoint',
     # Binary utilities
-    'num2bin', 'cat', 'substr', 'reverse_bytes', 'len_',
+    'num2bin', 'bin2num', 'cat', 'substr', 'reverse_bytes', 'len_',
     # Math
     'within', 'safediv', 'safemod', 'clamp', 'sign', 'pow_',
     'mul_div', 'percent_of', 'sqrt', 'gcd', 'divmod_', 'log2', 'bool_cast',

@@ -266,6 +266,25 @@ func Num2Bin(v int64, length int64) ByteString {
 	return ByteString(buf[:length])
 }
 
+// Bin2Num converts a byte string (Bitcoin Script LE signed-magnitude) back to
+// an integer. Inverse of Num2Bin.
+func Bin2Num(data ByteString) int64 {
+	if len(data) == 0 {
+		return 0
+	}
+	last := data[len(data)-1]
+	negative := (last & 0x80) != 0
+	var result uint64
+	result = uint64(last & 0x7f)
+	for i := len(data) - 2; i >= 0; i-- {
+		result = (result << 8) | uint64(data[i])
+	}
+	if negative {
+		return -int64(result)
+	}
+	return int64(result)
+}
+
 // Len returns the length of a byte string as an integer.
 func Len(data ByteString) int64 {
 	return int64(len(data))

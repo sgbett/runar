@@ -1,19 +1,21 @@
-"""Schnorr Zero-Knowledge Proof verifier.
+"""Schnorr Zero-Knowledge Proof verifier (non-interactive, Fiat-Shamir).
 
 Proves knowledge of a private key k such that P = k*G without
-revealing k. Uses the Schnorr identification protocol:
+revealing k. Uses the Schnorr identification protocol with the
+Fiat-Shamir heuristic to derive the challenge on-chain:
 
-    Prover: picks random r, sends R = r*G
-    Verifier: sends challenge e
+    Prover: picks random r, computes R = r*G
+    Challenge: e = bin2num(hash256(R || P))  (derived on-chain)
     Prover: sends s = r + e*k (mod n)
     Verifier: checks s*G === R + e*P
 
-In a Bitcoin contract context, the prover provides (R, s, e) in the
-unlocking script, and the contract verifies the proof on-chain.
+The challenge is derived deterministically from the commitment and
+public key, preventing the prover from choosing a convenient e.
 """
 from runar import (
     SmartContract, Point, Bigint, public, assert_,
     ec_add, ec_mul, ec_mul_gen, ec_point_x, ec_point_y, ec_on_curve,
+    hash256, cat, bin2num,
 )
 
 class SchnorrZKP(SmartContract):
@@ -26,16 +28,18 @@ class SchnorrZKP(SmartContract):
         self.pub_key = pub_key
 
     @public
-    def verify(self, r_point: Point, s: Bigint, e: Bigint):
+    def verify(self, r_point: Point, s: Bigint):
         """Verify a Schnorr ZKP proof.
 
         Args:
             r_point: The commitment R = r*G (prover's nonce point).
             s: The response s = r + e*k (mod n).
-            e: The challenge value.
         """
         # Verify R is on the curve
         assert_(ec_on_curve(r_point))
+
+        # Derive challenge via Fiat-Shamir: e = bin2num(hash256(R || P))
+        e = bin2num(hash256(cat(r_point, self.pub_key)))
 
         # Left side: s*G
         s_g = ec_mul_gen(s)

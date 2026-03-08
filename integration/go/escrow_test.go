@@ -46,22 +46,35 @@ func deployEscrow(t *testing.T, buyer, seller, arbiter *helpers.Wallet, funder *
 	return contract
 }
 
-func spendEscrowMethod(t *testing.T, contract *runar.RunarContract, signer *helpers.Wallet, methodIdx int) string {
+// spendEscrowDualSig builds an unlocking script with two signatures + method index.
+// The new escrow contract uses dual-signature methods:
+//   - release(sellerSig, arbiterSig) — method index 0
+//   - refund(buyerSig, arbiterSig) — method index 1
+func spendEscrowDualSig(t *testing.T, contract *runar.RunarContract, signer1, signer2 *helpers.Wallet, methodIdx int) string {
 	t.Helper()
 	utxo := helpers.SDKUtxoToHelper(contract.GetCurrentUtxo())
-	receiverScript := signer.P2PKHScript()
+	receiverScript := signer1.P2PKHScript()
 	spendTx, err := helpers.BuildSpendTx(utxo, receiverScript, 4500)
 	if err != nil {
 		t.Fatalf("build spend: %v", err)
 	}
 
-	sigHex, err := helpers.SignInput(spendTx, 0, signer.PrivKey)
+	sig1Hex, err := helpers.SignInput(spendTx, 0, signer1.PrivKey)
 	if err != nil {
-		t.Fatalf("sign: %v", err)
+		t.Fatalf("sign1: %v", err)
 	}
-	sigBytes, _ := hex.DecodeString(sigHex)
+	sig1Bytes, _ := hex.DecodeString(sig1Hex)
 
-	unlockHex := helpers.EncodePushBytes(sigBytes) + helpers.EncodeMethodIndex(methodIdx)
+	sig2Hex, err := helpers.SignInput(spendTx, 0, signer2.PrivKey)
+	if err != nil {
+		t.Fatalf("sign2: %v", err)
+	}
+	sig2Bytes, _ := hex.DecodeString(sig2Hex)
+
+	// Unlocking script: <sig1> <sig2> <methodIndex>
+	unlockHex := helpers.EncodePushBytes(sig1Bytes) +
+		helpers.EncodePushBytes(sig2Bytes) +
+		helpers.EncodeMethodIndex(methodIdx)
 
 	spendHex, err := helpers.SpendContract(utxo, unlockHex, receiverScript, 4500)
 	if err != nil {
@@ -162,50 +175,37 @@ func TestEscrow_DeploySameKey(t *testing.T) {
 	t.Logf("deployed with same key for all roles: %s", txid)
 }
 
-func TestEscrow_ReleaseBySeller(t *testing.T) {
+// release(sellerSig, arbiterSig) — method index 0
+func TestEscrow_Release(t *testing.T) {
 	buyer, seller, arbiter := helpers.NewWallet(), helpers.NewWallet(), helpers.NewWallet()
 	contract := deployEscrow(t, buyer, seller, arbiter, seller)
-	spendHex := spendEscrowMethod(t, contract, seller, 0)
+	spendHex := spendEscrowDualSig(t, contract, seller, arbiter, 0)
 	txid := helpers.AssertTxAccepted(t, spendHex)
 	helpers.AssertTxInBlock(t, txid)
 }
 
-func TestEscrow_ReleaseByArbiter(t *testing.T) {
-	buyer, seller, arbiter := helpers.NewWallet(), helpers.NewWallet(), helpers.NewWallet()
-	contract := deployEscrow(t, buyer, seller, arbiter, arbiter)
-	spendHex := spendEscrowMethod(t, contract, arbiter, 1)
-	txid := helpers.AssertTxAccepted(t, spendHex)
-	helpers.AssertTxInBlock(t, txid)
-}
-
-func TestEscrow_RefundToBuyer(t *testing.T) {
+// refund(buyerSig, arbiterSig) — method index 1
+func TestEscrow_Refund(t *testing.T) {
 	buyer, seller, arbiter := helpers.NewWallet(), helpers.NewWallet(), helpers.NewWallet()
 	contract := deployEscrow(t, buyer, seller, arbiter, buyer)
-	spendHex := spendEscrowMethod(t, contract, buyer, 2)
+	spendHex := spendEscrowDualSig(t, contract, buyer, arbiter, 1)
 	txid := helpers.AssertTxAccepted(t, spendHex)
 	helpers.AssertTxInBlock(t, txid)
 }
 
-func TestEscrow_RefundByArbiter(t *testing.T) {
-	buyer, seller, arbiter := helpers.NewWallet(), helpers.NewWallet(), helpers.NewWallet()
-	contract := deployEscrow(t, buyer, seller, arbiter, arbiter)
-	spendHex := spendEscrowMethod(t, contract, arbiter, 3)
-	txid := helpers.AssertTxAccepted(t, spendHex)
-	helpers.AssertTxInBlock(t, txid)
-}
-
+// release with wrong signer — should fail checkSig
 func TestEscrow_WrongSigner_Rejected(t *testing.T) {
 	buyer, seller, arbiter := helpers.NewWallet(), helpers.NewWallet(), helpers.NewWallet()
 	contract := deployEscrow(t, buyer, seller, arbiter, seller)
-	// Method 0 (releaseBySeller) but signed by buyer — should fail
-	spendHex := spendEscrowMethod(t, contract, buyer, 0)
+	// Use buyer's sig where seller's is expected — should fail
+	spendHex := spendEscrowDualSig(t, contract, buyer, arbiter, 0)
 	helpers.AssertTxRejected(t, spendHex)
 }
 
 func TestEscrow_InvalidMethodIndex_Rejected(t *testing.T) {
 	buyer, seller, arbiter := helpers.NewWallet(), helpers.NewWallet(), helpers.NewWallet()
 	contract := deployEscrow(t, buyer, seller, arbiter, seller)
-	// Method index 5 doesn't exist
-	spendHex := spendEscrowMethod(t, contract, seller, 5)
+	// Method index 5 doesn't exist — only 0 (release) and 1 (refund)
+	spendHex := spendEscrowDualSig(t, contract, seller, arbiter, 5)
 	helpers.AssertTxRejected(t, spendHex)
 }

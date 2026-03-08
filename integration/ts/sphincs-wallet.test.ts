@@ -48,7 +48,7 @@ import { createFundedWallet } from './helpers/wallet.js';
 import { createHash } from 'node:crypto';
 
 function createProvider() {
-  return new RPCProvider('http://localhost:18332', 'regtest', 'regtest', {
+  return new RPCProvider('http://localhost:18332', 'bitcoin', 'bitcoin', {
     autoMine: true,
     network: 'testnet',
   });

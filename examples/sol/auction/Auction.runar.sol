@@ -40,9 +40,13 @@ contract Auction is StatefulSmartContract {
     /// @dev State-mutating: the compiler auto-injects checkPreimage at entry and
     /// appends a state-continuation output at exit, creating a new UTXO with
     /// the updated highestBidder and highestBid.
+    /// @param sig Bidder's signature proving they authorized this bid.
     /// @param bidder Public key of the new bidder.
     /// @param bidAmount Bid in satoshis; must exceed the current highest bid.
-    function bid(PubKey bidder, bigint bidAmount) public {
+    function bid(Sig sig, PubKey bidder, bigint bidAmount) public {
+        // Verify the bidder authorized this bid (prevents griefing)
+        require(checkSig(sig, bidder));
+
         // Reject bids that do not exceed the current highest
         require(bidAmount > this.highestBid);
 

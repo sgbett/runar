@@ -6,13 +6,19 @@
 //! The contract locks funds to an EC public key P, and spending requires proving
 //! knowledge of the discrete logarithm k (i.e., P = k*G) without revealing k.
 //!
+//! The challenge e is derived on-chain via the Fiat-Shamir heuristic:
+//!     e = bin2num(hash256(cat(rPoint, pubKey)))
+//!
+//! This makes the proof non-interactive and prevents the prover from choosing
+//! a convenient challenge.
+//!
 //! ### Constructor
 //!   - pubKey: Point — the EC public key (64-byte uncompressed x[32] || y[32])
 //!
-//! ### Method: verify(rPoint: Point, s: bigint, e: bigint)
+//! ### Method: verify(rPoint: Point, s: bigint)
 //!   The prover generates a proof:
 //!     1. Pick random nonce r, compute R = r*G (commitment)
-//!     2. Pick challenge e
+//!     2. e is derived on-chain: e = bin2num(hash256(R || P))
 //!     3. Compute s = r + e*k (mod n) (response)
 //!   The contract checks: s*G === R + e*P (Schnorr verification equation)
 //!
@@ -21,11 +27,12 @@
 //!
 //! ### Important Notes
 //!   - No Sig param — pure mathematical proof, not ECDSA
-//!   - All params (Point, bigint) passed as explicit values to contract.call()
+//!   - s is a 256-bit scalar, passed as SdkValue::Bytes (script number hex)
+//!     since SdkValue::Int only supports i64
 //!   - Uses k256 crate for EC arithmetic in the test helper
 
 use crate::helpers::*;
-use crate::helpers::crypto::{ec_mul_gen_point, generate_schnorr_proof};
+use crate::helpers::crypto::{ec_mul_gen_point, generate_schnorr_proof_fs};
 use runar_lang::sdk::{DeployOptions, RunarContract, SdkValue};
 
 #[test]
@@ -103,14 +110,14 @@ fn test_schnorr_zkp_deploy_different_key() {
     assert!(!deploy_txid.is_empty());
 }
 
-/// Deploy and spend with a valid Schnorr ZKP proof.
+/// Deploy and spend with a valid Schnorr ZKP proof using Fiat-Shamir challenge.
 ///
 /// The proof satisfies the Schnorr verification equation s*G = R + e*P:
 ///   1. Private key k=42, public key P = k*G
 ///   2. Nonce r=7777, commitment R = r*G
-///   3. Challenge e=12345
+///   3. Challenge e = bin2num(hash256(R || P)) (Fiat-Shamir, derived on-chain)
 ///   4. Response s = r + e*k mod n
-///   5. Call verify(R, s, e) — the contract verifies s*G === R + e*P
+///   5. Call verify(R, s) — the contract derives e and verifies s*G === R + e*P
 #[test]
 #[ignore]
 fn test_schnorr_zkp_spend_valid_proof() {
@@ -121,8 +128,9 @@ fn test_schnorr_zkp_spend_valid_proof() {
     let mut provider = create_provider();
     let (signer, _wallet) = create_funded_wallet(&mut provider);
 
-    // Generate proof: k=42 (private key), r=7777 (nonce), e=12345 (challenge)
-    let (pub_key_hex, r_point_hex, s_hex, _e_hex) = generate_schnorr_proof(42, 7777, 12345);
+    // Generate proof with Fiat-Shamir: k=42 (private key), r=7777 (nonce)
+    // e is derived from hash256(R || P), s = r + e*k mod n
+    let (pub_key_hex, r_point_hex, s_script_hex) = generate_schnorr_proof_fs(42, 7777);
 
     // Deploy with the public key P
     let mut contract = RunarContract::new(artifact, vec![
@@ -135,22 +143,14 @@ fn test_schnorr_zkp_spend_valid_proof() {
         })
         .expect("deploy failed");
 
-    // Spend by calling verify(rPoint, s, e)
-    // s and e are bigints — convert from hex to decimal for SdkValue::Int
-    let s_val = i64::from_str_radix(&s_hex, 16).unwrap_or_else(|_| {
-        // For large values that don't fit i64, use Bytes encoding
-        // (the SDK will push as a script number)
-        panic!("s too large for i64 — needs BigInt support in Rust SDK");
-    });
-    let e_val = 12345i64;
-
+    // Spend by calling verify(rPoint, s)
+    // s is a 256-bit scalar — use SdkValue::Bytes with script number encoding
     let (spend_txid, _tx) = contract
         .call(
             "verify",
             &[
-                SdkValue::Bytes(r_point_hex),  // R point (64-byte hex)
-                SdkValue::Int(s_val),           // s = r + e*k mod n
-                SdkValue::Int(e_val),           // challenge e
+                SdkValue::Bytes(r_point_hex),   // R point (64-byte hex)
+                SdkValue::Bytes(s_script_hex),  // s as LE signed-magnitude script number
             ],
             &mut provider,
             &*signer,
@@ -171,8 +171,8 @@ fn test_schnorr_zkp_invalid_s_rejected() {
     let mut provider = create_provider();
     let (signer, _wallet) = create_funded_wallet(&mut provider);
 
-    // Generate proof: k=42 (private key), r=7777 (nonce), e=12345 (challenge)
-    let (pub_key_hex, r_point_hex, s_hex, _e_hex) = generate_schnorr_proof(42, 7777, 12345);
+    // Generate valid proof, then tamper with s
+    let (pub_key_hex, r_point_hex, _s_script_hex) = generate_schnorr_proof_fs(42, 7777);
 
     // Deploy with the public key P
     let mut contract = RunarContract::new(artifact, vec![
@@ -185,19 +185,14 @@ fn test_schnorr_zkp_invalid_s_rejected() {
         })
         .expect("deploy failed");
 
-    // Get valid s, then add 1 to tamper it
-    let s_val = i64::from_str_radix(&s_hex, 16).unwrap_or_else(|_| {
-        panic!("s too large for i64 — needs BigInt support in Rust SDK");
-    });
-    let tampered_s = s_val + 1;
-    let e_val = 12345i64;
+    // Tamper: use a completely wrong s value
+    let tampered_s = "0100".to_string(); // s=1 (very wrong)
 
     let result = contract.call(
         "verify",
         &[
             SdkValue::Bytes(r_point_hex),
-            SdkValue::Int(tampered_s),
-            SdkValue::Int(e_val),
+            SdkValue::Bytes(tampered_s),
         ],
         &mut provider,
         &*signer,

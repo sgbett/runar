@@ -53,6 +53,7 @@ class SimpleNFT extends StatefulSmartContract {
    */
   public transfer(sig: Sig, newOwner: PubKey, outputSatoshis: bigint) {
     assert(checkSig(sig, this.owner));
+    assert(outputSatoshis >= 1n);
     this.addOutput(outputSatoshis, newOwner);
   }
 

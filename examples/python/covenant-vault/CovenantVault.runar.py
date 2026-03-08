@@ -10,14 +10,17 @@ layers in its single public method:
   2. Preimage verification -- check_preimage (OP_PUSH_TX) proves the
      contract is inspecting the real spending transaction, enabling
      on-chain introspection of its fields.
-  3. Covenant rule -- the output amount must be >= min_amount, which
-     constrains the transaction structure itself.
+  3. Covenant rule -- the contract constructs the expected P2PKH output
+     on-chain (recipient address + min_amount satoshis) and verifies its
+     hash against the transaction's hashOutputs field. This constrains
+     both the destination and the amount at the consensus level.
 
 Script layout (simplified)::
 
-    Unlocking: <sig> <amount> <txPreimage>
+    Unlocking: <opPushTxSig> <sig> <txPreimage>
     Locking:   <pubKey> OP_CHECKSIG OP_VERIFY <checkPreimage>
-               <amount >= minAmount> OP_VERIFY
+               <buildP2PKH(recipient)> <num2bin(minAmount,8)> OP_CAT
+               OP_HASH256 <extractOutputHash(preimage)> OP_EQUAL OP_VERIFY
 
 Use cases for this pattern include withdrawal limits, time-locked vaults,
 rate-limited spending, and enforced change addresses.
@@ -27,8 +30,8 @@ are readonly and baked into the locking script at deploy time.
 """
 
 from runar import (
-    SmartContract, PubKey, Sig, Addr, SigHashPreimage, Bigint,
-    public, assert_, check_sig, check_preimage,
+    SmartContract, PubKey, Sig, Addr, ByteString, SigHashPreimage, Bigint,
+    public, assert_, check_sig, check_preimage, extract_output_hash, hash256, num2bin, cat,
 )
 
 class CovenantVault(SmartContract):
@@ -52,18 +55,20 @@ class CovenantVault(SmartContract):
         self.min_amount = min_amount
 
     @public
-    def spend(self, sig: Sig, amount: Bigint, tx_preimage: SigHashPreimage):
+    def spend(self, sig: Sig, tx_preimage: SigHashPreimage):
         """Spend funds held by this covenant.
+
+        Constructs the expected P2PKH output on-chain and verifies it against
+        the transaction's hashOutputs from the sighash preimage.
 
         Args:
             sig:         ECDSA signature from the owner (~72 bytes DER).
-            amount:      Declared output amount; must be >= min_amount.
-            tx_preimage: Sighash preimage (variable length) used by
-                         check_preimage to verify the spending transaction.
+            tx_preimage: Sighash preimage for check_preimage verification.
         """
-        # Layer 1: Owner authorization -- verify the ECDSA signature.
         assert_(check_sig(sig, self.owner))
-        # Layer 2: Preimage verification -- proves on-chain introspection.
         assert_(check_preimage(tx_preimage))
-        # Layer 3: Covenant rule -- enforce minimum output amount.
-        assert_(amount >= self.min_amount)
+
+        # Construct expected P2PKH output and verify against hashOutputs
+        p2pkh_script = cat(cat('1976a914', self.recipient), '88ac')
+        expected_output = cat(num2bin(self.min_amount, 8), p2pkh_script)
+        assert_(hash256(expected_output) == extract_output_hash(tx_preimage))

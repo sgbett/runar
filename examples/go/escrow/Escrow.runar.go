@@ -4,63 +4,47 @@ import runar "github.com/icellan/runar/packages/runar-go"
 
 // Escrow is a three-party escrow contract for marketplace payment protection.
 //
-// It holds funds in a UTXO until the buyer, seller, or arbiter authorizes
-// release. The buyer deposits funds by sending to this contract's locking
-// script. Four spending paths allow either party to move funds depending on
-// the transaction outcome:
+// Holds funds in a UTXO until two parties jointly authorize a spend. The buyer
+// deposits funds by sending to this contract's locking script. Two spending
+// paths allow funds to move depending on the transaction outcome:
 //
-//   - ReleaseBySeller  — seller confirms delivery, releases funds to themselves.
-//   - ReleaseByArbiter — arbiter resolves a dispute in the seller's favor.
-//   - RefundToBuyer    — buyer cancels before delivery (self-authorized).
-//   - RefundByArbiter  — arbiter resolves a dispute in the buyer's favor.
+//   - Release — seller + arbiter both sign to release funds to the seller
+//     (e.g., goods delivered successfully).
+//   - Refund  — buyer + arbiter both sign to refund funds to the buyer
+//     (e.g., dispute resolved in buyer's favor).
 //
-// This is a stateless contract (SmartContract). The three public keys are
-// readonly constructor parameters baked into the locking script at deploy time.
+// The arbiter serves as the trust anchor — no single party can act alone.
+// Both paths require two signatures (dual-sig), ensuring the arbiter must
+// co-sign every spend. This prevents unilateral action by either party.
 //
 // Script layout:
 //
-//	Unlocking: <methodIndex> <sig>
-//	Locking:   OP_IF <release paths> OP_ELSE <refund paths> OP_ENDIF
+//	Unlocking: <methodIndex> <sig1> <sig2>
+//	Locking:   OP_IF <seller checkSig> <arbiter checkSig>
+//	           OP_ELSE <buyer checkSig> <arbiter checkSig> OP_ENDIF
 //
-// Each public method becomes an OP_IF branch selected by the method index in
-// the unlocking script.
-//
-// Design note: Each path requires only one signature. A production escrow might
-// use 2-of-3 multisig for stronger guarantees, but this contract demonstrates
-// the multi-method spending pattern clearly.
-//
-// Fields:
-//
-//	Buyer   — buyer's compressed public key (33 bytes)
-//	Seller  — seller's compressed public key (33 bytes)
-//	Arbiter — arbiter's compressed public key (33 bytes)
+// This is a stateless contract (SmartContract). The three public keys are
+// readonly constructor parameters baked into the locking script at deploy time.
 type Escrow struct {
 	runar.SmartContract
-	Buyer  runar.PubKey `runar:"readonly"`
+	// Buyer is the buyer's compressed public key (33 bytes).
+	Buyer runar.PubKey `runar:"readonly"`
+	// Seller is the seller's compressed public key (33 bytes).
 	Seller runar.PubKey `runar:"readonly"`
+	// Arbiter is the arbiter's compressed public key (33 bytes).
 	Arbiter runar.PubKey `runar:"readonly"`
 }
 
-// ReleaseBySeller allows the seller to confirm delivery and release the
-// escrowed funds. Requires the seller's signature (~72 bytes).
-func (c *Escrow) ReleaseBySeller(sig runar.Sig) {
-	runar.Assert(runar.CheckSig(sig, c.Seller))
+// Release releases escrowed funds to the seller.
+// Requires both the seller's and arbiter's signatures.
+func (c *Escrow) Release(sellerSig runar.Sig, arbiterSig runar.Sig) {
+	runar.Assert(runar.CheckSig(sellerSig, c.Seller))
+	runar.Assert(runar.CheckSig(arbiterSig, c.Arbiter))
 }
 
-// ReleaseByArbiter allows the arbiter to resolve a dispute in the seller's
-// favor, releasing the escrowed funds. Requires the arbiter's signature (~72 bytes).
-func (c *Escrow) ReleaseByArbiter(sig runar.Sig) {
-	runar.Assert(runar.CheckSig(sig, c.Arbiter))
-}
-
-// RefundToBuyer allows the buyer to cancel the transaction before delivery
-// and reclaim the escrowed funds. Requires the buyer's own signature (~72 bytes).
-func (c *Escrow) RefundToBuyer(sig runar.Sig) {
-	runar.Assert(runar.CheckSig(sig, c.Buyer))
-}
-
-// RefundByArbiter allows the arbiter to resolve a dispute in the buyer's
-// favor, refunding the escrowed funds. Requires the arbiter's signature (~72 bytes).
-func (c *Escrow) RefundByArbiter(sig runar.Sig) {
-	runar.Assert(runar.CheckSig(sig, c.Arbiter))
+// Refund refunds escrowed funds to the buyer.
+// Requires both the buyer's and arbiter's signatures.
+func (c *Escrow) Refund(buyerSig runar.Sig, arbiterSig runar.Sig) {
+	runar.Assert(runar.CheckSig(buyerSig, c.Buyer))
+	runar.Assert(runar.CheckSig(arbiterSig, c.Arbiter))
 }
