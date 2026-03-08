@@ -880,6 +880,14 @@ impl<'a> RbParser<'a> {
             }
         }
 
+        // Convert bare calls to declared methods into this.method() calls.
+        // In Ruby, `compute_threshold(a, b)` is equivalent to `self.compute_threshold(a, b)`.
+        let method_names: std::collections::HashSet<String> =
+            methods.iter().map(|m| m.name.clone()).collect();
+        for method in &mut methods {
+            rewrite_bare_method_calls(&mut method.body, &method_names);
+        }
+
         Some(ContractNode {
             name: contract_name,
             parent_class,
@@ -2095,6 +2103,77 @@ fn build_constructor(properties: &[PropertyNode], file: &str) -> MethodNode {
             line: 1,
             column: 0,
         },
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Bare method call rewriter
+// ---------------------------------------------------------------------------
+
+/// Rewrite bare function calls to declared contract methods as `this.method()` calls.
+/// In Ruby, `compute_threshold(a, b)` is equivalent to `self.compute_threshold(a, b)`.
+fn rewrite_bare_method_calls(stmts: &mut [Statement], method_names: &std::collections::HashSet<String>) {
+    for stmt in stmts.iter_mut() {
+        rewrite_stmt(stmt, method_names);
+    }
+}
+
+fn rewrite_expr(expr: &mut Expression, method_names: &std::collections::HashSet<String>) {
+    match expr {
+        Expression::CallExpr { callee, args } => {
+            for arg in args.iter_mut() {
+                rewrite_expr(arg, method_names);
+            }
+            if let Expression::Identifier { name } = callee.as_ref() {
+                if method_names.contains(name) {
+                    *callee = Box::new(Expression::PropertyAccess { property: name.clone() });
+                }
+            } else {
+                rewrite_expr(callee.as_mut(), method_names);
+            }
+        }
+        Expression::BinaryExpr { left, right, .. } => {
+            rewrite_expr(left.as_mut(), method_names);
+            rewrite_expr(right.as_mut(), method_names);
+        }
+        Expression::UnaryExpr { operand, .. } => {
+            rewrite_expr(operand.as_mut(), method_names);
+        }
+        Expression::TernaryExpr { condition, consequent, alternate } => {
+            rewrite_expr(condition.as_mut(), method_names);
+            rewrite_expr(consequent.as_mut(), method_names);
+            rewrite_expr(alternate.as_mut(), method_names);
+        }
+        _ => {}
+    }
+}
+
+fn rewrite_stmt(stmt: &mut Statement, method_names: &std::collections::HashSet<String>) {
+    match stmt {
+        Statement::ExpressionStatement { expression, .. } => {
+            rewrite_expr(expression, method_names);
+        }
+        Statement::VariableDecl { init, .. } => {
+            rewrite_expr(init, method_names);
+        }
+        Statement::Assignment { value, .. } => {
+            rewrite_expr(value, method_names);
+        }
+        Statement::ReturnStatement { value, .. } => {
+            if let Some(v) = value {
+                rewrite_expr(v, method_names);
+            }
+        }
+        Statement::IfStatement { condition, then_branch, else_branch, .. } => {
+            rewrite_expr(condition, method_names);
+            rewrite_bare_method_calls(then_branch, method_names);
+            if let Some(else_stmts) = else_branch {
+                rewrite_bare_method_calls(else_stmts, method_names);
+            }
+        }
+        Statement::ForStatement { body, .. } => {
+            rewrite_bare_method_calls(body, method_names);
+        }
     }
 }
 

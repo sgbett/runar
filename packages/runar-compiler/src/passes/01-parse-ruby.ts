@@ -430,6 +430,77 @@ function makePrimitiveOrCustom(name: string): TypeNode {
   return { kind: 'custom_type', name };
 }
 
+/**
+ * Rewrite bare function calls to declared contract methods as this.method() calls.
+ * In Ruby, `compute_threshold(a, b)` inside a contract is equivalent to
+ * `self.compute_threshold(a, b)`, which should produce the same AST as
+ * `this.computeThreshold(a, b)` in TypeScript.
+ */
+function rewriteBareMethodCalls(stmts: Statement[], methodNames: Set<string>): void {
+  function rewriteExpr(expr: Expression): Expression {
+    if (expr.kind === 'call_expr') {
+      const call = expr as { kind: 'call_expr'; callee: Expression; args: Expression[] };
+      call.args = call.args.map(rewriteExpr);
+      if (call.callee.kind === 'identifier') {
+        const name = (call.callee as { name: string }).name;
+        if (methodNames.has(name)) {
+          call.callee = { kind: 'property_access', property: name } as Expression;
+        }
+      } else {
+        call.callee = rewriteExpr(call.callee);
+      }
+      return call as Expression;
+    }
+    if (expr.kind === 'binary_expr') {
+      const bin = expr as { kind: 'binary_expr'; left: Expression; right: Expression; op: BinaryOp };
+      bin.left = rewriteExpr(bin.left);
+      bin.right = rewriteExpr(bin.right);
+      return bin as Expression;
+    }
+    if (expr.kind === 'unary_expr') {
+      const un = expr as { kind: 'unary_expr'; operand: Expression; op: string };
+      un.operand = rewriteExpr(un.operand);
+      return un as Expression;
+    }
+    if (expr.kind === 'ternary_expr') {
+      const tern = expr as { kind: 'ternary_expr'; condition: Expression; consequent: Expression; alternate: Expression };
+      tern.condition = rewriteExpr(tern.condition);
+      tern.consequent = rewriteExpr(tern.consequent);
+      tern.alternate = rewriteExpr(tern.alternate);
+      return tern as Expression;
+    }
+    return expr;
+  }
+
+  function rewriteStmt(stmt: Statement): void {
+    if (stmt.kind === 'expression_statement') {
+      const es = stmt as { expression: Expression };
+      es.expression = rewriteExpr(es.expression);
+    } else if (stmt.kind === 'variable_decl') {
+      const vd = stmt as { init: Expression };
+      vd.init = rewriteExpr(vd.init);
+    } else if (stmt.kind === 'assignment') {
+      const a = stmt as { value: Expression };
+      a.value = rewriteExpr(a.value);
+    } else if (stmt.kind === 'return_statement') {
+      const rs = stmt as { value?: Expression };
+      if (rs.value) rs.value = rewriteExpr(rs.value);
+    } else if (stmt.kind === 'if_statement') {
+      const ifs = stmt as { condition: Expression; then: Statement[]; else?: Statement[] };
+      ifs.condition = rewriteExpr(ifs.condition);
+      rewriteBareMethodCalls(ifs.then, methodNames);
+      if (ifs.else) rewriteBareMethodCalls(ifs.else, methodNames);
+    } else if (stmt.kind === 'for_statement') {
+      const fs = stmt as { body: Statement[] };
+      rewriteBareMethodCalls(fs.body, methodNames);
+    }
+  }
+
+  for (const stmt of stmts) {
+    rewriteStmt(stmt);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Parser
 // ---------------------------------------------------------------------------
@@ -638,6 +709,13 @@ class RbParser {
           }
         }
       }
+    }
+
+    // Convert bare calls to declared methods into this.method() calls.
+    // In Ruby, `compute_threshold(a, b)` is equivalent to `self.compute_threshold(a, b)`.
+    const methodNames = new Set(methods.map(m => m.name));
+    for (const method of methods) {
+      rewriteBareMethodCalls(method.body, methodNames);
     }
 
     return {
