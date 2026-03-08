@@ -85,6 +85,35 @@ type OutputSpec struct {
 	State    map[string]interface{} `json:"state"`
 }
 
+// PreparedCall holds all data from a prepared (but not yet signed) method call.
+// Public fields are for external signer coordination. Internal fields (lowercase)
+// are consumed by FinalizeCall().
+type PreparedCall struct {
+	// Public: callers use these to coordinate external signing
+	Sighash     string `json:"sighash"`     // 64-char hex — BIP-143 hash external signers sign
+	Preimage    string `json:"preimage"`    // hex — full BIP-143 preimage
+	OpPushTxSig string `json:"opPushTxSig"` // hex — OP_PUSH_TX DER sig (empty if not needed)
+	TxHex       string `json:"txHex"`       // hex — built TX (P2PKH funding signed, primary contract input uses placeholder sigs)
+	SigIndices  []int  `json:"sigIndices"`  // which user-visible arg positions need external Sig values
+
+	// Internal — consumed by FinalizeCall()
+	methodName        string
+	resolvedArgs      []interface{}
+	methodSelectorHex string
+	isStateful        bool
+	isTerminal        bool
+	needsOpPushTx     bool
+	methodNeedsChange bool
+	changePKHHex      string
+	changeAmount      int64
+	preimageIndex     int
+	contractUtxo      UTXO
+	newLockingScript  string
+	newSatoshis       int64
+	hasMultiOutput    bool
+	contractOutputs   []ContractOutput
+}
+
 // ---------------------------------------------------------------------------
 // Artifact types (compiled contract output)
 // ---------------------------------------------------------------------------

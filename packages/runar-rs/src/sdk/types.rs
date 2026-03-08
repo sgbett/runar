@@ -207,3 +207,51 @@ impl SdkValue {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// PreparedCall — result of prepare_call()
+// ---------------------------------------------------------------------------
+
+/// Result of `prepare_call()` — contains everything needed for external signing
+/// and subsequent `finalize_call()`.
+///
+/// Public fields (`sighash`, `preimage`, `op_push_tx_sig`, `tx_hex`, `sig_indices`)
+/// are for external signer coordination. Other fields are opaque
+/// internals consumed by `finalize_call()`.
+#[derive(Debug, Clone)]
+pub struct PreparedCall {
+    /// BIP-143 sighash (hex) — what external signers ECDSA-sign.
+    pub sighash: String,
+    /// Full BIP-143 preimage (hex).
+    pub preimage: String,
+    /// OP_PUSH_TX DER signature + sighash byte (hex). Empty if not needed.
+    pub op_push_tx_sig: String,
+    /// Built transaction hex (P2PKH funding signed, primary contract input uses placeholder sigs).
+    pub tx_hex: String,
+    /// User-visible arg positions that need external Sig values.
+    pub sig_indices: Vec<usize>,
+
+    // Internal fields — consumed by finalize_call()
+    pub(crate) method_name: String,
+    pub(crate) resolved_args: Vec<SdkValue>,
+    pub(crate) method_selector_hex: String,
+    pub(crate) is_stateful: bool,
+    pub(crate) is_terminal: bool,
+    pub(crate) needs_op_push_tx: bool,
+    pub(crate) method_needs_change: bool,
+    pub(crate) change_pkh_hex: String,
+    pub(crate) change_amount: i64,
+    pub(crate) preimage_index: Option<usize>,
+    pub(crate) contract_utxo: Utxo,
+    pub(crate) new_locking_script: String,
+    pub(crate) new_satoshis: i64,
+    pub(crate) has_multi_output: bool,
+    pub(crate) contract_outputs: Vec<ContractOutputEntry>,
+}
+
+/// A contract output entry stored in PreparedCall (script + satoshis).
+#[derive(Debug, Clone)]
+pub struct ContractOutputEntry {
+    pub script: String,
+    pub satoshis: i64,
+}

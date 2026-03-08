@@ -39,7 +39,7 @@ export function generateTypescript(artifact: RunarArtifact): string {
 
   // Imports
   emit("import { RunarContract, buildP2PKHScript } from 'runar-sdk';");
-  emit("import type { Provider, Signer, Transaction, DeployOptions, RunarArtifact } from 'runar-sdk';");
+  emit("import type { Provider, Signer, Transaction, DeployOptions, RunarArtifact, PreparedCall } from 'runar-sdk';");
   blank();
 
   // Result type alias
@@ -186,6 +186,81 @@ export function generateTypescript(artifact: RunarArtifact): string {
       emit(`    return this.inner.call('${method.name}', ${argsExpr}, options);`);
     }
     emit('  }');
+
+    // -----------------------------------------------------------------
+    // prepareX / finalizeX — multi-signer support for methods with Sig params
+    // -----------------------------------------------------------------
+    const sigParams = allClassified.filter((p) => p.abiType === 'Sig');
+    if (sigParams.length > 0) {
+      blank();
+
+      // --- prepareX ---
+      const capitalizedName = safeName.charAt(0).toUpperCase() + safeName.slice(1);
+      const prepareName = `prepare${capitalizedName}`;
+
+      // prepareX has the same user-visible params minus Sig params
+      const prepareUserParams = userParams.filter((p) => p.abiType !== 'Sig');
+      const prepareParamParts: string[] = [];
+      for (const p of prepareUserParams) {
+        prepareParamParts.push(`${p.name}: ${p.tsType}`);
+      }
+      // Add the same options param as the main method
+      if (isTerminal && isStateful) {
+        prepareParamParts.push('outputs: TerminalOutput[]');
+      } else if (isStateful) {
+        prepareParamParts.push(`options?: ${name}StatefulCallOptions`);
+      } else {
+        prepareParamParts.push('outputs?: TerminalOutput[]');
+      }
+
+      if (prepareParamParts.length <= 2) {
+        emit(`  async ${prepareName}(${prepareParamParts.join(', ')}): Promise<PreparedCall> {`);
+      } else {
+        emit(`  async ${prepareName}(`);
+        for (const pp of prepareParamParts) emit(`    ${pp},`);
+        emit('  ): Promise<PreparedCall> {');
+      }
+
+      // Body: call this.inner.prepareCall with same args array as call()
+      if (isTerminal && isStateful) {
+        emit(`    return this.inner.prepareCall('${method.name}', ${argsExpr}, {`);
+        emit(`      terminalOutputs: ${name}Contract.resolveOutputs(outputs),`);
+        emit('    });');
+      } else if (!isStateful) {
+        emit(`    const callOpts = outputs ? { terminalOutputs: ${name}Contract.resolveOutputs(outputs) } : undefined;`);
+        emit(`    return this.inner.prepareCall('${method.name}', ${argsExpr}, callOpts);`);
+      } else {
+        emit(`    return this.inner.prepareCall('${method.name}', ${argsExpr}, options);`);
+      }
+      emit('  }');
+
+      // --- finalizeX ---
+      blank();
+      const finalizeName = `finalize${capitalizedName}`;
+
+      const finalizeParamParts = ['prepared: PreparedCall'];
+      for (const sp of sigParams) {
+        finalizeParamParts.push(`${sp.name}: string`);
+      }
+
+      if (finalizeParamParts.length <= 3) {
+        emit(`  async ${finalizeName}(${finalizeParamParts.join(', ')}): Promise<CallResult> {`);
+      } else {
+        emit(`  async ${finalizeName}(`);
+        for (const fp of finalizeParamParts) emit(`    ${fp},`);
+        emit('  ): Promise<CallResult> {');
+      }
+
+      // Build signatures map: { argIndex: sigParamName }
+      // argIndex is the Sig param's position in allClassified (= the args array)
+      const sigEntries: string[] = [];
+      for (const sp of sigParams) {
+        const idx = allClassified.findIndex((p) => p.name === sp.name);
+        sigEntries.push(`${idx}: ${sp.name}`);
+      }
+      emit(`    return this.inner.finalizeCall(prepared, { ${sigEntries.join(', ')} });`);
+      emit('  }');
+    }
   }
 
   emit('}');

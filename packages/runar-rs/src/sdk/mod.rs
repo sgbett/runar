@@ -18,4 +18,5 @@ pub use provider::{Provider, MockProvider};
 pub use rpc_provider::RPCProvider;
 pub use signer::{Signer, LocalSigner, ExternalSigner, MockSigner};
 pub use contract::RunarContract;
+pub use types::PreparedCall;
 pub use oppushtx::compute_op_push_tx;

@@ -1,4 +1,4 @@
-package main
+package compiler
 
 import (
 	"encoding/hex"
@@ -472,7 +472,7 @@ func TestOptimizer_NumEqualVerify(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func conformanceDir() string {
-	return filepath.Join("..", "..", "conformance", "tests")
+	return filepath.Join("..", "..", "..", "conformance", "tests")
 }
 
 func mustLoadConformanceIR(t *testing.T, testName string) []byte {

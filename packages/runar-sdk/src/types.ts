@@ -36,6 +36,44 @@ export interface DeployOptions {
   changeAddress?: string;
 }
 
+/**
+ * Result of `prepareCall()` — contains everything needed for external signing
+ * and subsequent `finalizeCall()`.
+ *
+ * Public fields (`sighash`, `preimage`, `opPushTxSig`, `txHex`, `sigIndices`)
+ * are for external signer coordination. Fields prefixed with `_` are opaque
+ * internals consumed by `finalizeCall()`.
+ */
+export interface PreparedCall {
+  /** BIP-143 sighash (hex) — what external signers ECDSA-sign. */
+  sighash: string;
+  /** Full BIP-143 preimage (hex). */
+  preimage: string;
+  /** OP_PUSH_TX DER signature + sighash byte (hex). Empty if not needed. */
+  opPushTxSig: string;
+  /** Built transaction hex (P2PKH funding signed, primary contract input uses placeholder sigs). */
+  txHex: string;
+  /** User-visible arg positions that need external Sig values. */
+  sigIndices: number[];
+
+  // Internal fields — consumed by finalizeCall()
+  /** @internal */ _methodName: string;
+  /** @internal */ _resolvedArgs: unknown[];
+  /** @internal */ _methodSelectorHex: string;
+  /** @internal */ _isStateful: boolean;
+  /** @internal */ _isTerminal: boolean;
+  /** @internal */ _needsOpPushTx: boolean;
+  /** @internal */ _methodNeedsChange: boolean;
+  /** @internal */ _changePKHHex: string;
+  /** @internal */ _changeAmount: number;
+  /** @internal */ _preimageIndex: number;
+  /** @internal */ _contractUtxo: UTXO;
+  /** @internal */ _newLockingScript: string;
+  /** @internal */ _newSatoshis: number;
+  /** @internal */ _hasMultiOutput: boolean;
+  /** @internal */ _contractOutputs: Array<{ script: string; satoshis: number }>;
+}
+
 export interface CallOptions {
   satoshis?: number; // for next output (stateful)
   changeAddress?: string;

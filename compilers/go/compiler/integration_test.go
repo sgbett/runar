@@ -1,7 +1,7 @@
 //go:build integration
 // +build integration
 
-package main
+package compiler
 
 import (
 	"os"
@@ -19,11 +19,11 @@ import (
 // ---------------------------------------------------------------------------
 
 func tsCompilerDir() string {
-	return filepath.Join("..", "..", "compiler")
+	return filepath.Join("..", "..", "..", "compiler")
 }
 
 func integrationConformanceDir() string {
-	return filepath.Join("..", "..", "conformance", "tests")
+	return filepath.Join("..", "..", "..", "conformance", "tests")
 }
 
 // TestTStoGoIntegration compiles conformance test expected-ir.json files
@@ -83,7 +83,7 @@ func TestGoBinaryCompilation(t *testing.T) {
 	// Build the Go compiler binary
 	tmpBin := filepath.Join(t.TempDir(), "runar-go")
 	cmd := exec.Command("go", "build", "-o", tmpBin, ".")
-	cmd.Dir = filepath.Join(".")
+	cmd.Dir = filepath.Join("..")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("failed to build Go compiler binary: %v\n%s", err, output)

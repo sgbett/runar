@@ -4,7 +4,7 @@ from runar.sdk.types import (
     Utxo, Transaction, TxInput, TxOutput,
     RunarArtifact, Abi, AbiMethod, AbiParam,
     StateField, ConstructorSlot, DeployOptions, CallOptions, OutputSpec,
-    SdkValue,
+    PreparedCall, SdkValue,
 )
 from runar.sdk.provider import Provider, MockProvider
 from runar.sdk.rpc_provider import RPCProvider
@@ -20,7 +20,7 @@ __all__ = [
     'Utxo', 'Transaction', 'TxInput', 'TxOutput',
     'RunarArtifact', 'Abi', 'AbiMethod', 'AbiParam',
     'StateField', 'ConstructorSlot', 'DeployOptions', 'CallOptions', 'OutputSpec',
-    'SdkValue',
+    'PreparedCall', 'SdkValue',
     'Provider', 'MockProvider', 'RPCProvider',
     'Signer', 'MockSigner', 'ExternalSigner', 'LocalSigner',
     'RunarContract',

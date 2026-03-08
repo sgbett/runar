@@ -9,6 +9,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+
+	"github.com/icellan/runar/compilers/go/compiler"
 )
 
 func main() {
@@ -34,7 +36,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "--emit-ir requires --source")
 			os.Exit(1)
 		}
-		program, err := CompileSourceToIR(*sourceFile)
+		program, err := compiler.CompileSourceToIR(*sourceFile)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Compilation error: %v\n", err)
 			os.Exit(1)
@@ -62,13 +64,13 @@ func main() {
 		return
 	}
 
-	var artifact *Artifact
+	var artifact *compiler.Artifact
 	var err error
 
 	if *sourceFile != "" {
-		artifact, err = CompileFromSource(*sourceFile)
+		artifact, err = compiler.CompileFromSource(*sourceFile)
 	} else {
-		artifact, err = CompileFromIR(*irFile)
+		artifact, err = compiler.CompileFromIR(*irFile)
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Compilation error: %v\n", err)
@@ -82,7 +84,7 @@ func main() {
 	} else if *asmOnly {
 		output = artifact.ASM
 	} else {
-		jsonBytes, err := ArtifactToJSON(artifact)
+		jsonBytes, err := compiler.ArtifactToJSON(artifact)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "JSON serialization error: %v\n", err)
 			os.Exit(1)

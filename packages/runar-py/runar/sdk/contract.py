@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 from runar.sdk.types import (
     RunarArtifact, Utxo, Transaction, TxOutput,
-    DeployOptions, CallOptions, OutputSpec, TerminalOutput,
+    DeployOptions, CallOptions, OutputSpec, TerminalOutput, PreparedCall,
 )
 from runar.sdk.provider import Provider
 from runar.sdk.signer import Signer
@@ -130,11 +130,49 @@ class RunarContract:
                 "RunarContract.call: no provider/signer. Call connect() or pass them."
             )
 
+        prepared = self.prepare_call(method_name, args, provider, signer, options)
+        signatures: dict[int, str] = {}
+        for idx in prepared.sig_indices:
+            signatures[idx] = signer.sign(
+                prepared.tx_hex, 0,
+                prepared.contract_utxo.script,
+                prepared.contract_utxo.satoshis,
+            )
+        return self.finalize_call(prepared, signatures, provider)
+
+    # -------------------------------------------------------------------
+    # prepare_call / finalize_call -- multi-signer support
+    # -------------------------------------------------------------------
+
+    def prepare_call(
+        self,
+        method_name: str,
+        args: list | None = None,
+        provider: Provider | None = None,
+        signer: Signer | None = None,
+        options: CallOptions | None = None,
+    ) -> PreparedCall:
+        """Build the transaction for a method call without signing the primary
+        contract input's Sig params.  Returns a PreparedCall containing the
+        BIP-143 sighash that external signers need, plus opaque internals for
+        finalize_call().
+
+        P2PKH funding inputs and additional contract inputs ARE signed with
+        the connected signer.  Only the primary contract input's Sig params
+        are left as 72-byte placeholders.
+        """
+        provider = provider or self._provider
+        signer = signer or self._signer
+        if provider is None or signer is None:
+            raise RuntimeError(
+                "RunarContract.prepare_call: no provider/signer. Call connect() or pass them."
+            )
+
         args = args or []
         method = self._find_method(method_name)
         if method is None:
             raise ValueError(
-                f"RunarContract.call: method '{method_name}' not found in {self.artifact.contract_name}"
+                f"RunarContract.prepare_call: method '{method_name}' not found in {self.artifact.contract_name}"
             )
 
         is_stateful = bool(self.artifact.state_fields)
@@ -156,20 +194,26 @@ class RunarContract:
 
         if len(user_params) != len(args):
             raise ValueError(
-                f"RunarContract.call: method '{method_name}' expects {len(user_params)} args, got {len(args)}"
+                f"RunarContract.prepare_call: method '{method_name}' expects {len(user_params)} args, got {len(args)}"
             )
         if self._current_utxo is None:
             raise RuntimeError(
-                "RunarContract.call: contract is not deployed. Call deploy() or from_txid() first."
+                "RunarContract.prepare_call: contract is not deployed. Call deploy() or from_txid() first."
             )
 
+        contract_utxo = Utxo(
+            txid=self._current_utxo.txid,
+            output_index=self._current_utxo.output_index,
+            satoshis=self._current_utxo.satoshis,
+            script=self._current_utxo.script,
+        )
         address = signer.get_address()
         opts = options or CallOptions()
         change_address = opts.change_address or address
 
         # Detect Sig/PubKey/SigHashPreimage/ByteString params that need auto-compute (user passed None)
         resolved_args = list(args)
-        sig_indices = []
+        sig_indices: list[int] = []
         prevouts_indices: list[int] = []
         preimage_index = -1
         # Estimate input count for ByteString placeholder sizing
@@ -194,16 +238,40 @@ class RunarContract:
         # the compiler injects an implicit _opPushTxSig.
         needs_op_push_tx = preimage_index >= 0 or is_stateful
 
+        # Compute method selector (needed for both terminal and non-terminal)
+        method_selector_hex = ''
+        if is_stateful:
+            public_methods = self._get_public_methods()
+            if len(public_methods) > 1:
+                for mi, m in enumerate(public_methods):
+                    if m.name == method_name:
+                        method_selector_hex = _encode_script_number(mi)
+                        break
+
+        # Compute change PKH for stateful methods that need it
+        change_pkh_hex = ''
+        if is_stateful and method_needs_change:
+            change_pub_key_hex = opts.change_pub_key or signer.get_public_key()
+            pub_key_bytes = bytes.fromhex(change_pub_key_hex)
+            hash160_bytes = hashlib.new(
+                'ripemd160', hashlib.sha256(pub_key_bytes).digest()
+            ).digest()
+            change_pkh_hex = hash160_bytes.hex()
+
         # -------------------------------------------------------------------
         # Terminal method path: exact outputs, no funding, no change
         # -------------------------------------------------------------------
         if opts.terminal_outputs:
-            return self._call_terminal(
-                method_name, resolved_args, provider, signer, opts,
+            return self._prepare_terminal(
+                method_name, resolved_args, signer, opts,
                 is_stateful, needs_op_push_tx, method_needs_change,
-                sig_indices, prevouts_indices, preimage_index, user_params,
+                sig_indices, prevouts_indices, preimage_index,
+                method_selector_hex, change_pkh_hex, contract_utxo,
             )
 
+        # -------------------------------------------------------------------
+        # Non-terminal path
+        # -------------------------------------------------------------------
         if needs_op_push_tx:
             # Prepend placeholder _opPushTxSig before user args
             unlocking_script = encode_push_data('00' * 72) + \
@@ -275,16 +343,6 @@ class RunarContract:
             if not (u.txid == self._current_utxo.txid and u.output_index == self._current_utxo.output_index)
         ]
 
-        # Compute change PKH for stateful methods that need it
-        change_pkh_hex = ''
-        if is_stateful and method_needs_change:
-            change_pub_key_hex = opts.change_pub_key or signer.get_public_key()
-            pub_key_bytes = bytes.fromhex(change_pub_key_hex)
-            hash160_bytes = hashlib.new(
-                'ripemd160', hashlib.sha256(pub_key_bytes).digest()
-            ).digest()
-            change_pkh_hex = hash160_bytes.hex()
-
         # Resolve per-input args for additional contract inputs (same Sig/PubKey/ByteString handling)
         resolved_per_input_args: list[list] | None = None
         if opts.additional_contract_input_args:
@@ -333,23 +391,21 @@ class RunarContract:
                 unlock_script = encode_push_data(sig) + encode_push_data(pub_key)
                 signed_tx = insert_unlocking_script(signed_tx, i, unlock_script)
 
-        # For stateful contracts, build the OP_PUSH_TX unlocking script:
-        #   <opPushTxSig> <user_args> <txPreimage> <methodSelector>
-        if is_stateful:
-            method_selector_hex = ''
-            public_methods = self._get_public_methods()
-            if len(public_methods) > 1:
-                for mi, m in enumerate(public_methods):
-                    if m.name == method_name:
-                        method_selector_hex = _encode_script_number(mi)
-                        break
+        final_op_push_tx_sig = ''
+        final_preimage = ''
 
-            def _build_stateful_unlock(tx: str, input_idx: int, subscript: str, sats: int, args_override: list | None = None, tx_change_amount: int = 0, pi: list[int] | None = None) -> str:
+        if is_stateful:
+            # Helper: build a stateful unlock.  For input_idx==0 (primary),
+            # keeps placeholder Sig params.  For input_idx>0 (extra), signs
+            # with signer.
+            def _build_stateful_unlock(tx: str, input_idx: int, subscript: str, sats: int, args_override: list | None = None, tx_change_amount: int = 0, pi: list[int] | None = None) -> tuple[str, str, str]:
                 op_sig, preimage = compute_op_push_tx(tx, input_idx, subscript, sats)
                 base_args = args_override if args_override is not None else resolved_args
                 input_args = list(base_args)
-                for idx in sig_indices:
-                    input_args[idx] = signer.sign(tx, input_idx, subscript, sats)
+                # Only sign Sig params for extra inputs, not the primary
+                if input_idx > 0:
+                    for idx in sig_indices:
+                        input_args[idx] = signer.sign(tx, input_idx, subscript, sats)
                 # Resolve ByteString prevouts
                 if pi:
                     all_prevouts_hex = _extract_all_prevouts(tx)
@@ -362,28 +418,30 @@ class RunarContract:
                 change_hex = ''
                 if method_needs_change and change_pkh_hex:
                     change_hex = encode_push_data(change_pkh_hex) + _encode_script_number(tx_change_amount)
-                return (
+                unlock = (
                     encode_push_data(op_sig) +
                     args_hex +
                     change_hex +
                     encode_push_data(preimage) +
                     method_selector_hex
                 )
+                return unlock, op_sig, preimage
 
             # First pass: build unlocking scripts with current tx layout
-            input0_unlock = _build_stateful_unlock(
-                signed_tx, 0, self._current_utxo.script, self._current_utxo.satoshis,
+            input0_unlock, _, _ = _build_stateful_unlock(
+                signed_tx, 0, contract_utxo.script, contract_utxo.satoshis,
                 tx_change_amount=change_amount,
                 pi=prevouts_indices,
             )
             extra_unlocks: list[str] = []
             for i, mu in enumerate(extra_contract_utxos):
                 extra_args = resolved_per_input_args[i] if resolved_per_input_args and i < len(resolved_per_input_args) else None
-                extra_unlocks.append(_build_stateful_unlock(
+                eu, _, _ = _build_stateful_unlock(
                     signed_tx, i + 1, mu.script, mu.satoshis, extra_args,
                     tx_change_amount=change_amount,
                     pi=prevouts_indices,
-                ))
+                )
+                extra_unlocks.append(eu)
 
             # Rebuild TX with real unlocking scripts (sizes may differ from placeholders)
             tx_hex, input_count, change_amount = build_call_transaction(
@@ -409,16 +467,18 @@ class RunarContract:
                     signed_tx = insert_unlocking_script(signed_tx, i, unlock_script)
 
             # Second pass: recompute with final tx (preimage changes with unlock size)
-            final_input0_unlock = _build_stateful_unlock(
-                signed_tx, 0, self._current_utxo.script, self._current_utxo.satoshis,
+            final_input0_unlock, op_sig, preimage = _build_stateful_unlock(
+                signed_tx, 0, contract_utxo.script, contract_utxo.satoshis,
                 tx_change_amount=change_amount,
                 pi=prevouts_indices,
             )
+            final_op_push_tx_sig = op_sig
+            final_preimage = preimage
             signed_tx = insert_unlocking_script(signed_tx, 0, final_input0_unlock)
 
             for i, mu in enumerate(extra_contract_utxos):
                 extra_args = resolved_per_input_args[i] if resolved_per_input_args and i < len(resolved_per_input_args) else None
-                final_merge_unlock = _build_stateful_unlock(
+                final_merge_unlock, _, _ = _build_stateful_unlock(
                     signed_tx, i + 1, mu.script, mu.satoshis, extra_args,
                     tx_change_amount=change_amount,
                     pi=prevouts_indices,
@@ -434,60 +494,139 @@ class RunarContract:
                     unlock_script = encode_push_data(sig) + encode_push_data(pub_key)
                     signed_tx = insert_unlocking_script(signed_tx, i, unlock_script)
 
+            # Update resolved_args with real prevouts so finalize_call can
+            # rebuild the primary unlock with correct allPrevouts values.
+            if prevouts_indices:
+                all_prevouts_hex = _extract_all_prevouts(signed_tx)
+                for idx in prevouts_indices:
+                    resolved_args[idx] = all_prevouts_hex
+
         elif needs_op_push_tx or sig_indices:
-            # Stateless with SigHashPreimage or Sig params: auto-compute
-            op_push_tx_sig_hex = None
+            # Stateless: keep placeholder sigs, compute OP_PUSH_TX
             if needs_op_push_tx:
                 sig_hex, preimage_hex = compute_op_push_tx(
-                    signed_tx, 0, self._current_utxo.script, self._current_utxo.satoshis,
+                    signed_tx, 0, contract_utxo.script, contract_utxo.satoshis,
                 )
-                op_push_tx_sig_hex = sig_hex
+                final_op_push_tx_sig = sig_hex
                 resolved_args[preimage_index] = preimage_hex
-
-            for idx in sig_indices:
-                resolved_args[idx] = signer.sign(
-                    signed_tx, 0, self._current_utxo.script, self._current_utxo.satoshis,
-                )
-
+            # Don't sign Sig params -- keep placeholders
             real_unlocking_script = self.build_unlocking_script(method_name, resolved_args)
-            if op_push_tx_sig_hex is not None:
-                real_unlocking_script = encode_push_data(op_push_tx_sig_hex) + real_unlocking_script
-
+            if needs_op_push_tx and final_op_push_tx_sig:
+                real_unlocking_script = encode_push_data(final_op_push_tx_sig) + real_unlocking_script
                 tmp_tx = insert_unlocking_script(signed_tx, 0, real_unlocking_script)
-                final_sig, final_preimage = compute_op_push_tx(
-                    tmp_tx, 0, self._current_utxo.script, self._current_utxo.satoshis,
+                final_sig, final_pre = compute_op_push_tx(
+                    tmp_tx, 0, contract_utxo.script, contract_utxo.satoshis,
                 )
-                resolved_args[preimage_index] = final_preimage
-                if sig_indices:
-                    for idx in sig_indices:
-                        resolved_args[idx] = signer.sign(
-                            tmp_tx, 0, self._current_utxo.script, self._current_utxo.satoshis,
-                        )
+                resolved_args[preimage_index] = final_pre
+                final_op_push_tx_sig = final_sig
+                final_preimage = final_pre
                 real_unlocking_script = encode_push_data(final_sig) + \
                     self.build_unlocking_script(method_name, resolved_args)
             signed_tx = insert_unlocking_script(signed_tx, 0, real_unlocking_script)
+            if not final_preimage and needs_op_push_tx:
+                final_preimage = resolved_args[preimage_index]
 
-        txid = provider.broadcast(signed_tx)
+        # Compute sighash from preimage
+        sighash = ''
+        if final_preimage:
+            sighash = hashlib.sha256(bytes.fromhex(final_preimage)).hexdigest()
+
+        return PreparedCall(
+            sighash=sighash,
+            preimage=final_preimage,
+            op_push_tx_sig=final_op_push_tx_sig,
+            tx_hex=signed_tx,
+            sig_indices=sig_indices,
+            method_name=method_name,
+            resolved_args=resolved_args,
+            method_selector_hex=method_selector_hex,
+            is_stateful=is_stateful,
+            is_terminal=False,
+            needs_op_push_tx=needs_op_push_tx,
+            method_needs_change=method_needs_change,
+            change_pkh_hex=change_pkh_hex,
+            change_amount=change_amount,
+            preimage_index=preimage_index,
+            contract_utxo=contract_utxo,
+            new_locking_script=new_locking_script,
+            new_satoshis=new_satoshis,
+            has_multi_output=bool(has_multi_output),
+            contract_outputs=contract_outputs or [],
+        )
+
+    def finalize_call(
+        self,
+        prepared: PreparedCall,
+        signatures: dict[int, str],
+        provider: Provider | None = None,
+    ) -> tuple[str, Transaction]:
+        """Complete a prepared call by injecting external signatures and broadcasting.
+
+        Args:
+            prepared:    The PreparedCall returned by prepare_call().
+            signatures:  Map from arg index to DER signature hex (with sighash byte).
+                         Each key must be one of prepared.sig_indices.
+            provider:    Optional provider override.
+        """
+        provider = provider or self._provider
+        if provider is None:
+            raise RuntimeError("finalize_call: no provider")
+
+        # Replace placeholder sigs with real signatures
+        resolved_args = list(prepared.resolved_args)
+        for idx in prepared.sig_indices:
+            if idx in signatures:
+                resolved_args[idx] = signatures[idx]
+
+        # Assemble the primary unlocking script
+        if prepared.is_stateful:
+            args_hex = ''
+            for arg in resolved_args:
+                args_hex += _encode_arg(arg)
+            change_hex = ''
+            if prepared.method_needs_change and prepared.change_pkh_hex:
+                change_hex = encode_push_data(prepared.change_pkh_hex) + _encode_script_number(prepared.change_amount)
+            primary_unlock = (
+                encode_push_data(prepared.op_push_tx_sig) +
+                args_hex +
+                change_hex +
+                encode_push_data(prepared.preimage) +
+                prepared.method_selector_hex
+            )
+        elif prepared.needs_op_push_tx:
+            if prepared.preimage_index >= 0:
+                resolved_args[prepared.preimage_index] = prepared.preimage
+            primary_unlock = encode_push_data(prepared.op_push_tx_sig) + \
+                self.build_unlocking_script(prepared.method_name, resolved_args)
+        else:
+            primary_unlock = self.build_unlocking_script(prepared.method_name, resolved_args)
+
+        final_tx = insert_unlocking_script(prepared.tx_hex, 0, primary_unlock)
+
+        txid = provider.broadcast(final_tx)
 
         # Update tracked UTXO
-        if is_stateful and has_multi_output and contract_outputs:
-            # Multi-output: track the first continuation output
+        if prepared.is_stateful and prepared.has_multi_output and prepared.contract_outputs:
             self._current_utxo = Utxo(
                 txid=txid, output_index=0,
-                satoshis=contract_outputs[0]['satoshis'],
-                script=contract_outputs[0]['script'],
+                satoshis=prepared.contract_outputs[0]['satoshis'],
+                script=prepared.contract_outputs[0]['script'],
             )
-        elif is_stateful and new_locking_script:
+        elif prepared.is_stateful and prepared.new_locking_script:
             self._current_utxo = Utxo(
-                txid=txid, output_index=0, satoshis=new_satoshis, script=new_locking_script,
+                txid=txid, output_index=0,
+                satoshis=prepared.new_satoshis or prepared.contract_utxo.satoshis,
+                script=prepared.new_locking_script,
             )
+        elif prepared.is_terminal:
+            self._current_utxo = None
         else:
             self._current_utxo = None
 
         try:
             tx = provider.get_transaction(txid)
         except Exception:
-            tx = Transaction(txid=txid, version=1, raw=signed_tx)
+            tx = Transaction(txid=txid, version=1, raw=final_tx)
 
         return txid, tx
 
@@ -572,13 +711,12 @@ class RunarContract:
         """Update state values directly."""
         self._state.update(new_state)
 
-    # -- Terminal method --
+    # -- Terminal method (prepare path) --
 
-    def _call_terminal(
+    def _prepare_terminal(
         self,
         method_name: str,
         resolved_args: list,
-        provider: Provider,
         signer: Signer,
         opts: CallOptions,
         is_stateful: bool,
@@ -587,9 +725,11 @@ class RunarContract:
         sig_indices: list[int],
         prevouts_indices: list[int],
         preimage_index: int,
-        user_params: list,
-    ) -> tuple[str, Transaction]:
-        """Handle the terminal method code path."""
+        method_selector_hex: str,
+        change_pkh_hex: str,
+        contract_utxo: Utxo,
+    ) -> PreparedCall:
+        """Handle the terminal method code path for prepare_call."""
         # Normalize terminal outputs
         term_outputs = []
         for item in opts.terminal_outputs:
@@ -615,8 +755,8 @@ class RunarContract:
             tx = ''
             tx += _to_le32(1)  # version
             tx += _encode_varint(1)  # 1 input
-            tx += _reverse_hex(self._current_utxo.txid)
-            tx += _to_le32(self._current_utxo.output_index)
+            tx += _reverse_hex(contract_utxo.txid)
+            tx += _to_le32(contract_utxo.output_index)
             tx += _encode_varint(len(unlock) // 2)
             tx += unlock
             tx += 'ffffffff'
@@ -629,97 +769,93 @@ class RunarContract:
             return tx
 
         term_tx = build_terminal_tx(term_unlock_script)
+        final_op_push_tx_sig = ''
+        final_preimage = ''
 
         if is_stateful:
-            method_selector_hex = ''
-            public_methods = self._get_public_methods()
-            if len(public_methods) > 1:
-                for mi, m in enumerate(public_methods):
-                    if m.name == method_name:
-                        method_selector_hex = _encode_script_number(mi)
-                        break
-
-            # Compute change PKH
-            change_pkh_hex = ''
-            if method_needs_change:
-                change_pub_key_hex = opts.change_pub_key or signer.get_public_key()
-                pub_key_bytes = bytes.fromhex(change_pub_key_hex)
-                hash160_bytes = hashlib.new(
-                    'ripemd160', hashlib.sha256(pub_key_bytes).digest()
-                ).digest()
-                change_pkh_hex = hash160_bytes.hex()
-
-            def build_stateful_terminal_unlock(tx: str) -> str:
-                op_sig, preimage = compute_op_push_tx(tx, 0, self._current_utxo.script, self._current_utxo.satoshis)
-                input_args = list(resolved_args)
-                for idx in sig_indices:
-                    input_args[idx] = signer.sign(tx, 0, self._current_utxo.script, self._current_utxo.satoshis)
+            # Build stateful terminal unlock with PLACEHOLDER user sigs
+            def build_stateful_terminal_unlock(tx: str) -> tuple[str, str, str]:
+                op_sig, preimage = compute_op_push_tx(tx, 0, contract_utxo.script, contract_utxo.satoshis)
+                # Keep placeholder Sig params (don't sign for primary)
                 args_hex = ''
-                for arg in input_args:
+                for arg in resolved_args:
                     args_hex += _encode_arg(arg)
                 # Terminal: 0 change
                 change_hex = ''
                 if method_needs_change and change_pkh_hex:
                     change_hex = encode_push_data(change_pkh_hex) + _encode_script_number(0)
-                return (
+                unlock = (
                     encode_push_data(op_sig) +
                     args_hex +
                     change_hex +
                     encode_push_data(preimage) +
                     method_selector_hex
                 )
+                return unlock, op_sig, preimage
 
             # First pass
-            first_unlock = build_stateful_terminal_unlock(term_tx)
+            first_unlock, _, _ = build_stateful_terminal_unlock(term_tx)
             term_tx = build_terminal_tx(first_unlock)
 
             # Second pass
-            final_unlock = build_stateful_terminal_unlock(term_tx)
+            final_unlock, op_sig, preimage = build_stateful_terminal_unlock(term_tx)
             term_tx = insert_unlocking_script(term_tx, 0, final_unlock)
+            final_op_push_tx_sig = op_sig
+            final_preimage = preimage
 
         elif needs_op_push_tx or sig_indices:
-            # Stateless terminal with OP_PUSH_TX or Sig params
-            op_push_tx_sig_hex = None
+            # Stateless terminal -- keep placeholder sigs
             if needs_op_push_tx:
                 sig_hex, preimage_hex = compute_op_push_tx(
-                    term_tx, 0, self._current_utxo.script, self._current_utxo.satoshis,
+                    term_tx, 0, contract_utxo.script, contract_utxo.satoshis,
                 )
-                op_push_tx_sig_hex = sig_hex
+                final_op_push_tx_sig = sig_hex
                 resolved_args[preimage_index] = preimage_hex
 
-            for idx in sig_indices:
-                resolved_args[idx] = signer.sign(
-                    term_tx, 0, self._current_utxo.script, self._current_utxo.satoshis,
-                )
-
+            # Don't sign Sig params -- keep 72-byte placeholders
             real_unlock = self.build_unlocking_script(method_name, resolved_args)
-            if op_push_tx_sig_hex is not None:
-                real_unlock = encode_push_data(op_push_tx_sig_hex) + real_unlock
+            if needs_op_push_tx and final_op_push_tx_sig:
+                real_unlock = encode_push_data(final_op_push_tx_sig) + real_unlock
                 tmp_tx = insert_unlocking_script(term_tx, 0, real_unlock)
-                final_sig, final_preimage = compute_op_push_tx(
-                    tmp_tx, 0, self._current_utxo.script, self._current_utxo.satoshis,
+                final_sig, final_pre = compute_op_push_tx(
+                    tmp_tx, 0, contract_utxo.script, contract_utxo.satoshis,
                 )
-                resolved_args[preimage_index] = final_preimage
-                for idx in sig_indices:
-                    resolved_args[idx] = signer.sign(
-                        tmp_tx, 0, self._current_utxo.script, self._current_utxo.satoshis,
-                    )
+                resolved_args[preimage_index] = final_pre
+                final_op_push_tx_sig = final_sig
+                final_preimage = final_pre
                 real_unlock = encode_push_data(final_sig) + \
                     self.build_unlocking_script(method_name, resolved_args)
             term_tx = insert_unlocking_script(term_tx, 0, real_unlock)
+            if not final_preimage and needs_op_push_tx:
+                final_preimage = resolved_args[preimage_index]
 
-        # Broadcast
-        txid = provider.broadcast(term_tx)
+        # Compute sighash from preimage
+        sighash = ''
+        if final_preimage:
+            sighash = hashlib.sha256(bytes.fromhex(final_preimage)).hexdigest()
 
-        # Terminal: contract is fully spent
-        self._current_utxo = None
-
-        try:
-            tx = provider.get_transaction(txid)
-        except Exception:
-            tx = Transaction(txid=txid, version=1, raw=term_tx)
-
-        return txid, tx
+        return PreparedCall(
+            sighash=sighash,
+            preimage=final_preimage,
+            op_push_tx_sig=final_op_push_tx_sig,
+            tx_hex=term_tx,
+            sig_indices=sig_indices,
+            method_name=method_name,
+            resolved_args=resolved_args,
+            method_selector_hex=method_selector_hex,
+            is_stateful=is_stateful,
+            is_terminal=True,
+            needs_op_push_tx=needs_op_push_tx,
+            method_needs_change=method_needs_change,
+            change_pkh_hex=change_pkh_hex,
+            change_amount=0,
+            preimage_index=preimage_index,
+            contract_utxo=contract_utxo,
+            new_locking_script='',
+            new_satoshis=0,
+            has_multi_output=False,
+            contract_outputs=[],
+        )
 
     # -- Private helpers --
 

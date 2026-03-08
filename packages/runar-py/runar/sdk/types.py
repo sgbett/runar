@@ -166,5 +166,33 @@ class CallOptions:
     terminal_outputs: list[TerminalOutput | dict] | None = None
 
 
+@dataclass
+class PreparedCall:
+    """Result of prepare_call() -- contains everything needed for external signing and finalize_call()."""
+    # Public -- callers use these to coordinate external signing
+    sighash: str = ''           # 64-char hex -- BIP-143 hash external signers sign
+    preimage: str = ''          # hex -- full BIP-143 preimage
+    op_push_tx_sig: str = ''    # hex -- OP_PUSH_TX DER sig (empty if not needed)
+    tx_hex: str = ''            # hex -- built TX (P2PKH funding signed, primary input uses placeholder sigs)
+    sig_indices: list[int] = field(default_factory=list)  # which user-visible arg positions need external Sig values
+
+    # Internal -- consumed by finalize_call()
+    method_name: str = ''
+    resolved_args: list = field(default_factory=list)
+    method_selector_hex: str = ''
+    is_stateful: bool = False
+    is_terminal: bool = False
+    needs_op_push_tx: bool = False
+    method_needs_change: bool = False
+    change_pkh_hex: str = ''
+    change_amount: int = 0
+    preimage_index: int = -1
+    contract_utxo: Utxo | None = None
+    new_locking_script: str = ''
+    new_satoshis: int = 0
+    has_multi_output: bool = False
+    contract_outputs: list[dict] = field(default_factory=list)
+
+
 # SdkValue is the union of types that can be passed as contract arguments
 SdkValue = Union[int, bool, bytes, str]

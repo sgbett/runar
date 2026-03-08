@@ -10,6 +10,7 @@ export type {
   UTXO,
   DeployOptions,
   CallOptions,
+  PreparedCall,
 } from './types.js';
 
 // Providers
