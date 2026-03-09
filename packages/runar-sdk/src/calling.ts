@@ -68,7 +68,7 @@ export function buildCallTransaction(
     outputsSize += 34; // P2PKH change
   }
   const estimatedSize = 10 + inputsSize + outputsSize;
-  const fee = estimatedSize * feeRate;
+  const fee = Math.ceil(estimatedSize * feeRate);
 
   const change = totalInput - contractOutputSats - fee;
 
