@@ -40,7 +40,7 @@
       "extension": ".runar.rb",
       "name": "Ruby",
       "description": "Ruby DSL contract syntax",
-      "compilers": ["ts", "go", "rust"],
+      "compilers": ["ts", "go", "rust", "python"],
       "status": "experimental"
     }
   ]
