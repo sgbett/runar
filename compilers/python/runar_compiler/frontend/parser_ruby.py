@@ -1,7 +1,7 @@
 """Ruby format parser (.runar.rb) for the Runar compiler.
 
 Ported from packages/runar-compiler/src/passes/01-parse-ruby.ts.
-Hand-written tokeniser + recursive descent parser.
+Hand-written tokenizer + recursive descent parser.
 
 Ruby syntax conventions used in Runar contracts:
   - ``class Foo < Runar::SmartContract`` /
@@ -18,6 +18,8 @@ Ruby syntax conventions used in Runar contracts:
 """
 
 from __future__ import annotations
+
+import re
 
 from runar_compiler.frontend.ast_nodes import (
     ContractNode, PropertyNode, MethodNode, ParamNode, SourceLocation,
@@ -211,16 +213,11 @@ _PASSTHROUGH_NAMES: frozenset[str] = frozenset({
 def _snake_to_camel(name: str) -> str:
     """Convert a snake_case identifier to camelCase.
 
-    Single words pass through unchanged.
+    Only capitalizes lowercase letters and digits after underscores, matching
+    the TS reference: ``name.replace(/_([a-z0-9])/g, ...)``.  This means
+    ``EC_P`` passes through unchanged (uppercase P is not matched).
     """
-    if "_" not in name:
-        return name
-    parts = name.split("_")
-    result = parts[0]
-    for part in parts[1:]:
-        if part:
-            result += part[0].upper() + part[1:]
-    return result
+    return re.sub(r"_([a-z0-9])", lambda m: m.group(1).upper(), name)
 
 
 def _map_builtin_name(name: str) -> str:
@@ -268,6 +265,35 @@ def _map_rb_type(name: str) -> TypeNode:
 # Tokeniser
 # ---------------------------------------------------------------------------
 
+_SINGLE_CHAR_TOKENS: dict[str, int] = {
+    ",": TOK_COMMA,
+    ".": TOK_DOT,
+    ":": TOK_COLON,
+    "+": TOK_PLUS,
+    "-": TOK_MINUS,
+    "*": TOK_STAR,
+    "/": TOK_SLASH,
+    "%": TOK_PERCENT,
+    "!": TOK_BANG,
+    "~": TOK_TILDE,
+    "&": TOK_AMP,
+    "|": TOK_PIPE,
+    "^": TOK_CARET,
+    "?": TOK_QUESTION,
+    "<": TOK_LT,
+    ">": TOK_GT,
+    "=": TOK_ASSIGN,
+}
+
+_COMPOUND_OPS: dict[int, str] = {
+    TOK_PLUSEQ: "+",
+    TOK_MINUSEQ: "-",
+    TOK_STAREQ: "*",
+    TOK_SLASHEQ: "/",
+    TOK_PERCENTEQ: "%",
+}
+
+
 def _is_ident_start(ch: str) -> bool:
     return ch.isalpha() or ch == "_"
 
@@ -279,9 +305,9 @@ def _is_ident_part(ch: str) -> bool:
 def _tokenize(source: str) -> list[Token]:
     """Tokenise a Ruby Runar source file line by line.
 
-    The tokeniser processes one line at a time, tracking parenthesis depth to
+    The tokenizer processes one line at a time, tracking parenthesis depth to
     suppress NEWLINE tokens inside multi-line expressions.  This matches the
-    behaviour of the TypeScript reference implementation.
+    behavior of the TypeScript reference implementation.
     """
     tokens: list[Token] = []
     lines = source.split("\n")
@@ -437,27 +463,8 @@ def _tokenize(source: str) -> list[Token]:
                 continue
 
             # Single-character operators and delimiters
-            _SINGLE_CHAR: dict[str, int] = {
-                ",": TOK_COMMA,
-                ".": TOK_DOT,
-                ":": TOK_COLON,
-                "+": TOK_PLUS,
-                "-": TOK_MINUS,
-                "*": TOK_STAR,
-                "/": TOK_SLASH,
-                "%": TOK_PERCENT,
-                "!": TOK_BANG,
-                "~": TOK_TILDE,
-                "&": TOK_AMP,
-                "|": TOK_PIPE,
-                "^": TOK_CARET,
-                "?": TOK_QUESTION,
-                "<": TOK_LT,
-                ">": TOK_GT,
-                "=": TOK_ASSIGN,
-            }
-            if ch in _SINGLE_CHAR:
-                tokens.append(Token(_SINGLE_CHAR[ch], ch, line_num, col))
+            if ch in _SINGLE_CHAR_TOKENS:
+                tokens.append(Token(_SINGLE_CHAR_TOKENS[ch], ch, line_num, col))
                 pos += 1
                 continue
 
@@ -530,7 +537,7 @@ def _tokenize(source: str) -> list[Token]:
                     tokens.append(Token(TOK_IDENT, word, line_num, col))
                 continue
 
-            # Skip unrecognised characters
+            # Skip unrecognized characters
             pos += 1
 
         # Emit NEWLINE at end of significant line (only if not inside parens)
@@ -984,7 +991,7 @@ class _RbParser:
           @prop2 = prop2
           ...
         """
-        # Exclude properties that have initialisers (they don't need constructor params)
+        # Exclude properties that have initializers (they don't need constructor params)
         required_props = [p for p in properties if p.initializer is None]
 
         params = [
@@ -1066,7 +1073,7 @@ class _RbParser:
         if kind == TOK_IDENT:
             return self._parse_ident_statement(loc)
 
-        # Skip unrecognised token
+        # Skip unrecognized token
         self._advance()
         return None
 
@@ -1255,18 +1262,11 @@ class _RbParser:
             return AssignmentStmt(target=target, value=value, source_location=loc)
 
         # Compound assignment: @var += expr, @var -= expr, etc.
-        _COMPOUND: dict[int, str] = {
-            TOK_PLUSEQ: "+",
-            TOK_MINUSEQ: "-",
-            TOK_STAREQ: "*",
-            TOK_SLASHEQ: "/",
-            TOK_PERCENTEQ: "%",
-        }
         op_kind = self._peek().kind
-        if op_kind in _COMPOUND:
+        if op_kind in _COMPOUND_OPS:
             self._advance()
             right = self._parse_expression()
-            value = BinaryExpr(op=_COMPOUND[op_kind], left=target, right=right)
+            value = BinaryExpr(op=_COMPOUND_OPS[op_kind], left=target, right=right)
             return AssignmentStmt(target=target, value=value, source_location=loc)
 
         # Expression statement: bare ``@var`` (e.g. followed by ``.method(...)``)
@@ -1309,18 +1309,11 @@ class _RbParser:
             return AssignmentStmt(target=expr, value=value, source_location=loc)
 
         # Compound assignment
-        _COMPOUND: dict[int, str] = {
-            TOK_PLUSEQ: "+",
-            TOK_MINUSEQ: "-",
-            TOK_STAREQ: "*",
-            TOK_SLASHEQ: "/",
-            TOK_PERCENTEQ: "%",
-        }
         op_kind = self._peek().kind
-        if op_kind in _COMPOUND:
+        if op_kind in _COMPOUND_OPS:
             self._advance()
             right = self._parse_expression()
-            value = BinaryExpr(op=_COMPOUND[op_kind], left=expr, right=right)
+            value = BinaryExpr(op=_COMPOUND_OPS[op_kind], left=expr, right=right)
             return AssignmentStmt(target=expr, value=value, source_location=loc)
 
         return ExpressionStmt(expr=expr, source_location=loc)
