@@ -251,7 +251,7 @@ module Runar
       sequences = tx[:inputs].map { |inp| [inp[:sequence]].pack('V') }.join
       hash_sequence = [double_sha256(sequences.unpack1('H*'))].pack('H*')
 
-      # hashOutputs — double-SHA256 of all serialised outputs.
+      # hashOutputs — double-SHA256 of all serialized outputs.
       outputs_data = tx[:outputs].map do |out|
         [out[:satoshis]].pack('Q<') + encode_varint_bin(out[:script].bytesize) + out[:script]
       end.join

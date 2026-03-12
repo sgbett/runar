@@ -11,7 +11,7 @@
 Runar compiles a strict subset of several languages (TypeScript, Go, Rust, Solidity-like, Move-style, Python) into Bitcoin Script. All formats parse into the same `ContractNode` AST, after which the pipeline is identical. This document captures the rationale for adding Ruby as a supported format (`.runar.rb`).
 
 The implementation adds:
-- A hand-written parser (tokeniser + recursive descent) in all three compilers (TypeScript, Go, Rust)
+- A hand-written parser (tokenizer + recursive descent) in all three compilers (TypeScript, Go, Rust)
 - A Ruby gem (`runar-rb`) providing base classes, types, mock crypto, and SDK
 - Example contracts, conformance tests, integration tests, and documentation
 
@@ -59,7 +59,7 @@ def unlock(sig, pub_key)
 - Verbose: each property needs a separate `@return` line; each method parameter needs a separate `@param` line.
 - Types feel like documentation rather than code, yet they are compilation-critical.
 
-**YARD is retained for its original purpose** — documenting semantics and behaviour. The DSL handles types; YARD handles the *why*. Never duplicate types in YARD tags.
+**YARD is retained for its original purpose** — documenting semantics and behavior. The DSL handles types; YARD handles the *why*. Never duplicate types in YARD tags.
 
 ### 2. Sorbet / `sig` Blocks (Rejected)
 

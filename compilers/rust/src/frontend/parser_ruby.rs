@@ -1,6 +1,6 @@
 //! Ruby parser for Rúnar contracts (.runar.rb).
 //!
-//! Parses Ruby-style contract definitions using a hand-written tokeniser
+//! Parses Ruby-style contract definitions using a hand-written tokenizer
 //! and recursive descent parser. Produces the same AST as the TypeScript
 //! and Python parsers.
 //!

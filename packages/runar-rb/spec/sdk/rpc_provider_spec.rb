@@ -70,7 +70,7 @@ RSpec.describe Runar::SDK::RPCProvider do
 
   describe 'live RPC calls (skipped — no node available)' do
     # Integration tests against a real Bitcoin node belong in
-    # integration/ruby/, not here. The tests above verify all behaviour
+    # integration/ruby/, not here. The tests above verify all behavior
     # that does not require network I/O.
   end
 end

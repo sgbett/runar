@@ -26,7 +26,7 @@ RSpec.describe 'Runar::SDK::Signer' do
   describe Runar::SDK::MockSigner do
     subject(:signer) { described_class.new }
 
-    describe 'default behaviour' do
+    describe 'default behavior' do
       it 'returns a 66-character hex public key' do
         pk = signer.get_public_key
         expect(pk).to match(/\A[0-9a-f]{66}\z/)

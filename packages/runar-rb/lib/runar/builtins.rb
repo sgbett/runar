@@ -129,7 +129,7 @@ module Runar
       return 0 if b == 0
 
       r = a % b
-      # Ensure sign matches dividend (Bitcoin Script behaviour)
+      # Ensure sign matches dividend (Bitcoin Script behavior)
       r -= b if r != 0 && (a < 0) != (r < 0)
       r
     end

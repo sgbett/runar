@@ -2,7 +2,7 @@
  * Ruby parser for Rúnar contracts.
  *
  * Parses `.runar.rb` files into the same Rúnar AST that the TypeScript
- * parser produces. Uses a hand-written tokeniser plus recursive descent.
+ * parser produces. Uses a hand-written tokenizer plus recursive descent.
  *
  * Ruby syntax conventions:
  *   - `class Foo < Runar::SmartContract` / `class Foo < Runar::StatefulSmartContract`

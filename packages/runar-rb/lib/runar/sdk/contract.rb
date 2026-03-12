@@ -13,7 +13,7 @@ require_relative 'oppushtx'
 #
 # Handles deployment, method invocation, state tracking, and script
 # construction. Mirrors the Python SDK RunarContract class in structure and
-# behaviour.
+# behavior.
 #
 # Public method names (get_state, set_state, get_locking_script, etc.) mirror
 # the Python and Go SDKs for cross-language consistency. The Naming/AccessorMethodName
