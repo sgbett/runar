@@ -44,6 +44,7 @@ import { makeDiagnostic } from '../errors.js';
 import { parseSolSource } from './01-parse-sol.js';
 import { parseMoveSource } from './01-parse-move.js';
 import { parsePythonSource } from './01-parse-python.js';
+import { parseRubySource } from './01-parse-ruby.js';
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -73,6 +74,9 @@ export function parse(source: string, fileName?: string): ParseResult {
   }
   if (file.endsWith('.runar.py')) {
     return parsePythonSource(source, file);
+  }
+  if (file.endsWith('.runar.rb')) {
+    return parseRubySource(source, file);
   }
 
   // Default: TypeScript parser (for .runar.ts and any unrecognized extension)
