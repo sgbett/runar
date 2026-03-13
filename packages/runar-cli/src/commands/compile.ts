@@ -56,7 +56,8 @@ export async function compileCommand(
 
   // Dynamically import the compiler to avoid hard failures if it's not
   // yet fully built (the compiler package may still be under development).
-  let compile: ((source: string, options?: { fileName?: string }) => unknown) | null = null;
+  type CompileFn = (source: string, options?: { fileName?: string; disableConstantFolding?: boolean }) => unknown;
+  let compile: CompileFn | null = null;
   try {
     // In monorepo/dev mode, prefer the source entry so conformance and CLI
     // runs always reflect the latest compiler implementation.
@@ -64,7 +65,7 @@ export async function compileCommand(
     if (fs.existsSync(sourceEntry)) {
       const compiler = (await import(pathToFileURL(sourceEntry).href)) as Record<string, unknown>;
       if (typeof compiler.compile === 'function') {
-        compile = compiler.compile as (source: string, options?: { fileName?: string }) => unknown;
+        compile = compiler.compile as CompileFn;
       }
     }
 
@@ -73,7 +74,7 @@ export async function compileCommand(
       const moduleName = 'runar-compiler';
       const compiler = (await import(moduleName)) as Record<string, unknown>;
       if (typeof compiler.compile === 'function') {
-        compile = compiler.compile as (source: string, options?: { fileName?: string }) => unknown;
+        compile = compiler.compile as CompileFn;
       }
     }
   } catch {
