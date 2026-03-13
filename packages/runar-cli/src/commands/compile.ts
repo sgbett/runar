@@ -10,6 +10,7 @@ interface CompileOptions {
   output: string;
   ir?: boolean;
   asm?: boolean;
+  disableConstantFolding?: boolean;
 }
 
 interface CompilerDiagnosticLike {
@@ -109,7 +110,7 @@ export async function compileCommand(
 
     let compileResult: CompileResultLike;
     try {
-      compileResult = compile(source, { fileName: resolvedPath }) as CompileResultLike;
+      compileResult = compile(source, { fileName: resolvedPath, disableConstantFolding: options.disableConstantFolding }) as CompileResultLike;
     } catch (err) {
       console.error(`  Compilation error: ${(err as Error).message}`);
       errorCount++;

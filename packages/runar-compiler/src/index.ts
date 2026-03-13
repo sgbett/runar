@@ -37,6 +37,7 @@ import { lowerToStack } from './passes/05-stack-lower.js';
 import { emit } from './passes/06-emit.js';
 import { optimizeStackIR } from './optimizer/peephole.js';
 import { optimizeEC } from './optimizer/anf-ec.js';
+import { foldConstants } from './optimizer/constant-fold.js';
 import { assembleArtifact } from './artifact/assembler.js';
 import type { CompilerDiagnostic } from './errors.js';
 import type { ContractNode, ANFProgram, RunarArtifact } from './ir/index.js';
@@ -60,6 +61,9 @@ export interface CompileOptions {
 
   /** Bake property values into the locking script (replaces placeholders). */
   constructorArgs?: Record<string, bigint | boolean | string>;
+
+  /** If true, skip the ANF constant folding pass. Default: false (folding enabled). */
+  disableConstantFolding?: boolean;
 }
 
 export interface CompileResult {
@@ -241,6 +245,11 @@ export function compile(source: string, options?: CompileOptions): CompileResult
         prop.initialValue = opts.constructorArgs[prop.name];
       }
     }
+  }
+
+  // Pass 4.25: Constant folding (on by default)
+  if (!opts.disableConstantFolding) {
+    anf = foldConstants(anf);
   }
 
   // Pass 4.5: ANF EC Optimizer (always-on)

@@ -75,27 +75,34 @@ const (
 // ---------------------------------------------------------------------------
 
 // CompileFromIR reads an ANF IR JSON file and compiles it to a Rúnar artifact.
-func CompileFromIR(irPath string) (*Artifact, error) {
+func CompileFromIR(irPath string, opts ...CompileOptions) (*Artifact, error) {
 	program, err := ir.LoadIR(irPath)
 	if err != nil {
 		return nil, fmt.Errorf("loading IR: %w", err)
 	}
 
-	return CompileFromProgram(program)
+	return CompileFromProgram(program, opts...)
 }
 
 // CompileFromIRBytes compiles from raw ANF IR JSON bytes.
-func CompileFromIRBytes(data []byte) (*Artifact, error) {
+func CompileFromIRBytes(data []byte, opts ...CompileOptions) (*Artifact, error) {
 	program, err := ir.LoadIRFromBytes(data)
 	if err != nil {
 		return nil, fmt.Errorf("loading IR: %w", err)
 	}
 
-	return CompileFromProgram(program)
+	return CompileFromProgram(program, opts...)
 }
 
 // CompileFromProgram compiles a parsed ANF program to a Rúnar artifact.
-func CompileFromProgram(program *ir.ANFProgram) (*Artifact, error) {
+func CompileFromProgram(program *ir.ANFProgram, opts ...CompileOptions) (*Artifact, error) {
+	o := mergeOptions(opts)
+
+	// Pass 4.25: Constant folding (on by default)
+	if !o.DisableConstantFolding {
+		program = frontend.FoldConstants(program)
+	}
+
 	// EC optimization — algebraic simplification of EC calls
 	program = frontend.OptimizeEC(program)
 
@@ -199,7 +206,7 @@ func assembleArtifact(program *ir.ANFProgram, scriptHex, scriptAsm string, const
 }
 
 // CompileFromSource compiles a .runar.ts source file through all passes to a Rúnar artifact.
-func CompileFromSource(sourcePath string) (*Artifact, error) {
+func CompileFromSource(sourcePath string, opts ...CompileOptions) (*Artifact, error) {
 	source, err := os.ReadFile(sourcePath)
 	if err != nil {
 		return nil, fmt.Errorf("reading source file: %w", err)
@@ -229,15 +236,12 @@ func CompileFromSource(sourcePath string) (*Artifact, error) {
 	// Pass 4: ANF lowering
 	program := frontend.LowerToANF(parseResult.Contract)
 
-	// EC optimization — algebraic simplification of EC calls
-	program = frontend.OptimizeEC(program)
-
-	// Feed into existing compilation pipeline (passes 5-6)
-	return CompileFromProgram(program)
+	// Feed into existing compilation pipeline (passes 4.25+)
+	return CompileFromProgram(program, opts...)
 }
 
 // CompileSourceToIR runs passes 1-4 on a .runar.ts source file and returns the ANF program.
-func CompileSourceToIR(sourcePath string) (*ir.ANFProgram, error) {
+func CompileSourceToIR(sourcePath string, opts ...CompileOptions) (*ir.ANFProgram, error) {
 	source, err := os.ReadFile(sourcePath)
 	if err != nil {
 		return nil, fmt.Errorf("reading source file: %w", err)
@@ -262,6 +266,13 @@ func CompileSourceToIR(sourcePath string) (*ir.ANFProgram, error) {
 	}
 
 	program := frontend.LowerToANF(parseResult.Contract)
+
+	o := mergeOptions(opts)
+	// Pass 4.25: Constant folding (on by default)
+	if !o.DisableConstantFolding {
+		program = frontend.FoldConstants(program)
+	}
+
 	program = frontend.OptimizeEC(program)
 	return program, nil
 }

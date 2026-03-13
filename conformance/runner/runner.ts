@@ -146,7 +146,7 @@ function runTsCompiler(source: string, sourceFile: string): CompilerOutput {
     if (!existsSync(artifactDir)) mkdirSync(artifactDir, { recursive: true });
 
     execSync(
-      `npx tsx ${shellEscape(resolve(__dirname, '../../packages/runar-cli/src/bin.ts'))} compile ${shellEscape(tmpFile)} --ir -o ${shellEscape(artifactDir)}`,
+      `npx tsx ${shellEscape(resolve(__dirname, '../../packages/runar-cli/src/bin.ts'))} compile ${shellEscape(tmpFile)} --ir --disable-constant-folding -o ${shellEscape(artifactDir)}`,
       { timeout: 30_000, encoding: 'utf-8', cwd: resolve(__dirname, '../..') },
     );
 
@@ -213,13 +213,13 @@ function runGoCompiler(source: string, sourceFile: string): CompilerOutput | und
 
     // Get IR output
     const irOutput = execSync(
-      `${binary} --source ${shellEscape(tmpFile)} --emit-ir`,
+      `${binary} --source ${shellEscape(tmpFile)} --emit-ir --disable-constant-folding`,
       { timeout: 30_000, encoding: 'utf-8', cwd: GO_COMPILER_DIR, maxBuffer: 10 * 1024 * 1024 },
     ).trim();
 
     // Get script hex output
     const scriptHexOutput = execSync(
-      `${binary} --source ${shellEscape(tmpFile)} --hex`,
+      `${binary} --source ${shellEscape(tmpFile)} --hex --disable-constant-folding`,
       { timeout: 30_000, encoding: 'utf-8', cwd: GO_COMPILER_DIR, maxBuffer: 10 * 1024 * 1024 },
     ).trim();
 
@@ -261,7 +261,7 @@ function runRustCompiler(source: string, sourceFile: string): CompilerOutput | u
 
     // Get IR output (required for parity checks)
     const irOutput = execSync(
-      `${binary} --source ${shellEscape(tmpFile)} --emit-ir`,
+      `${binary} --source ${shellEscape(tmpFile)} --emit-ir --disable-constant-folding`,
       {
         timeout: 30_000,
         encoding: 'utf-8',
@@ -273,7 +273,7 @@ function runRustCompiler(source: string, sourceFile: string): CompilerOutput | u
 
     // Get script hex output
     const scriptHexOutput = execSync(
-      `${binary} --source ${shellEscape(tmpFile)} --hex`,
+      `${binary} --source ${shellEscape(tmpFile)} --hex --disable-constant-folding`,
       {
         timeout: 30_000,
         encoding: 'utf-8',
@@ -336,13 +336,13 @@ function runPythonCompiler(source: string, sourceFile: string): CompilerOutput |
 
     // Get IR output
     const irOutput = execSync(
-      `${binary} --source ${shellEscape(tmpFile)} --emit-ir`,
+      `${binary} --source ${shellEscape(tmpFile)} --emit-ir --disable-constant-folding`,
       { timeout: 30_000, encoding: 'utf-8', cwd: PYTHON_COMPILER_DIR, maxBuffer: 10 * 1024 * 1024 },
     ).trim();
 
     // Get script hex output
     const scriptHexOutput = execSync(
-      `${binary} --source ${shellEscape(tmpFile)} --hex`,
+      `${binary} --source ${shellEscape(tmpFile)} --hex --disable-constant-folding`,
       { timeout: 30_000, encoding: 'utf-8', cwd: PYTHON_COMPILER_DIR, maxBuffer: 10 * 1024 * 1024 },
     ).trim();
 

@@ -155,6 +155,12 @@ def _lower_to_anf(contract: Any) -> ANFProgram:
 # Backend stub imports
 # ---------------------------------------------------------------------------
 
+def _fold_constants(program: ANFProgram) -> ANFProgram:
+    """Constant folding: evaluate compile-time-known expressions (Pass 4.25)."""
+    from runar_compiler.frontend.constant_fold import fold_constants
+    return fold_constants(program)
+
+
 def _optimize_ec(program: ANFProgram) -> ANFProgram:
     """Optimize EC operations in ANF IR (Pass 4.5)."""
     from runar_compiler.frontend.anf_optimize import optimize_ec
@@ -195,20 +201,24 @@ def _load_ir_from_bytes(data: bytes) -> ANFProgram:
 # Compilation pipeline
 # ---------------------------------------------------------------------------
 
-def compile_from_ir(ir_path: str) -> Artifact:
+def compile_from_ir(ir_path: str, disable_constant_folding: bool = False) -> Artifact:
     """Read an ANF IR JSON file and compile it to a Runar artifact."""
     program = _load_ir(ir_path)
-    return compile_from_program(program)
+    return compile_from_program(program, disable_constant_folding=disable_constant_folding)
 
 
-def compile_from_ir_bytes(data: bytes) -> Artifact:
+def compile_from_ir_bytes(data: bytes, disable_constant_folding: bool = False) -> Artifact:
     """Compile from raw ANF IR JSON bytes."""
     program = _load_ir_from_bytes(data)
-    return compile_from_program(program)
+    return compile_from_program(program, disable_constant_folding=disable_constant_folding)
 
 
-def compile_from_program(program: ANFProgram) -> Artifact:
+def compile_from_program(program: ANFProgram, disable_constant_folding: bool = False) -> Artifact:
     """Compile a parsed ANF program to a Runar artifact."""
+    # Pass 4.25: Constant folding (on by default)
+    if not disable_constant_folding:
+        program = _fold_constants(program)
+
     # Pass 4.5: EC optimization
     program = _optimize_ec(program)
 
@@ -232,7 +242,7 @@ def compile_from_program(program: ANFProgram) -> Artifact:
     )
 
 
-def compile_from_source(source_path: str) -> Artifact:
+def compile_from_source(source_path: str, disable_constant_folding: bool = False) -> Artifact:
     """Compile a source file through all passes to a Runar artifact.
 
     Supports .runar.ts, .runar.sol, .runar.move, .runar.go, .runar.rs,
@@ -260,14 +270,11 @@ def compile_from_source(source_path: str) -> Artifact:
     # Pass 4: ANF lowering
     program = _lower_to_anf(parse_result.contract)
 
-    # Pass 4.5: EC optimization
-    program = _optimize_ec(program)
-
-    # Feed into existing compilation pipeline (passes 5-6)
-    return compile_from_program(program)
+    # Feed into existing compilation pipeline (passes 4.25-6)
+    return compile_from_program(program, disable_constant_folding=disable_constant_folding)
 
 
-def compile_source_to_ir(source_path: str) -> ANFProgram:
+def compile_source_to_ir(source_path: str, disable_constant_folding: bool = False) -> ANFProgram:
     """Run passes 1-4 on a source file and return the ANF program."""
     source = _read_file(source_path)
 
@@ -286,6 +293,10 @@ def compile_source_to_ir(source_path: str) -> ANFProgram:
         raise CompilationError("type check errors:\n  " + "\n  ".join(tc_result.errors))
 
     program = _lower_to_anf(parse_result.contract)
+
+    # Pass 4.25: Constant folding (on by default)
+    if not disable_constant_folding:
+        program = _fold_constants(program)
 
     # Pass 4.5: EC optimization
     program = _optimize_ec(program)

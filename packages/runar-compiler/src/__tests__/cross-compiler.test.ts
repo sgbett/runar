@@ -500,8 +500,8 @@ describe.skipIf(!hasGo)('Cross-compiler conformance: Go output vs golden hex', (
       const source = readFileSync(test.sourceFile, 'utf-8');
       const expectedHex = readFileSync(test.hexFile, 'utf-8').trim();
 
-      // Compile through TS compiler
-      const result = compile(source);
+      // Compile through TS compiler (disable constant folding to match golden files)
+      const result = compile(source, { disableConstantFolding: true });
       if (!result.success) {
         throw new Error(tsCompileErrors(test.name, result.diagnostics));
       }
@@ -599,7 +599,8 @@ describe.skipIf(!hasRust || !rustBinaryPath)('Cross-compiler conformance: Rust o
       const source = readFileSync(test.sourceFile, 'utf-8');
       const expectedHex = readFileSync(test.hexFile, 'utf-8').trim();
 
-      const result = compile(source);
+      // Disable constant folding to match golden files
+      const result = compile(source, { disableConstantFolding: true });
       if (!result.success) {
         throw new Error(tsCompileErrors(test.name, result.diagnostics));
       }

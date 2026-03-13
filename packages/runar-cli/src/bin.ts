@@ -29,6 +29,7 @@ program
   .option('-o, --output <dir>', 'output directory', './artifacts')
   .option('--ir', 'include IR in artifact')
   .option('--asm', 'print ASM to stdout')
+  .option('--disable-constant-folding', 'disable ANF constant folding pass')
   .action(compileCommand);
 
 program

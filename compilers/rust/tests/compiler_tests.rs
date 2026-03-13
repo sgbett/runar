@@ -1,6 +1,6 @@
 //! Integration tests for the Rúnar Rust compiler.
 
-use runar_compiler_rust::{compile_from_ir_str, compile_from_source_str};
+use runar_compiler_rust::{compile_from_ir_str, compile_from_ir_str_with_options, compile_from_source_str, compile_from_source_str_with_options, CompileOptions};
 
 // ---------------------------------------------------------------------------
 // Test: IR loading — Basic P2PKH
@@ -490,6 +490,8 @@ fn test_all_conformance_tests() {
         "stateful",
     ];
 
+    let no_fold = CompileOptions { disable_constant_folding: true };
+
     for dir in &test_dirs {
         let ir_json = load_conformance_ir(dir);
         let artifact = compile_from_ir_str(&ir_json)
@@ -511,10 +513,13 @@ fn test_all_conformance_tests() {
             dir
         );
 
-        // Compare against golden expected-script.hex
+        // Compare against golden expected-script.hex (with folding disabled to
+        // match the golden files which were generated without constant folding)
         if let Some(expected_hex) = load_expected_script_hex(dir) {
+            let artifact_no_fold = compile_from_ir_str_with_options(&ir_json, &no_fold)
+                .unwrap_or_else(|e| panic!("compilation (no-fold) failed for {}: {}", dir, e));
             assert_eq!(
-                artifact.script, expected_hex,
+                artifact_no_fold.script, expected_hex,
                 "{}: IR-compiled script hex does not match golden file",
                 dir
             );
@@ -885,6 +890,8 @@ fn test_source_compile_all_conformance() {
         "stateful",
     ];
 
+    let no_fold = CompileOptions { disable_constant_folding: true };
+
     for dir in &test_dirs {
         let source = conformance_source(dir);
         let artifact = compile_from_source_str(&source, Some(&format!("{}.runar.ts", dir)))
@@ -906,10 +913,13 @@ fn test_source_compile_all_conformance() {
             dir
         );
 
-        // Compare against golden expected-script.hex
+        // Compare against golden expected-script.hex (with folding disabled to
+        // match the golden files which were generated without constant folding)
         if let Some(expected_hex) = load_expected_script_hex(dir) {
+            let artifact_no_fold = compile_from_source_str_with_options(&source, Some(&format!("{}.runar.ts", dir)), &no_fold)
+                .unwrap_or_else(|e| panic!("source compilation (no-fold) failed for {}: {}", dir, e));
             assert_eq!(
-                artifact.script, expected_hex,
+                artifact_no_fold.script, expected_hex,
                 "{}: source-compiled script hex does not match golden file",
                 dir
             );
@@ -977,8 +987,9 @@ fn test_source_vs_ir_both_produce_output() {
 // ---------------------------------------------------------------------------
 
 fn conformance_golden_test(test_name: &str) {
+    let no_fold = CompileOptions { disable_constant_folding: true };
     let source = conformance_source(test_name);
-    let artifact = compile_from_source_str(&source, Some(&format!("{}.runar.ts", test_name)))
+    let artifact = compile_from_source_str_with_options(&source, Some(&format!("{}.runar.ts", test_name)), &no_fold)
         .unwrap_or_else(|e| panic!("[{}] source compilation failed: {}", test_name, e));
 
     assert!(
