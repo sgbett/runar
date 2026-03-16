@@ -6,7 +6,7 @@ import { describe, it, expect } from 'vitest';
 import { parse } from '../passes/01-parse.js';
 import { parseRustSource } from '../passes/01-parse-rust.js';
 import { readFileSync, existsSync, readdirSync } from 'fs';
-import { join, basename } from 'path';
+import { join } from 'path';
 
 // ---------------------------------------------------------------------------
 // Conformance tests
@@ -123,7 +123,7 @@ describe('Rust parser: example contracts', () => {
       if (errors.length > 0) {
         console.error(`Parse errors in ${name}:`);
         for (const e of errors) {
-          console.error(`  Line ${e.location?.line ?? '?'}: ${e.message}`);
+          console.error(`  Line ${e.loc?.line ?? '?'}: ${e.message}`);
         }
       }
       expect(errors).toEqual([]);
