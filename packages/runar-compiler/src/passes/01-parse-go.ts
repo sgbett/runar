@@ -1069,6 +1069,18 @@ class GoParser extends ParserCore<GoToken> {
       return expr;
     }
 
+    // Array literal: [expr, expr, ...]
+    if (t.type === '[') {
+      this.advance();
+      const elements: Expression[] = [];
+      while (this.current().type !== ']' && this.current().type !== 'eof') {
+        elements.push(this.parseExpression());
+        if (this.current().type === ',') this.advance();
+      }
+      this.expect(']');
+      return { kind: 'array_literal', elements };
+    }
+
     // Identifier — handles runar.X, receiver.Field, plain idents
     if (t.type === 'ident') {
       this.advance();

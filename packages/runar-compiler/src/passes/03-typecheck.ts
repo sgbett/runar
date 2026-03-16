@@ -572,6 +572,23 @@ class TypeChecker {
         }
         return BIGINT;
       }
+
+      case 'array_literal': {
+        if (expr.elements.length === 0) {
+          return '<unknown>[]';
+        }
+        const elemType = this.inferExprType(expr.elements[0]!, env);
+        for (let i = 1; i < expr.elements.length; i++) {
+          const et = this.inferExprType(expr.elements[i]!, env);
+          if (!isSubtype(et, elemType) && et !== '<unknown>') {
+            this.errors.push(makeDiagnostic(
+              `Array element type mismatch: expected '${elemType}', got '${et}'`,
+              'error',
+            ));
+          }
+        }
+        return `${elemType}[]`;
+      }
     }
   }
 
@@ -1142,5 +1159,7 @@ function inferExprTypeStatic(expr: Expression): TType {
     case 'increment_expr':
     case 'decrement_expr':
       return BIGINT;
+    case 'array_literal':
+      return '<unknown>[]';
   }
 }

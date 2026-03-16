@@ -266,6 +266,8 @@ def collect_refs(value: ANFValue) -> list[str]:
     elif kind == "add_raw_output":
         refs.append(value.satoshis)
         refs.append(value.script_bytes)
+    elif kind == "array_literal":
+        refs.extend(value.elements)
 
     return refs
 
@@ -526,6 +528,8 @@ class _LoweringContext:
             self._lower_add_output(name, value.satoshis, value.state_values, value.preimage, binding_index, last_uses)
         elif kind == "add_raw_output":
             self._lower_add_raw_output(name, value.satoshis, value.script_bytes, binding_index, last_uses)
+        elif kind == "array_literal":
+            self._lower_array_literal(name, value.elements, binding_index, last_uses)
 
     # -----------------------------------------------------------------
     # Individual lowering methods
@@ -685,6 +689,11 @@ class _LoweringContext:
         # super() in constructor
         if func_name == "super":
             self.sm.push(binding_name)
+            return
+
+        # checkMultiSig(sigs, pks) -- special handling for OP_CHECKMULTISIG.
+        if func_name == "checkMultiSig" and len(args) == 2:
+            self._lower_check_multi_sig(binding_name, args, binding_index, last_uses)
             return
 
         if func_name == "reverseBytes":
@@ -1789,6 +1798,63 @@ class _LoweringContext:
 
         # Rename top to binding name
         self.sm.pop()
+        self.sm.push(binding_name)
+        self._track_depth()
+
+    # -----------------------------------------------------------------
+    # array_literal
+    # -----------------------------------------------------------------
+
+    def _lower_array_literal(self, binding_name: str, elements: list[str],
+                              binding_index: int, last_uses: dict[str, int]) -> None:
+        """Lower an array_literal by bringing each element to the top of the stack.
+
+        The elements remain as individual stack entries; the binding name tracks
+        the last element so that callers (e.g. checkMultiSig) can find them.
+        """
+        for elem in elements:
+            is_last = self._is_last_use(elem, binding_index, last_uses)
+            self.bring_to_top(elem, is_last)
+            self.sm.pop()
+            self.sm.push("")  # anonymous stack entry for intermediate elements
+        # Rename the topmost entry to the binding name
+        if elements:
+            self.sm.pop()
+        self.sm.push(binding_name)
+        self._track_depth()
+
+    # -----------------------------------------------------------------
+    # checkMultiSig
+    # -----------------------------------------------------------------
+
+    def _lower_check_multi_sig(self, binding_name: str, args: list[str],
+                                binding_index: int, last_uses: dict[str, int]) -> None:
+        """Emit OP_CHECKMULTISIG with the OP_0 dummy workaround.
+
+        Bitcoin Script stack layout:
+          OP_0 <sig1> ... <sigN> <nSigs> <pk1> ... <pkM> <nPKs> OP_CHECKMULTISIG
+
+        The two args reference array_literal bindings whose individual elements
+        are already on the stack.
+        """
+        # Push OP_0 dummy (Bitcoin CHECKMULTISIG off-by-one bug workaround)
+        self.emit_op(StackOp(op="push", value=big_int_push(0)))
+        self.sm.push("")
+
+        # Bring sigs array ref to top
+        sigs_is_last = self._is_last_use(args[0], binding_index, last_uses)
+        self.bring_to_top(args[0], sigs_is_last)
+
+        # Bring pks array ref to top
+        pks_is_last = self._is_last_use(args[1], binding_index, last_uses)
+        self.bring_to_top(args[1], pks_is_last)
+
+        # Pop all args + dummy
+        self.sm.pop()  # pks
+        self.sm.pop()  # sigs
+        self.sm.pop()  # OP_0 dummy
+
+        self.emit_op(StackOp(op="opcode", code="OP_CHECKMULTISIG"))
         self.sm.push(binding_name)
         self._track_depth()
 

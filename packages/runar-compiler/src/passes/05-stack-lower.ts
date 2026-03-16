@@ -296,6 +296,9 @@ function collectRefs(value: ANFValue): string[] {
     case 'deserialize_state':
       refs.push(value.preimage);
       break;
+    case 'array_literal':
+      refs.push(...value.elements);
+      break;
   }
 
   return refs;
@@ -321,6 +324,8 @@ class LoweringContext {
   private _insideBranch = false;
   /** Debug: source location to attach to next emitted StackOps. */
   private currentSourceLoc: { file: string; line: number; column: number } | undefined;
+  /** Tracks the number of elements in array literal bindings for checkMultiSig. */
+  private arrayLengths: Map<string, number> = new Map();
 
   constructor(
     params: string[],
@@ -620,6 +625,9 @@ class LoweringContext {
         break;
       case 'add_raw_output':
         this.lowerAddRawOutput(name, value.satoshis, value.scriptBytes, bindingIndex, lastUses);
+        break;
+      case 'array_literal':
+        this.lowerArrayLiteral(name, value.elements, bindingIndex, lastUses);
         break;
     }
   }
@@ -970,6 +978,11 @@ class LoweringContext {
       return;
     }
 
+    if (func === 'checkMultiSig') {
+      this.lowerCheckMultiSig(bindingName, args, bindingIndex, lastUses);
+      return;
+    }
+
     // computeStateOutputHash(preimage, stateBytes) — builds the full BIP-143
     // output serialization for a single-output stateful continuation, then hashes it.
     // Extracts codePart and amount from the preimage's scriptCode field, builds:
@@ -1038,6 +1051,92 @@ class LoweringContext {
       this.stackMap.push(bindingName);
     }
 
+    this.trackDepth();
+  }
+
+  /**
+   * Lower an array literal to stack. Each element is brought to the top
+   * in order. The binding name represents the array as a whole on the stack.
+   * The element count is recorded in `arrayLengths` so that consumers
+   * (like checkMultiSig) can emit the count push.
+   */
+  private lowerArrayLiteral(
+    bindingName: string,
+    elements: string[],
+    bindingIndex: number,
+    lastUses: Map<string, number>,
+  ): void {
+    // Bring each element to the top in order
+    for (const elem of elements) {
+      const isLast = this.isLastUse(elem, bindingIndex, lastUses);
+      this.bringToTop(elem, isLast);
+    }
+
+    // Pop all elements from the stack map (they're consumed into the array)
+    for (let i = 0; i < elements.length; i++) {
+      this.stackMap.pop();
+    }
+
+    // Push the array binding name — represents the N elements now on stack
+    this.stackMap.push(bindingName);
+    // Record the array length for checkMultiSig
+    this.arrayLengths.set(bindingName, elements.length);
+    this.trackDepth();
+  }
+
+  /**
+   * Lower checkMultiSig([sig1, sig2, ...], [pk1, pk2, ...]) to Bitcoin Script.
+   *
+   * OP_CHECKMULTISIG expects the stack layout:
+   *   OP_0 <sig1> <sig2> ... <nSigs> <pk1> <pk2> ... <nPKs> OP_CHECKMULTISIG
+   *
+   * The args[0] is the sigs array binding, args[1] is the pubkeys array binding.
+   * Each was lowered as an array_literal, so the individual elements are already
+   * on the stack. We need to insert the OP_0 dummy, counts, and the opcode.
+   */
+  private lowerCheckMultiSig(
+    bindingName: string,
+    args: string[],
+    bindingIndex: number,
+    lastUses: Map<string, number>,
+  ): void {
+    if (args.length !== 2) {
+      throw new Error(`checkMultiSig expects 2 arguments, got ${args.length}`);
+    }
+
+    const sigsRef = args[0]!;
+    const pksRef = args[1]!;
+    const nSigs = this.arrayLengths.get(sigsRef) ?? 1;
+    const nPKs = this.arrayLengths.get(pksRef) ?? 1;
+
+    // Push OP_0 dummy (required by Bitcoin's OP_CHECKMULTISIG bug)
+    this.emitOp({ op: 'push', value: 0n });
+    this.stackMap.push(null);
+
+    // Bring sigs array to top (the individual elements are treated as one item)
+    const sigsLast = this.isLastUse(sigsRef, bindingIndex, lastUses);
+    this.bringToTop(sigsRef, sigsLast);
+
+    // Push nSigs count
+    this.emitOp({ op: 'push', value: BigInt(nSigs) });
+    this.stackMap.push(null);
+
+    // Bring pubkeys array to top
+    const pksLast = this.isLastUse(pksRef, bindingIndex, lastUses);
+    this.bringToTop(pksRef, pksLast);
+
+    // Push nPKs count
+    this.emitOp({ op: 'push', value: BigInt(nPKs) });
+    this.stackMap.push(null);
+
+    // Pop everything: OP_0 + sigs + nSigs + pks + nPKs = 2 + nSigs + nPKs + 2 items
+    // But on our stack map they're: null(OP_0), sigsRef, null(nSigs), pksRef, null(nPKs)
+    for (let i = 0; i < 5; i++) {
+      this.stackMap.pop();
+    }
+
+    this.emitOp({ op: 'opcode', code: 'OP_CHECKMULTISIG' });
+    this.stackMap.push(bindingName);
     this.trackDepth();
   }
 

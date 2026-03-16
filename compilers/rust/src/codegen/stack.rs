@@ -309,6 +309,9 @@ fn collect_refs(value: &ANFValue) -> Vec<String> {
             refs.push(satoshis.clone());
             refs.push(script_bytes.clone());
         }
+        ANFValue::ArrayLiteral { elements } => {
+            refs.extend(elements.iter().cloned());
+        }
     }
     refs
 }
@@ -626,6 +629,9 @@ impl LoweringContext {
             ANFValue::AddRawOutput { satoshis, script_bytes } => {
                 self.lower_add_raw_output(name, satoshis, script_bytes, binding_index, last_uses);
             }
+            ANFValue::ArrayLiteral { elements } => {
+                self.lower_array_literal(name, elements, binding_index, last_uses);
+            }
         }
     }
 
@@ -848,6 +854,12 @@ impl LoweringContext {
         // Constructor args are already on the stack.
         if func_name == "super" {
             self.sm.push(binding_name);
+            return;
+        }
+
+        // checkMultiSig(sigs, pks) — special handling for OP_CHECKMULTISIG.
+        if func_name == "checkMultiSig" && args.len() == 2 {
+            self.lower_check_multi_sig(binding_name, args, binding_index, last_uses);
             return;
         }
 
@@ -1981,6 +1993,66 @@ impl LoweringContext {
 
         // Rename top to binding name
         self.sm.pop();
+        self.sm.push(binding_name);
+        self.track_depth();
+    }
+
+    fn lower_array_literal(
+        &mut self,
+        binding_name: &str,
+        elements: &[String],
+        binding_index: usize,
+        last_uses: &HashMap<String, usize>,
+    ) {
+        // An array_literal brings each element to the top of the stack.
+        // The elements remain as individual stack entries; the binding name tracks
+        // the last element so that callers (e.g. checkMultiSig) can find them.
+        for elem in elements {
+            let is_last = self.is_last_use(elem, binding_index, last_uses);
+            self.bring_to_top(elem, is_last);
+            self.sm.pop();
+            self.sm.push(""); // anonymous stack entry for intermediate elements
+        }
+        // Rename the topmost entry to the binding name
+        if !elements.is_empty() {
+            self.sm.pop();
+        }
+        self.sm.push(binding_name);
+        self.track_depth();
+    }
+
+    fn lower_check_multi_sig(
+        &mut self,
+        binding_name: &str,
+        args: &[String],
+        binding_index: usize,
+        last_uses: &HashMap<String, usize>,
+    ) {
+        // checkMultiSig(sigs, pks) — emits the OP_CHECKMULTISIG sequence.
+        // Bitcoin Script stack layout:
+        //   OP_0 <sig1> ... <sigN> <nSigs> <pk1> ... <pkM> <nPKs> OP_CHECKMULTISIG
+        //
+        // The two args reference array_literal bindings whose individual elements
+        // are already on the stack.
+
+        // Push OP_0 dummy (Bitcoin CHECKMULTISIG off-by-one bug workaround)
+        self.emit_op(StackOp::Push(PushValue::Int(0)));
+        self.sm.push("");
+
+        // Bring sigs array ref to top
+        let sigs_is_last = self.is_last_use(&args[0], binding_index, last_uses);
+        self.bring_to_top(&args[0], sigs_is_last);
+
+        // Bring pks array ref to top
+        let pks_is_last = self.is_last_use(&args[1], binding_index, last_uses);
+        self.bring_to_top(&args[1], pks_is_last);
+
+        // Pop all args + dummy
+        self.sm.pop(); // pks
+        self.sm.pop(); // sigs
+        self.sm.pop(); // OP_0 dummy
+
+        self.emit_op(StackOp::Opcode("OP_CHECKMULTISIG".to_string()));
         self.sm.push(binding_name);
         self.track_depth();
     }

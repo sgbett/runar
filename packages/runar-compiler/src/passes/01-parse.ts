@@ -909,6 +909,12 @@ function parseExpression(
       return parseExpression(nnExpr.getExpression(), file, errors);
     }
 
+    case SyntaxKind.ArrayLiteralExpression: {
+      const arrayLit = node.asKindOrThrow(SyntaxKind.ArrayLiteralExpression);
+      const elements = arrayLit.getElements().map(elem => parseExpression(elem, file, errors));
+      return { kind: 'array_literal', elements };
+    }
+
     default:
       errors.push(makeDiagnostic(
         `Unsupported expression kind: ${node.getKindName()} ('${node.getText().slice(0, 50)}')`,

@@ -150,6 +150,11 @@ export interface AddRawOutput {
   scriptBytes: string;   // reference to a temp holding ByteString script
 }
 
+export interface ArrayLiteral {
+  kind: 'array_literal';
+  elements: string[];    // references to temp names
+}
+
 export type ANFValue =
   | LoadParam
   | LoadProp
@@ -166,4 +171,5 @@ export type ANFValue =
   | CheckPreimage
   | DeserializeState
   | AddOutput
-  | AddRawOutput;
+  | AddRawOutput
+  | ArrayLiteral;

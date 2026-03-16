@@ -405,6 +405,9 @@ function foldValue(value: ANFValue, env: ConstEnv): ANFValue {
 
     case 'add_raw_output':
       return value;
+
+    case 'array_literal':
+      return value;
   }
 }
 
@@ -530,6 +533,9 @@ function collectRefsFromValue(value: ANFValue, refs: Set<string>): void {
     case 'add_raw_output':
       refs.add(value.satoshis);
       refs.add(value.scriptBytes);
+      break;
+    case 'array_literal':
+      for (const elem of value.elements) refs.add(elem);
       break;
   }
 }

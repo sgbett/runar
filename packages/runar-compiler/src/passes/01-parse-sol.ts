@@ -837,6 +837,16 @@ class SolParser {
       this.expect(')');
       return expr;
     }
+    if (t.type === '[') {
+      this.advance();
+      const elements: Expression[] = [];
+      while (this.current().type !== ']' && this.current().type !== 'eof') {
+        elements.push(this.parseExpression());
+        if (this.current().type === ',') this.advance();
+      }
+      this.expect(']');
+      return { kind: 'array_literal', elements };
+    }
     if (t.type === 'ident') {
       this.advance();
       return { kind: 'identifier', name: t.value };

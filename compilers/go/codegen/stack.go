@@ -288,6 +288,8 @@ func collectRefs(value *ir.ANFValue) []string {
 	case "add_raw_output":
 		refs = append(refs, value.Satoshis)
 		refs = append(refs, value.ScriptBytes)
+	case "array_literal":
+		refs = append(refs, value.Elements...)
 	}
 
 	return refs
@@ -575,6 +577,8 @@ func (ctx *loweringContext) lowerBinding(binding *ir.ANFBinding, bindingIndex in
 		ctx.lowerAddOutput(name, value.Satoshis, value.StateValues, value.Preimage, bindingIndex, lastUses)
 	case "add_raw_output":
 		ctx.lowerAddRawOutput(name, value.Satoshis, value.ScriptBytes, bindingIndex, lastUses)
+	case "array_literal":
+		ctx.lowerArrayLiteral(name, value.Elements, bindingIndex, lastUses)
 	}
 }
 
@@ -751,6 +755,15 @@ func (ctx *loweringContext) lowerCall(bindingName, funcName string, args []strin
 	// Constructor args are already on the stack.
 	if funcName == "super" {
 		ctx.sm.push(bindingName)
+		return
+	}
+
+	// checkMultiSig(sigs, pks) — special handling for OP_CHECKMULTISIG.
+	// The two args are array_literal bindings whose individual elements are already
+	// on the stack from lowerArrayLiteral. We emit:
+	//   OP_0 <sig1> ... <sigN> <nSigs> <pk1> ... <pkM> <nPKs> OP_CHECKMULTISIG
+	if funcName == "checkMultiSig" && len(args) == 2 {
+		ctx.lowerCheckMultiSig(bindingName, args, bindingIndex, lastUses)
 		return
 	}
 
@@ -1986,6 +1999,58 @@ func (ctx *loweringContext) lowerAddRawOutput(bindingName, satoshis, scriptBytes
 
 	// Rename top to binding name
 	ctx.sm.pop()
+	ctx.sm.push(bindingName)
+	ctx.trackDepth()
+}
+
+func (ctx *loweringContext) lowerArrayLiteral(bindingName string, elements []string, bindingIndex int, lastUses map[string]int) {
+	// An array_literal brings each element to the top of the stack.
+	// The elements remain as individual stack entries — the binding name tracks
+	// the last element so that callers (e.g. checkMultiSig) can find them.
+	for _, elem := range elements {
+		isLast := ctx.isLastUse(elem, bindingIndex, lastUses)
+		ctx.bringToTop(elem, isLast)
+		ctx.sm.pop()
+		ctx.sm.push("") // anonymous stack entry for intermediate elements
+	}
+	// Rename the topmost entry to the binding name
+	if len(elements) > 0 {
+		ctx.sm.pop()
+	}
+	ctx.sm.push(bindingName)
+	ctx.trackDepth()
+}
+
+func (ctx *loweringContext) lowerCheckMultiSig(bindingName string, args []string, bindingIndex int, lastUses map[string]int) {
+	// checkMultiSig(sigs, pks) — emits the OP_CHECKMULTISIG sequence.
+	// Bitcoin Script stack layout:
+	//   OP_0 <sig1> ... <sigN> <nSigs> <pk1> ... <pkM> <nPKs> OP_CHECKMULTISIG
+	//
+	// The two args reference array_literal bindings. Each array_literal has
+	// already placed its individual elements on the stack. Here we:
+	// 1. Push OP_0 dummy (Bitcoin CHECKMULTISIG off-by-one bug workaround)
+	// 2. Bring the sigs ref to top
+	// 3. Bring the pks ref to top
+	// 4. Emit OP_CHECKMULTISIG
+
+	// Push OP_0 dummy
+	ctx.emitOp(StackOp{Op: "push", Value: bigIntPush(0)})
+	ctx.sm.push("")
+
+	// Bring sigs array ref to top
+	sigsIsLast := ctx.isLastUse(args[0], bindingIndex, lastUses)
+	ctx.bringToTop(args[0], sigsIsLast)
+
+	// Bring pks array ref to top
+	pksIsLast := ctx.isLastUse(args[1], bindingIndex, lastUses)
+	ctx.bringToTop(args[1], pksIsLast)
+
+	// Pop all args + dummy
+	ctx.sm.pop() // pks
+	ctx.sm.pop() // sigs
+	ctx.sm.pop() // OP_0 dummy
+
+	ctx.emitOp(StackOp{Op: "opcode", Code: "OP_CHECKMULTISIG"})
 	ctx.sm.push(bindingName)
 	ctx.trackDepth()
 }

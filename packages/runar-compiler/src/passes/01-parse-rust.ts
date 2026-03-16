@@ -1087,6 +1087,18 @@ class RustParser extends ParserCore<RustToken> {
       return expr;
     }
 
+    // Array literal: [expr, expr, ...]
+    if (t.type === '[') {
+      this.advance();
+      const elements: Expression[] = [];
+      while (this.current().type !== ']' && this.current().type !== 'eof') {
+        elements.push(this.parseExpression());
+        if (this.current().type === ',') this.advance();
+      }
+      this.expect(']');
+      return { kind: 'array_literal', elements };
+    }
+
     // self keyword
     if (t.type === 'self') {
       this.advance();

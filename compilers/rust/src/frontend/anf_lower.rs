@@ -1637,6 +1637,9 @@ fn remap_value_refs(value: &ANFValue, map: &HashMap<String, String>) -> ANFValue
             satoshis: r(satoshis),
             script_bytes: r(script_bytes),
         },
+        ANFValue::ArrayLiteral { elements } => ANFValue::ArrayLiteral {
+            elements: elements.iter().map(|e| r(e)).collect(),
+        },
         ANFValue::If { cond, then, else_branch } => ANFValue::If {
             cond: r(cond),
             then: then.clone(),

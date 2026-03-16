@@ -445,6 +445,11 @@ fn collect_refs_from_value(value: &ANFValue, refs: &mut HashSet<String>) {
             refs.insert(satoshis.clone());
             refs.insert(script_bytes.clone());
         }
+        ANFValue::ArrayLiteral { elements } => {
+            for elem in elements {
+                refs.insert(elem.clone());
+            }
+        }
     }
 }
 

@@ -681,6 +681,11 @@ function lowerExprToRef(expr: Expression, ctx: LoweringContext): string {
 
     case 'decrement_expr':
       return lowerDecrementExpr(expr, ctx);
+
+    case 'array_literal': {
+      const elementRefs = expr.elements.map(elem => lowerExprToRef(elem, ctx));
+      return ctx.emit({ kind: 'array_literal', elements: elementRefs });
+    }
   }
 }
 
