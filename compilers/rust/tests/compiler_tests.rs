@@ -482,12 +482,32 @@ fn load_expected_script_hex(test_name: &str) -> Option<String> {
 fn test_all_conformance_tests() {
     let test_dirs = [
         "arithmetic",
+        "auction",
         "basic-p2pkh",
+        "blake3",
         "boolean-logic",
         "bounded-loop",
+        "convergence-proof",
+        "covenant-vault",
+        "ec-demo",
+        "ec-primitives",
+        "escrow",
+        "function-patterns",
         "if-else",
+        "if-without-else",
+        "math-demo",
         "multi-method",
+        "oracle-price",
+        "post-quantum-slhdsa",
+        "post-quantum-wallet",
+        "post-quantum-wots",
+        "property-initializers",
+        "schnorr-zkp",
+        "sphincs-wallet",
         "stateful",
+        "stateful-counter",
+        "token-ft",
+        "token-nft",
     ];
 
     let no_fold = CompileOptions { disable_constant_folding: true };
@@ -880,14 +900,31 @@ fn test_source_compile_stateful() {
 
 #[test]
 fn test_source_compile_all_conformance() {
+    // Only directories that have a .runar.ts source file (20 of 27).
+    // The remaining 7 (auction, blake3, covenant-vault, escrow, schnorr-zkp,
+    // token-ft, token-nft) only have source.json and are covered by the
+    // IR-based test_all_conformance_tests instead.
     let test_dirs = [
         "arithmetic",
         "basic-p2pkh",
         "boolean-logic",
         "bounded-loop",
+        "convergence-proof",
+        "ec-demo",
+        "ec-primitives",
+        "function-patterns",
         "if-else",
+        "if-without-else",
+        "math-demo",
         "multi-method",
+        "oracle-price",
+        "post-quantum-slhdsa",
+        "post-quantum-wallet",
+        "post-quantum-wots",
+        "property-initializers",
+        "sphincs-wallet",
         "stateful",
+        "stateful-counter",
     ];
 
     let no_fold = CompileOptions { disable_constant_folding: true };
@@ -980,7 +1017,7 @@ fn test_source_vs_ir_both_produce_output() {
 }
 
 // ---------------------------------------------------------------------------
-// Conformance golden-file parity tests (all 9 test cases)
+// Conformance golden-file parity tests (all 20 source-based test cases)
 //
 // Each test compiles the `.runar.ts` source via compile_from_source_str()
 // and compares the resulting script hex against expected-script.hex.
@@ -1067,6 +1104,61 @@ fn test_conformance_golden_post_quantum_wots() {
 #[test]
 fn test_conformance_golden_post_quantum_slhdsa() {
     conformance_golden_test("post-quantum-slhdsa");
+}
+
+#[test]
+fn test_conformance_golden_convergence_proof() {
+    conformance_golden_test("convergence-proof");
+}
+
+#[test]
+fn test_conformance_golden_ec_demo() {
+    conformance_golden_test("ec-demo");
+}
+
+#[test]
+fn test_conformance_golden_ec_primitives() {
+    conformance_golden_test("ec-primitives");
+}
+
+#[test]
+fn test_conformance_golden_function_patterns() {
+    conformance_golden_test("function-patterns");
+}
+
+#[test]
+fn test_conformance_golden_if_without_else() {
+    conformance_golden_test("if-without-else");
+}
+
+#[test]
+fn test_conformance_golden_math_demo() {
+    conformance_golden_test("math-demo");
+}
+
+#[test]
+fn test_conformance_golden_oracle_price() {
+    conformance_golden_test("oracle-price");
+}
+
+#[test]
+fn test_conformance_golden_post_quantum_wallet() {
+    conformance_golden_test("post-quantum-wallet");
+}
+
+#[test]
+fn test_conformance_golden_property_initializers() {
+    conformance_golden_test("property-initializers");
+}
+
+#[test]
+fn test_conformance_golden_sphincs_wallet() {
+    conformance_golden_test("sphincs-wallet");
+}
+
+#[test]
+fn test_conformance_golden_stateful_counter() {
+    conformance_golden_test("stateful-counter");
 }
 
 // ---------------------------------------------------------------------------

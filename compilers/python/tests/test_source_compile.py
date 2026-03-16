@@ -23,6 +23,12 @@ def _source_path(test_name: str) -> str:
     raise FileNotFoundError(f"No .runar.ts file in {source_dir}")
 
 
+def _has_source(test_name: str) -> bool:
+    """Check if a conformance test has a .runar.ts source file."""
+    source_dir = conformance_dir() / test_name
+    return any(f.name.endswith(".runar.ts") for f in source_dir.iterdir())
+
+
 # ---------------------------------------------------------------------------
 # Source compilation — opcode checks
 # ---------------------------------------------------------------------------
@@ -59,23 +65,50 @@ class TestSourceCompile:
 
 
 # ---------------------------------------------------------------------------
-# Compiler parity — golden file match
+# All conformance tests — IR-to-script golden file match
 # ---------------------------------------------------------------------------
 
-PARITY_TESTS = [
+ALL_CONFORMANCE_TESTS = [
     "arithmetic",
+    "auction",
     "basic-p2pkh",
+    "blake3",
     "boolean-logic",
     "bounded-loop",
+    "convergence-proof",
+    "covenant-vault",
+    "ec-demo",
+    "ec-primitives",
+    "escrow",
+    "function-patterns",
     "if-else",
+    "if-without-else",
+    "math-demo",
     "multi-method",
+    "oracle-price",
+    "post-quantum-slhdsa",
+    "post-quantum-wallet",
+    "post-quantum-wots",
+    "property-initializers",
+    "schnorr-zkp",
+    "sphincs-wallet",
     "stateful",
+    "stateful-counter",
+    "token-ft",
+    "token-nft",
 ]
 
+# Tests that have .runar.ts source files (not IR-only)
+SOURCE_TESTS = [t for t in ALL_CONFORMANCE_TESTS if _has_source(t)]
+
+
+# ---------------------------------------------------------------------------
+# Compiler parity — source compilation golden file match
+# ---------------------------------------------------------------------------
 
 class TestCompilerParity:
-    @pytest.mark.parametrize("test_name", PARITY_TESTS)
-    def test_compiler_parity_all(self, test_name: str):
+    @pytest.mark.parametrize("test_name", SOURCE_TESTS)
+    def test_compiler_parity_from_source(self, test_name: str):
         source_path = _source_path(test_name)
         expected_hex = load_conformance_script(test_name)
 
@@ -83,6 +116,6 @@ class TestCompilerParity:
         artifact = must_compile_source(source_path, disable_constant_folding=True)
         assert artifact.script == expected_hex, (
             f"Parity mismatch for {test_name}:\n"
-            f"  expected: {expected_hex}\n"
-            f"  got:      {artifact.script}"
+            f"  expected: {expected_hex[:200]}...\n"
+            f"  got:      {artifact.script[:200]}..."
         )

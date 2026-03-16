@@ -581,12 +581,32 @@ func TestCompile_Stateful(t *testing.T) {
 func TestCompile_AllConformanceTests(t *testing.T) {
 	testDirs := []string{
 		"arithmetic",
+		"auction",
 		"basic-p2pkh",
+		"blake3",
 		"boolean-logic",
 		"bounded-loop",
+		"convergence-proof",
+		"covenant-vault",
+		"ec-demo",
+		"ec-primitives",
+		"escrow",
+		"function-patterns",
 		"if-else",
+		"if-without-else",
+		"math-demo",
 		"multi-method",
+		"oracle-price",
+		"post-quantum-slhdsa",
+		"post-quantum-wallet",
+		"post-quantum-wots",
+		"property-initializers",
+		"schnorr-zkp",
+		"sphincs-wallet",
 		"stateful",
+		"stateful-counter",
+		"token-ft",
+		"token-nft",
 	}
 
 	for _, dir := range testDirs {
@@ -1045,12 +1065,33 @@ func TestSourceCompile_Stateful(t *testing.T) {
 
 func TestSourceCompile_AllConformanceFromSource(t *testing.T) {
 	testDirs := []string{
-		"arithmetic", "basic-p2pkh", "boolean-logic",
-		"bounded-loop", "if-else", "multi-method", "stateful",
+		"arithmetic",
+		"basic-p2pkh",
+		"boolean-logic",
+		"bounded-loop",
+		"convergence-proof",
+		"ec-demo",
+		"ec-primitives",
+		"function-patterns",
+		"if-else",
+		"if-without-else",
+		"math-demo",
+		"multi-method",
+		"oracle-price",
+		"post-quantum-slhdsa",
+		"post-quantum-wallet",
+		"post-quantum-wots",
+		"property-initializers",
+		"sphincs-wallet",
+		"stateful",
+		"stateful-counter",
 	}
 	for _, dir := range testDirs {
 		t.Run(dir, func(t *testing.T) {
 			source := filepath.Join(conformanceDir(), dir, dir+".runar.ts")
+			if _, err := os.Stat(source); os.IsNotExist(err) {
+				t.Skipf("source file not found (IR-only test): %s", source)
+			}
 			// Disable constant folding to match existing golden files
 			artifact, err := CompileFromSource(source, CompileOptions{DisableConstantFolding: true})
 			if err != nil {
@@ -1140,21 +1181,39 @@ func TestSourceCompile_IRvsSourceMatch(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Test: ALL 9 conformance .runar.ts files compile and match golden hex
+// Test: ALL 27 conformance tests compile and match golden hex
 // ---------------------------------------------------------------------------
 
 func TestCompilerParity_AllConformance(t *testing.T) {
-	// All 9 conformance test directories
+	// All 27 conformance test directories
 	testDirs := []string{
 		"arithmetic",
+		"auction",
 		"basic-p2pkh",
+		"blake3",
 		"boolean-logic",
 		"bounded-loop",
+		"convergence-proof",
+		"covenant-vault",
+		"ec-demo",
+		"ec-primitives",
+		"escrow",
+		"function-patterns",
 		"if-else",
+		"if-without-else",
+		"math-demo",
 		"multi-method",
+		"oracle-price",
 		"post-quantum-slhdsa",
+		"post-quantum-wallet",
 		"post-quantum-wots",
+		"property-initializers",
+		"schnorr-zkp",
+		"sphincs-wallet",
 		"stateful",
+		"stateful-counter",
+		"token-ft",
+		"token-nft",
 	}
 
 	for _, dir := range testDirs {
