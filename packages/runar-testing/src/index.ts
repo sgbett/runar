@@ -86,3 +86,13 @@ export {
   SLH_SHA2_256s, SLH_SHA2_256f, ALL_SHA2_PARAMS,
 } from './crypto/slh-dsa.js';
 export type { SLHParams, SLHKeyPair } from './crypto/slh-dsa.js';
+
+// Mock preimage helpers (standalone BIP-143 preimage building for stateful contracts)
+export {
+  buildStatefulPreimage,
+  buildLockingScript,
+  buildContinuationOutput,
+  computeHashOutputs,
+  serializeState,
+} from './mock-preimage.js';
+export type { StatefulPreimageParams, StatefulPreimageResult } from './mock-preimage.js';
