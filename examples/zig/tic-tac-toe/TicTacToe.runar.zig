@@ -5,8 +5,8 @@ pub const TicTacToe = struct {
 
     playerX: runar.PubKey,
     betAmount: i64,
-    p2pkhPrefix: runar.ByteString,
-    p2pkhSuffix: runar.ByteString,
+    p2pkhPrefix: runar.Readonly(runar.ByteString) = "1976a914",
+    p2pkhSuffix: runar.Readonly(runar.ByteString) = "88ac",
     playerO: runar.PubKey = "000000000000000000000000000000000000000000000000000000000000000000",
     c0: i64 = 0,
     c1: i64 = 0,
@@ -24,8 +24,6 @@ pub const TicTacToe = struct {
         return .{
             .playerX = playerX,
             .betAmount = betAmount,
-            .p2pkhPrefix = "1976a914",
-            .p2pkhSuffix = "88ac",
         };
     }
 

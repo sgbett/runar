@@ -681,7 +681,7 @@ Built-in implementations: `LocalSigner` (in-memory key, testing/CLI), `ExternalS
 The maintained compilers (TypeScript, Go, Rust, Python, Zig) target byte-identical Bitcoin Script for the same contract on the shared conformance corpus. You can:
 
 1. **Write** in any supported format (`.runar.ts`, `.runar.zig`, `.runar.go`, `.runar.rs`, `.runar.sol`, `.runar.move`, `.runar.py`)
-2. **Test** with the native test runner (`vitest`, `zig build test`, `go test`, `cargo test`, `pytest`)
+2. **Test** with the native test runner (`vitest`, `cd examples/zig && zig build test`, `go test`, `cargo test`, `pytest`)
 3. **Compile** with any compiler
 4. **Deploy** the same artifact from any language
 

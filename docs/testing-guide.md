@@ -4,9 +4,9 @@ This guide covers how to test Rúnar smart contracts at every level, from unit t
 
 ---
 
-## Unit Testing with Vitest
+## TypeScript Unit Testing with Vitest
 
-Rúnar uses vitest as its test runner. Contract tests compile a `.runar.ts` file to an artifact, then execute methods against the built-in Script VM.
+TypeScript contract tests use vitest. Contract tests compile a `.runar.ts` file to an artifact, then execute methods against the built-in Script VM.
 
 ### Basic Test Structure
 
@@ -40,6 +40,17 @@ describe('P2PKH', () => {
   });
 });
 ```
+
+## Native Example Test Runners
+
+The maintained native frontends use their own language test runners for the example trees:
+
+- Go: `cd examples/go && go test ./...`
+- Rust: `cd examples/rust && cargo test`
+- Python: `cd examples/python && PYTHONPATH=../../packages/runar-py python3 -m pytest`
+- Zig: `cd examples/zig && zig build test`
+
+The Zig example suite is backed by `packages/runar-zig`, which provides the `runar` module, compile-check helpers, fixtures, and the native helper/runtime surface used by `examples/zig/*/*_test.zig`.
 
 ### Running Tests
 

@@ -8,6 +8,7 @@
 //!   - `pub const Contract = runar.SmartContract;` sets parent class
 //!   - Fields without defaults are readonly; fields with `= expr` defaults are mutable
 //!     (for StatefulSmartContract only -- all SmartContract fields are readonly)
+//!   - `runar.Readonly(T)` marks a field readonly explicitly in StatefulSmartContract
 //!   - `pub fn init(...)` is the constructor
 //!   - `pub fn name(self, ...)` are public methods
 //!   - `fn name(self, ...)` are private methods
@@ -228,6 +229,11 @@ const Parser = struct {
 
     const max_depth: u32 = 256;
 
+    const ParsedFieldType = struct {
+        type_node: TypeNode,
+        explicit_readonly: bool,
+    };
+
     fn init(allocator: Allocator, source: []const u8, file_name: []const u8) Parser {
         var tokenizer = Tokenizer.init(source);
         const first = tokenizer.next();
@@ -327,6 +333,7 @@ const Parser = struct {
         var constructor: ?ConstructorNode = null;
         var methods: std.ArrayListUnmanaged(MethodNode) = .empty;
         var fields_with_defaults: std.ArrayListUnmanaged([]const u8) = .empty;
+        var explicit_readonly_fields: std.ArrayListUnmanaged([]const u8) = .empty;
 
         while (self.current.kind != .rbrace and self.current.kind != .eof) {
             if (self.current.kind == .kw_pub) {
@@ -369,7 +376,7 @@ const Parser = struct {
                 continue;
             }
 
-            if (self.parseField(&fields_with_defaults)) |f| {
+            if (self.parseField(&fields_with_defaults, &explicit_readonly_fields)) |f| {
                 properties.append(self.allocator, f) catch {};
             } else {
                 _ = self.bump();
@@ -386,6 +393,17 @@ const Parser = struct {
         const pc = parent_class.?;
         for (properties.items) |*prop| {
             if (pc == .smart_contract) { prop.readonly = true; } else {
+                var is_explicit_readonly = false;
+                for (explicit_readonly_fields.items) |fname| {
+                    if (std.mem.eql(u8, fname, prop.name)) {
+                        is_explicit_readonly = true;
+                        break;
+                    }
+                }
+                if (is_explicit_readonly) {
+                    prop.readonly = true;
+                    continue;
+                }
                 var has_default = false;
                 for (fields_with_defaults.items) |fname| { if (std.mem.eql(u8, fname, prop.name)) { has_default = true; break; } }
                 prop.readonly = !has_default;
@@ -412,13 +430,17 @@ const Parser = struct {
 
     // ---- Fields ----
 
-    fn parseField(self: *Parser, fwd: *std.ArrayListUnmanaged([]const u8)) ?PropertyNode {
+    fn parseField(
+        self: *Parser,
+        fwd: *std.ArrayListUnmanaged([]const u8),
+        explicit_readonly_fields: *std.ArrayListUnmanaged([]const u8),
+    ) ?PropertyNode {
         if (self.current.kind == .kw_pub) _ = self.bump();
         if (self.current.kind != .ident) return null;
         const name_tok = self.bump();
         if (self.current.kind != .colon) return null;
         _ = self.bump();
-        const type_info = self.parseTypeNode();
+        const parsed_type = self.parseFieldTypeNode();
         var has_default = false;
         var initializer: ?*const Expression = null;
         if (self.current.kind == .assign) {
@@ -426,9 +448,38 @@ const Parser = struct {
             if (self.parseExpression()) |e| { initializer = self.heapExpr(e); }
         }
         if (has_default) fwd.append(self.allocator, name_tok.text) catch {};
+        if (parsed_type.explicit_readonly) explicit_readonly_fields.append(self.allocator, name_tok.text) catch {};
         if (self.current.kind == .comma) { _ = self.bump(); } else if (self.current.kind == .semicolon) { _ = self.bump(); }
         const expr_val: ?Expression = if (initializer) |init_ptr| init_ptr.* else null;
-        return PropertyNode{ .name = name_tok.text, .type_info = typeNodeToRunarType(type_info), .readonly = false, .initializer = expr_val };
+        return PropertyNode{ .name = name_tok.text, .type_info = typeNodeToRunarType(parsed_type.type_node), .readonly = false, .initializer = expr_val };
+    }
+
+    fn parseFieldTypeNode(self: *Parser) ParsedFieldType {
+        if (self.current.kind == .ident and std.mem.eql(u8, self.current.text, "runar")) {
+            _ = self.bump();
+            if (self.expect(.dot) == null) {
+                return .{ .type_node = .{ .custom_type = "unknown" }, .explicit_readonly = false };
+            }
+            if (self.current.kind != .ident) {
+                self.addError("expected type name after 'runar.'");
+                return .{ .type_node = .{ .custom_type = "unknown" }, .explicit_readonly = false };
+            }
+
+            const name = self.current.text;
+            _ = self.bump();
+            if (std.mem.eql(u8, name, "Readonly")) {
+                if (self.expect(.lparen) == null) {
+                    return .{ .type_node = .{ .custom_type = "unknown" }, .explicit_readonly = true };
+                }
+                const inner = self.parseFieldTypeNode();
+                _ = self.expect(.rparen);
+                return .{ .type_node = inner.type_node, .explicit_readonly = true };
+            }
+
+            return .{ .type_node = resolveRunarTypeNode(name), .explicit_readonly = false };
+        }
+
+        return .{ .type_node = self.parseTypeNode(), .explicit_readonly = false };
     }
 
     fn parseTypeNode(self: *Parser) TypeNode {
@@ -1182,6 +1233,33 @@ test "type resolution" {
     try std.testing.expectEqual(RunarType.ripemd160, typeNodeToRunarType(Parser.resolveRunarTypeNode("Ripemd160")));
     try std.testing.expectEqual(RunarType.rabin_sig, typeNodeToRunarType(Parser.resolveRunarTypeNode("RabinSig")));
     try std.testing.expectEqual(RunarType.point, typeNodeToRunarType(Parser.resolveRunarTypeNode("Point")));
+}
+
+test "parse explicit runar.Readonly fields in stateful contract" {
+    const source =
+        \\const runar = @import("runar");
+        \\pub const ReadonlyState = struct {
+        \\    pub const Contract = runar.StatefulSmartContract;
+        \\    owner: runar.Readonly(runar.PubKey),
+        \\    seed: runar.Readonly(i64) = 1,
+        \\    count: i64 = 0,
+        \\    pub fn init(owner: runar.PubKey) ReadonlyState {
+        \\        return .{ .owner = owner, .seed = 1, .count = 0 };
+        \\    }
+        \\};
+    ;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const res = parseZig(arena.allocator(), source, "ReadonlyState.runar.zig");
+    try std.testing.expectEqual(@as(usize, 0), res.errors.len);
+    const properties = res.contract.?.properties;
+    try std.testing.expectEqual(@as(usize, 3), properties.len);
+    try std.testing.expectEqual(RunarType.pub_key, properties[0].type_info);
+    try std.testing.expect(properties[0].readonly);
+    try std.testing.expectEqual(RunarType.bigint, properties[1].type_info);
+    try std.testing.expect(properties[1].readonly);
+    try std.testing.expectEqual(RunarType.bigint, properties[2].type_info);
+    try std.testing.expect(!properties[2].readonly);
 }
 
 test "if statement" {

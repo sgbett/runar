@@ -5,12 +5,11 @@ pub const BoundedCounter = struct {
 
     count: i64 = 0,
     maxCount: i64,
-    active: bool,
+    active: runar.Readonly(bool) = true,
 
     pub fn init(maxCount: i64) BoundedCounter {
         return .{
             .maxCount = maxCount,
-            .active = true,
         };
     }
 

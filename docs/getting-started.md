@@ -38,13 +38,14 @@ pnpm install
 pnpm build
 ```
 
-This builds all packages in the workspace: `runar-lang`, `runar-compiler`, `runar-cli`, `runar-sdk`, `runar-testing`, and `runar-ir-schema`.
+This installs the pnpm workspace packages and builds the JavaScript/TypeScript workspace packages such as `runar-lang`, `runar-compiler`, `runar-cli`, `runar-sdk`, `runar-testing`, and `runar-ir-schema`.
 
-If you also want the Zig compiler, build it from source under `compilers/zig`:
+If you also want the Zig tooling, build and test it from source:
 
 ```bash
-cd compilers/zig
-zig build
+cd packages/runar-zig && zig build test
+cd ../../examples/zig && zig build test
+cd ../../compilers/zig && zig build
 ```
 
 ### As npm Packages

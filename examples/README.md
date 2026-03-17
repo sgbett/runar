@@ -2,7 +2,7 @@
 
 **A collection of example smart contracts demonstrating Rúnar patterns and features.**
 
-Examples are organized by input format under `ts/`, `sol/`, `move/`, `go/`, `rust/`, `python/`, and `zig/`. Each directory contains the contract sources for that frontend, and the native-language frontends share the same 21-contract example set.
+Examples are organized by input format under `ts/`, `sol/`, `move/`, `go/`, `rust/`, `python/`, and `zig/`. Each directory contains the contract sources for that frontend, and the native-language frontends share the same 21-contract example set with adjacent native tests.
 
 ---
 
@@ -140,13 +140,21 @@ cd examples/python && PYTHONPATH=../../packages/runar-py python3 -m pytest
 
 ### Zig
 
+Run the native Zig example suite:
+
+```bash
+cd examples/zig && zig build test
+```
+
+The Zig example runner imports `packages/runar-zig` as the `runar` module and executes the adjacent `*_test.zig` files under each example directory.
+
 Compile a Zig example through the Zig compiler:
 
 ```bash
 cd compilers/zig && zig build run -- compile ../../examples/zig/p2pkh/P2PKH.runar.zig
 ```
 
-Run the Zig compiler test suite:
+Run the Zig compiler verification suite:
 
 ```bash
 cd compilers/zig && zig build test && zig build conformance

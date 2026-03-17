@@ -167,7 +167,7 @@ Bitcoin Script development today forces a choice between hand-writing opcodes (e
 
 - **No decorators** — uses native language keywords (`readonly`, `public`, `immutable`, `#[readonly]`)
 - **Write in your language** — TypeScript, Go, Rust, Python, Zig, Solidity-like, or Move-style
-- **Test natively** — `vitest` for TS, `go test` for Go, `cargo test` for Rust, `pytest` for Python, `zig build test` for Zig
+- **Test natively** — `vitest` for TS, `go test` for Go, `cargo test` for Rust, `pytest` for Python, `zig build test` for Zig examples
 - **Five compilers** — TypeScript (reference), Go, Rust, Python, Zig — all produce byte-identical output
 - **Post-quantum ready** — WOTS+ and SLH-DSA (FIPS 205) signature verification in Bitcoin Script
 - **Nanopass architecture** — 6 small passes, each auditable in a single sitting
@@ -212,15 +212,16 @@ PYTHONPATH=packages/runar-py python3 -m pytest
 ### Zig
 
 ```bash
-cd compilers/zig
-zig build run -- compile ../../examples/zig/p2pkh/P2PKH.runar.zig
+cd examples/zig && zig build test
+cd ../..
+cd compilers/zig && zig build run -- compile ../../examples/zig/p2pkh/P2PKH.runar.zig
 ```
 
 ---
 
 ## Test Your Contracts
 
-Every contract format has native testing support. Business logic tests run the contract as real code in the host language. Rúnar compile checks verify the contract will produce valid Bitcoin Script.
+The maintained frontends all have native test workflows. Go, Rust, and Python tests execute contract logic directly in the host language; Zig example tests live next to the contracts and combine compile checks with Zig-native helper/runtime tests.
 
 **TypeScript** (vitest):
 ```typescript
@@ -278,6 +279,14 @@ def test_unlock():
     c = P2PKH(pub_key_hash=hash160(pk))
     c.unlock(mock_sig(), pk)
 ```
+
+**Zig** (`zig build test`):
+```bash
+cd examples/zig
+zig build test
+```
+
+Zig example tests live next to the contracts under `examples/zig/` and use `packages/runar-zig` for compile checks, fixtures, and native helper/runtime coverage.
 
 ---
 
@@ -339,13 +348,15 @@ All 21 examples are available in `ts/`, `go/`, `rust/`, `python/`, and `zig/`. A
 ```
 examples/
   ts/p2pkh/          P2PKH.runar.ts + P2PKH.test.ts
-  zig/p2pkh/         P2PKH.runar.zig
+  zig/p2pkh/         P2PKH.runar.zig + P2PKH_test.zig
   go/p2pkh/          P2PKH.runar.go + P2PKH_test.go
   rust/p2pkh/        P2PKH.runar.rs + P2PKH_test.rs
   sol/p2pkh/         P2PKH.runar.sol + P2PKH.test.ts
   move/p2pkh/        P2PKH.runar.move + P2PKH.test.ts
   python/p2pkh/      P2PKH.runar.py + test_p2pkh.py
 ```
+
+The Zig example tree is backed by `packages/runar-zig` and a shared runner at `examples/zig/examples_test.zig`.
 
 ---
 
@@ -409,6 +420,7 @@ packages/
   runar-rs/            # Rust crate: prelude types, mock crypto, real hashes, compile_check(), deployment SDK
   runar-rs-macros/     # Rust proc-macros (#[runar::contract], #[public], etc.)
   runar-py/            # Python package: types, mock crypto, real hashes, deployment SDK
+  runar-zig/           # Zig package: native testing/runtime helpers and compile checks
 compilers/
   go/                 # Go compiler (tree-sitter + native Go frontend)
   rust/               # Rust compiler (SWC + native Rust frontend)
@@ -422,6 +434,7 @@ examples/
   sol/                # Solidity-like contracts + tests
   move/               # Move-style contracts + tests
   python/             # Python contracts + tests
+  zig/                # Zig contracts + adjacent Zig tests
   sdk-usage/          # SDK usage reference docs (not runnable)
 end2end-example/      # End-to-end example (ts, go, rust, sol, move, webapp, webapp-blackjack)
 spec/                 # Language specification

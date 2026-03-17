@@ -10,7 +10,7 @@
 
 The Zig format lets you write Rúnar contracts as native Zig structs with explicit types, a constructor-style `init` function, and `runar.*` builtins. It is the native frontend for the Zig compiler in `compilers/zig`, and the TypeScript compiler also parses `.runar.zig` so Zig sources can participate in shared AST and script conformance tests.
 
-Use this format when you want Zig-native authoring, `zig build test`, or the Zig benchmark harness while keeping the same contract model as the other Rúnar frontends.
+Use this format when you want Zig-native authoring, the `packages/runar-zig` helper/runtime package, `cd examples/zig && zig build test`, or the Zig benchmark harness while keeping the same contract model as the other Rúnar frontends.
 
 ---
 
@@ -23,6 +23,8 @@ const runar = @import("runar");
 ```
 
 The import line is required by the parser. It establishes the `runar.` namespace used for contract types and builtins.
+
+In the native Zig example/test setup, that module is provided by `packages/runar-zig`.
 
 ### Contract Declaration
 
@@ -61,6 +63,7 @@ pub const Counter = struct {
 
 - In `runar.SmartContract`, fields are treated as readonly contract properties.
 - In `runar.StatefulSmartContract`, fields with defaults are mutable state fields.
+- Use `runar.Readonly(T)` to mark a stateful field readonly explicitly, with or without a default initializer.
 - Fields without defaults still become constructor parameters unless `init` assigns them explicitly.
 
 ### Constructor
@@ -156,7 +159,7 @@ Unsupported or intentionally narrow:
 | Constructor | `pub fn init(...) Name { return .{ ... }; }` |
 | Public method | `pub fn name(self: *const Name, ...) void { ... }` |
 | Private method | `fn name(self: *const Name, ...) Type { ... }` |
-| Readonly field | plain field in `SmartContract` |
+| Readonly field | plain field in `SmartContract`, or `runar.Readonly(T)` in `StatefulSmartContract` |
 | Mutable/defaulted field | `field: i64 = 0,` in `StatefulSmartContract` |
 
 ---
@@ -171,3 +174,11 @@ See the repo examples under:
 - `examples/zig/sphincs-wallet/SPHINCSWallet.runar.zig`
 
 Compiler-specific notes and benchmark commands live in `compilers/zig/README.md`.
+
+Native Zig testing commands:
+
+```bash
+cd packages/runar-zig && zig build test
+cd ../../examples/zig && zig build test
+cd ../../compilers/zig && zig build test && zig build conformance
+```

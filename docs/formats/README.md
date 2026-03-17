@@ -70,7 +70,7 @@ The broadest portable formats today are `.runar.ts`, `.runar.sol`, and `.runar.m
 ## Choosing a Format
 
 - **TypeScript** is the recommended format for production use. It has the best tooling, is the canonical reference for the language spec, and is supported by all compilers.
-- **Zig** is the native format for the Zig compiler and is also understood by the TypeScript compiler for shared AST/script conformance. Use it when you want Zig-native syntax, `zig test`, and the Zig benchmark harness.
+- **Zig** is the native format for the Zig compiler and is also understood by the TypeScript compiler for shared AST/script conformance. Use it when you want Zig-native syntax, the `packages/runar-zig` testing/runtime helpers, `cd examples/zig && zig build test`, and the Zig benchmark harness.
 - **Solidity-like** helps Ethereum developers transfer existing knowledge. The syntax is intentionally close to Solidity but compiles to Bitcoin Script.
 - **Move-like** appeals to developers from the Sui/Aptos ecosystem who prefer resource-oriented thinking.
 - **Go** is for teams already using the Go compiler who want to write contracts in idiomatic Go.

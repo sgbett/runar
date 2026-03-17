@@ -259,6 +259,7 @@ function makePrimitiveOrCustom(name: string): TypeNode {
 interface ParsedType {
   type: TypeNode;
   rawName: string;
+  readonly?: boolean;
 }
 
 class ZigParser extends ParserCore<ZigToken> {
@@ -393,7 +394,7 @@ class ZigParser extends ParserCore<ZigToken> {
 
     this.properties = this.properties.map((property) => ({
       ...property,
-      readonly: this.parentClass === 'SmartContract' || property.initializer === undefined,
+      readonly: this.parentClass === 'SmartContract' || property.readonly || property.initializer === undefined,
     }));
 
     const contract: ContractNode = {
@@ -445,7 +446,7 @@ class ZigParser extends ParserCore<ZigToken> {
       kind: 'property',
       name,
       type: parsedType.type,
-      readonly: false,
+      readonly: parsedType.readonly ?? false,
       initializer,
       sourceLocation,
     };
@@ -552,6 +553,12 @@ class ZigParser extends ParserCore<ZigToken> {
       this.advance();
       this.expect('.');
       const name = this.expect('ident').value;
+      if (name === 'Readonly' && this.current().type === '(') {
+        this.expect('(');
+        const inner = this.parseType();
+        this.expect(')');
+        return { ...inner, readonly: true };
+      }
       const mapped = mapZigType(name);
       return { type: makePrimitiveOrCustom(mapped), rawName: name };
     }
