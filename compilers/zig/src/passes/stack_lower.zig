@@ -129,6 +129,7 @@ const LowerError = error{
     VariableNotFound,
     InvalidBuiltin,
     UnsupportedOperation,
+    BranchStackMismatch,
 };
 
 const LowerCtx = struct {
@@ -310,6 +311,9 @@ const LowerCtx = struct {
                 }
             },
             .method_call => |mc| {
+                if (mc.object.len > 0) {
+                    self.last_uses.put(self.allocator, mc.object, idx) catch return;
+                }
                 for (mc.args) |arg| {
                     self.last_uses.put(self.allocator, arg, idx) catch return;
                 }
@@ -337,14 +341,30 @@ const LowerCtx = struct {
                 self.last_uses.put(self.allocator, ds.preimage, idx) catch return;
             },
             .add_output => |ao| {
-                self.last_uses.put(self.allocator, ao.satoshis, idx) catch return;
+                if (ao.satoshis.len > 0) {
+                    self.last_uses.put(self.allocator, ao.satoshis, idx) catch return;
+                }
+                if (ao.preimage.len > 0) {
+                    self.last_uses.put(self.allocator, ao.preimage, idx) catch return;
+                }
+                for (ao.state_values) |sv| {
+                    if (sv.len > 0) {
+                        self.last_uses.put(self.allocator, sv, idx) catch return;
+                    }
+                }
                 for (ao.state_refs) |sr| {
-                    self.last_uses.put(self.allocator, sr, idx) catch return;
+                    if (sr.len > 0) {
+                        self.last_uses.put(self.allocator, sr, idx) catch return;
+                    }
                 }
             },
             .add_raw_output => |aro| {
-                self.last_uses.put(self.allocator, aro.satoshis, idx) catch return;
-                self.last_uses.put(self.allocator, aro.script_ref, idx) catch return;
+                if (aro.satoshis.len > 0) {
+                    self.last_uses.put(self.allocator, aro.satoshis, idx) catch return;
+                }
+                if (aro.script_ref.len > 0) {
+                    self.last_uses.put(self.allocator, aro.script_ref, idx) catch return;
+                }
             },
             .array_literal => |al| {
                 for (al.elements) |elem| {
@@ -462,14 +482,16 @@ const LowerCtx = struct {
         // Check if property has been updated on stack
         if (self.updated_props.get(prop_name) != null) {
             if (self.stack.findDepth(prop_name)) |_| {
-                try self.bringToTop(prop_name, false);
+                const consume = self.isLastUse(prop_name);
+                try self.bringToTop(prop_name, consume);
                 self.stack.renameAtDepth(0, bind_name);
                 return;
             }
         }
         // Property might be on stack from setup
         if (self.stack.findDepth(prop_name)) |_| {
-            try self.bringToTop(prop_name, false);
+            const consume = self.isLastUse(prop_name);
+            try self.bringToTop(prop_name, consume);
             self.stack.renameAtDepth(0, bind_name);
             return;
         }
@@ -1075,14 +1097,23 @@ const LowerCtx = struct {
         if (args.len < 1) return LowerError.InvalidBuiltin;
         try self.emitOp(.op_codeseparator);
         try self.bringToTopAuto(args[0]);
-        if (self.stack.findDepth("_opPushTxSig")) |_| {
+        const has_sig = self.stack.findDepth("_opPushTxSig") != null;
+        if (has_sig) {
             try self.bringToTop("_opPushTxSig", true);
         }
         try self.emitPushData(&generator_point_g);
+        // Track the generator point in the stack map so pop accounting is correct
+        try self.stack.push(self.allocator, null);
+        self.trackDepth();
+        // OP_CHECKSIGVERIFY consumes top 2 items (sig/txsig + pubkey/G)
         try self.emitOp(.op_checksigverify);
-        _ = self.stack.pop();
-        _ = self.stack.pop();
-        _ = self.stack.pop();
+        _ = self.stack.pop(); // G (generator point)
+        if (has_sig) {
+            _ = self.stack.pop(); // _opPushTxSig
+            // preimage (args[0]) remains on stack — consumed by caller or used downstream
+        } else {
+            _ = self.stack.pop(); // args[0] consumed as sig when no _opPushTxSig
+        }
         _ = bind_name;
     }
 
@@ -1159,13 +1190,13 @@ const LowerCtx = struct {
             self.last_uses = saved_lu;
         }
 
-        // Save then stack depth for reconciliation
+        // Save then stack state for reconciliation
         const then_depth = self.stack.depth();
+        const then_top_name = if (then_depth > 0) self.stack.peekAtDepth(0) else null;
 
         try self.emitOp(.op_else);
 
         // -- Else branch: restore base stack --
-        // We need to discard the then-stack and restore base
         self.stack.deinit(self.allocator);
         self.stack = try base_stack.clone(self.allocator);
 
@@ -1183,7 +1214,28 @@ const LowerCtx = struct {
             }
         }
 
-        _ = then_depth; // May be used for future reconciliation
+        const else_depth = self.stack.depth();
+        const else_top_name = if (else_depth > 0) self.stack.peekAtDepth(0) else null;
+
+        // Phase 3: Balance stack depth between branches.
+        // Bitcoin Script requires identical stack state after OP_IF/OP_ELSE/OP_ENDIF
+        // regardless of which branch executes. A mismatch means one path leaves
+        // extra items (or too few) — the script will fail at runtime or, worse,
+        // silently misinterpret stack positions, risking fund loss.
+        if (then_depth != else_depth) {
+            return LowerError.BranchStackMismatch;
+        }
+
+        // Verify top-of-stack names are consistent between branches.
+        // Both branches should produce compatible named results.
+        if (then_top_name != null and else_top_name != null) {
+            // Both branches have named tops — they should match for the binding
+            // to be meaningful. We don't error here because the rename below
+            // will unify them under bind_name anyway.
+        } else if (then_top_name == null and else_top_name == null) {
+            // Both anonymous — fine
+        }
+        // Mixed named/null is acceptable: the rename below normalizes it.
 
         self.in_branch = saved_in_branch;
         try self.emitOp(.op_endif);

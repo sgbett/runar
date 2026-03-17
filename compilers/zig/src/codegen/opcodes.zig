@@ -412,6 +412,12 @@ pub fn encodeScriptNumber(writer: anytype, n: i64) !void {
 
 /// Internal: encode an i64 as LE sign-magnitude bytes into buf, return length used.
 fn encodeScriptInt(n: i64, buf: *[9]u8) usize {
+    // Special case: i64 MIN cannot be negated without overflow.
+    // |minInt(i64)| = 0x8000000000000000, LE sign-magnitude with sign byte = 9 bytes.
+    if (n == std.math.minInt(i64)) {
+        buf.* = .{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x80 };
+        return 9;
+    }
     const neg = n < 0;
     var abs_val: u64 = if (neg) @intCast(-n) else @intCast(n);
     var i: usize = 0;
@@ -678,6 +684,21 @@ test "script number encoding — large positive 1000" {
     // 1000 = 0x03E8 -> LE: E8 03, MSB of 03 not set -> push 02 e8 03
     try encodeScriptNumber(buf.writer(std.testing.allocator), 1000);
     try std.testing.expectEqualSlices(u8, &.{ 0x02, 0xe8, 0x03 }, buf.items);
+}
+
+test "script number encoding — i64 MIN does not panic" {
+    var buf: std.ArrayListUnmanaged(u8) = .empty;
+    defer buf.deinit(std.testing.allocator);
+
+    // minInt(i64) = -9223372036854775808
+    // abs = 0x8000000000000000, LE sign-magnitude: 00 00 00 00 00 00 00 80 80 (9 bytes)
+    // encodePushData wraps it as: 09 (length) + 9 data bytes
+    try encodeScriptNumber(buf.writer(std.testing.allocator), std.math.minInt(i64));
+    try std.testing.expectEqual(@as(usize, 10), buf.items.len); // 1 len + 9 data
+    try std.testing.expectEqual(@as(u8, 9), buf.items[0]); // push 9 bytes
+    // Last two bytes should be 0x80 0x80 (MSB of magnitude + sign byte)
+    try std.testing.expectEqual(@as(u8, 0x80), buf.items[8]);
+    try std.testing.expectEqual(@as(u8, 0x80), buf.items[9]);
 }
 
 test "bytesToHex" {

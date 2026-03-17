@@ -310,6 +310,8 @@ fn writeJsonString(writer: anytype, s: []const u8) !void {
             '\n' => try writer.writeAll("\\n"),
             '\r' => try writer.writeAll("\\r"),
             '\t' => try writer.writeAll("\\t"),
+            0x08 => try writer.writeAll("\\b"),
+            0x0C => try writer.writeAll("\\f"),
             else => {
                 if (c < 0x20) {
                     try writer.print("\\u{x:0>4}", .{c});

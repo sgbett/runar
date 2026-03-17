@@ -13,7 +13,10 @@ const ParseError = error{
     InvalidOperator,
     InvalidConstValue,
     UnexpectedValueType,
+    MaxRecursionDepthExceeded,
 };
+
+const max_parse_depth: u32 = 256;
 
 // ============================================================================
 // Public API
@@ -107,7 +110,7 @@ fn parseMethod(allocator: std.mem.Allocator, method_obj: std.json.ObjectMap) !ty
         .params = params,
         .body = &.{},
     };
-    const bindings = try parseBindings(allocator, body_val.array);
+    const bindings = try parseBindings(allocator, body_val.array, 0);
 
     return .{
         .name = try allocator.dupe(u8, name),
@@ -134,18 +137,18 @@ fn parseParams(allocator: std.mem.Allocator, method_obj: std.json.ObjectMap) ![]
 
 const BindingError = ParseError || std.mem.Allocator.Error;
 
-fn parseBindings(allocator: std.mem.Allocator, arr: std.json.Array) BindingError![]types.ANFBinding {
+fn parseBindings(allocator: std.mem.Allocator, arr: std.json.Array, depth: u32) BindingError![]types.ANFBinding {
     var result = try allocator.alloc(types.ANFBinding, arr.items.len);
     for (arr.items, 0..) |binding_val, i| {
-        result[i] = try parseBinding(allocator, binding_val.object);
+        result[i] = try parseBinding(allocator, binding_val.object, depth);
     }
     return result;
 }
 
-fn parseBinding(allocator: std.mem.Allocator, obj: std.json.ObjectMap) BindingError!types.ANFBinding {
+fn parseBinding(allocator: std.mem.Allocator, obj: std.json.ObjectMap, depth: u32) BindingError!types.ANFBinding {
     const name = try getString(obj, "name");
     const value_json = obj.get("value") orelse return ParseError.MissingField;
-    const value = try parseANFValue(allocator, value_json.object);
+    const value = try parseANFValue(allocator, value_json.object, depth);
 
     return .{
         .name = try allocator.dupe(u8, name),
@@ -178,7 +181,9 @@ const kind_map = std.StaticStringMap(KindTag).initComptime(.{
     .{ "add_raw_output", .add_raw_output },
 });
 
-fn parseANFValue(allocator: std.mem.Allocator, obj: std.json.ObjectMap) BindingError!types.ANFValue {
+fn parseANFValue(allocator: std.mem.Allocator, obj: std.json.ObjectMap, depth: u32) BindingError!types.ANFValue {
+    if (depth >= max_parse_depth) return ParseError.MaxRecursionDepthExceeded;
+
     const kind = try getString(obj, "kind");
     const tag = kind_map.get(kind) orelse return ParseError.InvalidKind;
 
@@ -194,8 +199,8 @@ fn parseANFValue(allocator: std.mem.Allocator, obj: std.json.ObjectMap) BindingE
         .unary_op => try parseUnaryOp(allocator, obj),
         .call => try parseCall(allocator, obj),
         .method_call => try parseMethodCall(allocator, obj),
-        .@"if" => try parseIf(allocator, obj),
-        .loop => try parseLoop(allocator, obj),
+        .@"if" => try parseIf(allocator, obj, depth),
+        .loop => try parseLoop(allocator, obj, depth),
         .assert => try parseAssert(allocator, obj),
         .update_prop => try parseUpdateProp(allocator, obj),
         .get_state_script => .{ .get_state_script = {} },
@@ -215,7 +220,12 @@ fn parseLoadConst(allocator: std.mem.Allocator, obj: std.json.ObjectMap) !types.
 
     switch (val) {
         .integer => |i| return .{ .load_const = .{ .value = .{ .integer = i } } },
-        .float => |f| return .{ .load_const = .{ .value = .{ .integer = @intFromFloat(f) } } },
+        .float => |f| {
+            const int_val: i128 = @intFromFloat(f);
+            const roundtrip: f64 = @floatFromInt(int_val);
+            if (roundtrip != f) return ParseError.InvalidConstValue;
+            return .{ .load_const = .{ .value = .{ .integer = int_val } } };
+        },
         .bool => |b| return .{ .load_const = .{ .value = .{ .boolean = b } } },
         .string => |s| return .{ .load_const = .{ .value = .{ .string = try allocator.dupe(u8, s) } } },
         else => return ParseError.InvalidConstValue,
@@ -276,13 +286,13 @@ fn parseMethodCall(allocator: std.mem.Allocator, obj: std.json.ObjectMap) !types
     } };
 }
 
-fn parseIf(allocator: std.mem.Allocator, obj: std.json.ObjectMap) BindingError!types.ANFValue {
+fn parseIf(allocator: std.mem.Allocator, obj: std.json.ObjectMap, depth: u32) BindingError!types.ANFValue {
     const cond = try getString(obj, "cond");
     const then_val = obj.get("then") orelse return ParseError.MissingField;
-    const then_bindings = try parseBindings(allocator, then_val.array);
+    const then_bindings = try parseBindings(allocator, then_val.array, depth + 1);
 
     const else_bindings: []types.ANFBinding = if (obj.get("else")) |else_val|
-        try parseBindings(allocator, else_val.array)
+        try parseBindings(allocator, else_val.array, depth + 1)
     else
         try allocator.alloc(types.ANFBinding, 0);
 
@@ -296,7 +306,7 @@ fn parseIf(allocator: std.mem.Allocator, obj: std.json.ObjectMap) BindingError!t
     return .{ .@"if" = if_expr };
 }
 
-fn parseLoop(allocator: std.mem.Allocator, obj: std.json.ObjectMap) BindingError!types.ANFValue {
+fn parseLoop(allocator: std.mem.Allocator, obj: std.json.ObjectMap, depth: u32) BindingError!types.ANFValue {
     const count_val = obj.get("count") orelse return ParseError.MissingField;
     const count: u32 = switch (count_val) {
         .integer => |i| @intCast(i),
@@ -305,7 +315,7 @@ fn parseLoop(allocator: std.mem.Allocator, obj: std.json.ObjectMap) BindingError
     };
     const iter_var = try getString(obj, "iterVar");
     const body_val = obj.get("body") orelse return ParseError.MissingField;
-    const body_bindings = try parseBindings(allocator, body_val.array);
+    const body_bindings = try parseBindings(allocator, body_val.array, depth + 1);
 
     const loop_node = try allocator.create(types.ANFLoop);
     loop_node.* = .{
