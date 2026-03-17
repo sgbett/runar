@@ -502,6 +502,30 @@ test "runarTypeToString" {
     try std.testing.expectEqualStrings("PubKey", runarTypeToString(.pub_key));
 }
 
+test "parseRunarType canonical names" {
+    try std.testing.expectEqual(RunarType.bigint, parseRunarType("bigint"));
+    try std.testing.expectEqual(RunarType.boolean, parseRunarType("boolean"));
+    try std.testing.expectEqual(RunarType.byte_string, parseRunarType("ByteString"));
+    try std.testing.expectEqual(RunarType.pub_key, parseRunarType("PubKey"));
+    try std.testing.expectEqual(RunarType.sig, parseRunarType("Sig"));
+    try std.testing.expectEqual(RunarType.addr, parseRunarType("Addr"));
+    try std.testing.expectEqual(RunarType.void, parseRunarType("void"));
+    try std.testing.expectEqual(RunarType.unknown, parseRunarType("NonExistentType"));
+}
+
+test "parseRunarType aliases" {
+    try std.testing.expectEqual(RunarType.bigint, parseRunarType("int"));
+    try std.testing.expectEqual(RunarType.boolean, parseRunarType("bool"));
+    try std.testing.expectEqual(RunarType.byte_string, parseRunarType("bytes"));
+}
+
+test "typeNodeToRunarType" {
+    try std.testing.expectEqual(RunarType.bigint, typeNodeToRunarType(.{ .primitive_type = .bigint }));
+    try std.testing.expectEqual(RunarType.pub_key, typeNodeToRunarType(.{ .primitive_type = .pub_key }));
+    try std.testing.expectEqual(RunarType.void, typeNodeToRunarType(.{ .primitive_type = .void }));
+    try std.testing.expectEqual(RunarType.unknown, typeNodeToRunarType(.{ .custom_type = "MyType" }));
+}
+
 test "StateField with initial_value" {
     const field = StateField{ .name = "c", .type_name = "bigint", .index = 0, .initial_value = .{ .integer = 0 } };
     try std.testing.expect(field.initial_value != null);

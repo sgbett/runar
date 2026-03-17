@@ -86,29 +86,29 @@ fn validateProperties(
     contract: ContractNode,
     errors: *std.ArrayListUnmanaged(CompilerDiagnostic),
     warnings: *std.ArrayListUnmanaged(CompilerDiagnostic),
-) void {
+) !void {
     for (contract.properties) |prop| {
         // Check for void type
         if (prop.type_info == .void) {
-            errors.append(allocator, .{
+            try errors.append(allocator, .{
                 .message = "property type 'void' is not valid",
                 .severity = .@"error",
-            }) catch {};
+            });
         } else if (!isValidPropertyType(prop.type_info) and prop.type_info != .unknown) {
-            errors.append(allocator, .{
+            try errors.append(allocator, .{
                 .message = "unsupported type in property declaration",
                 .severity = .@"error",
-            }) catch {};
+            });
         }
 
         // V27: txPreimage is implicit in StatefulSmartContract
         if (contract.parent_class == .stateful_smart_contract and
             std.mem.eql(u8, prop.name, "txPreimage"))
         {
-            errors.append(allocator, .{
+            try errors.append(allocator, .{
                 .message = "'txPreimage' is an implicit property of StatefulSmartContract and must not be declared",
                 .severity = .@"error",
-            }) catch {};
+            });
         }
     }
 
@@ -116,10 +116,10 @@ fn validateProperties(
     if (contract.parent_class == .smart_contract) {
         for (contract.properties) |prop| {
             if (!prop.readonly) {
-                errors.append(allocator, .{
+                try errors.append(allocator, .{
                     .message = "property in SmartContract must be declared readonly",
                     .severity = .@"error",
-                }) catch {};
+                });
             }
         }
     }
@@ -134,10 +134,10 @@ fn validateProperties(
             }
         }
         if (!has_mutable) {
-            warnings.append(allocator, .{
+            try warnings.append(allocator, .{
                 .message = "StatefulSmartContract has no mutable properties; consider using SmartContract instead",
                 .severity = .warning,
-            }) catch {};
+            });
         }
     }
 }
@@ -150,7 +150,7 @@ fn validateConstructor(
     allocator: Allocator,
     contract: ContractNode,
     errors: *std.ArrayListUnmanaged(CompilerDiagnostic),
-) void {
+) !void {
     const ctor = contract.constructor;
 
     // Check super() call: constructor must have super_args (the parser populates this
@@ -159,10 +159,10 @@ fn validateConstructor(
     // However, the Zig AST models super_args explicitly. If there are params but
     // no super_args, the super() call is missing or incomplete.
     if (ctor.params.len > 0 and ctor.super_args.len == 0) {
-        errors.append(allocator, .{
+        try errors.append(allocator, .{
             .message = "constructor must call super() with all parameters",
             .severity = .@"error",
-        }) catch {};
+        });
     }
 
     // Check all properties are assigned in constructor
@@ -176,10 +176,10 @@ fn validateConstructor(
         }
         // Properties with initializers don't need constructor assignments
         if (!assigned and prop.initializer == null) {
-            errors.append(allocator, .{
+            try errors.append(allocator, .{
                 .message = "property must be assigned in the constructor",
                 .severity = .@"error",
-            }) catch {};
+            });
         }
     }
 }
@@ -193,27 +193,27 @@ fn validateMethods(
     contract: ContractNode,
     errors: *std.ArrayListUnmanaged(CompilerDiagnostic),
     warnings: *std.ArrayListUnmanaged(CompilerDiagnostic),
-) void {
+) !void {
     for (contract.methods) |method| {
         // Public methods must end with assert() (unless StatefulSmartContract,
         // where the compiler auto-injects the final assert)
         if (method.is_public and contract.parent_class != .stateful_smart_contract) {
             if (!endsWithAssert(method.body)) {
-                errors.append(allocator, .{
+                try errors.append(allocator, .{
                     .message = "public method must end with an assert() call",
                     .severity = .@"error",
-                }) catch {};
+                });
             }
         }
 
         // V24/V25: Warn on manual preimage/state-script boilerplate in StatefulSmartContract
         if (contract.parent_class == .stateful_smart_contract and method.is_public) {
-            warnManualPreimageUsage(allocator, method, warnings);
+            try warnManualPreimageUsage(allocator, method, warnings);
         }
 
         // Validate for-loop bounds are compile-time constants
         for (method.body) |stmt| {
-            validateStatement(allocator, stmt, errors);
+            try validateStatement(allocator, stmt, errors);
         }
     }
 }
@@ -250,16 +250,16 @@ fn validateStatement(
     allocator: Allocator,
     stmt: Statement,
     errors: *std.ArrayListUnmanaged(CompilerDiagnostic),
-) void {
+) !void {
     switch (stmt) {
         .for_stmt => {
             // For loops in the Zig IR already have concrete i64 bounds (init_value, bound),
             // so they are inherently compile-time constants. No validation needed here.
         },
         .if_stmt => |if_s| {
-            for (if_s.then_body) |s| validateStatement(allocator, s, errors);
+            for (if_s.then_body) |s| try validateStatement(allocator, s, errors);
             if (if_s.else_body) |eb| {
-                for (eb) |s| validateStatement(allocator, s, errors);
+                for (eb) |s| try validateStatement(allocator, s, errors);
             }
         },
         else => {},
@@ -271,9 +271,9 @@ fn warnManualPreimageUsage(
     allocator: Allocator,
     method: MethodNode,
     warnings: *std.ArrayListUnmanaged(CompilerDiagnostic),
-) void {
+) !void {
     for (method.body) |stmt| {
-        walkStatementsForPreimage(allocator, stmt, method.name, warnings);
+        try walkStatementsForPreimage(allocator, stmt, method.name, warnings);
     }
 }
 
@@ -282,27 +282,27 @@ fn walkStatementsForPreimage(
     stmt: Statement,
     method_name: []const u8,
     warnings: *std.ArrayListUnmanaged(CompilerDiagnostic),
-) void {
+) !void {
     switch (stmt) {
-        .expr_stmt => |expr| walkExprForPreimage(allocator, expr, method_name, warnings),
-        .const_decl => |cd| walkExprForPreimage(allocator, cd.value, method_name, warnings),
+        .expr_stmt => |expr| try walkExprForPreimage(allocator, expr, method_name, warnings),
+        .const_decl => |cd| try walkExprForPreimage(allocator, cd.value, method_name, warnings),
         .let_decl => |ld| {
-            if (ld.value) |v| walkExprForPreimage(allocator, v, method_name, warnings);
+            if (ld.value) |v| try walkExprForPreimage(allocator, v, method_name, warnings);
         },
-        .assign => |a| walkExprForPreimage(allocator, a.value, method_name, warnings),
+        .assign => |a| try walkExprForPreimage(allocator, a.value, method_name, warnings),
         .if_stmt => |if_s| {
-            walkExprForPreimage(allocator, if_s.condition, method_name, warnings);
-            for (if_s.then_body) |s| walkStatementsForPreimage(allocator, s, method_name, warnings);
+            try walkExprForPreimage(allocator, if_s.condition, method_name, warnings);
+            for (if_s.then_body) |s| try walkStatementsForPreimage(allocator, s, method_name, warnings);
             if (if_s.else_body) |eb| {
-                for (eb) |s| walkStatementsForPreimage(allocator, s, method_name, warnings);
+                for (eb) |s| try walkStatementsForPreimage(allocator, s, method_name, warnings);
             }
         },
         .for_stmt => |fs| {
-            for (fs.body) |s| walkStatementsForPreimage(allocator, s, method_name, warnings);
+            for (fs.body) |s| try walkStatementsForPreimage(allocator, s, method_name, warnings);
         },
-        .assert_stmt => |a| walkExprForPreimage(allocator, a.condition, method_name, warnings),
+        .assert_stmt => |a| try walkExprForPreimage(allocator, a.condition, method_name, warnings),
         .return_stmt => |opt_expr| {
-            if (opt_expr) |expr| walkExprForPreimage(allocator, expr, method_name, warnings);
+            if (opt_expr) |expr| try walkExprForPreimage(allocator, expr, method_name, warnings);
         },
     }
 }
@@ -312,48 +312,48 @@ fn walkExprForPreimage(
     expr: Expression,
     method_name: []const u8,
     warnings: *std.ArrayListUnmanaged(CompilerDiagnostic),
-) void {
+) !void {
     switch (expr) {
         .call => |c| {
             if (std.mem.eql(u8, c.callee, "checkPreimage")) {
-                warnings.append(allocator, .{
+                try warnings.append(allocator, .{
                     .message = "StatefulSmartContract auto-injects checkPreimage(); calling it manually will cause a duplicate verification",
                     .severity = .warning,
-                }) catch {};
+                });
             }
-            for (c.args) |arg| walkExprForPreimage(allocator, arg, method_name, warnings);
+            for (c.args) |arg| try walkExprForPreimage(allocator, arg, method_name, warnings);
         },
         .method_call => |mc| {
             if (std.mem.eql(u8, mc.method, "checkPreimage")) {
-                warnings.append(allocator, .{
+                try warnings.append(allocator, .{
                     .message = "StatefulSmartContract auto-injects checkPreimage(); calling it manually will cause a duplicate verification",
                     .severity = .warning,
-                }) catch {};
+                });
             }
             if (std.mem.eql(u8, mc.method, "getStateScript")) {
-                warnings.append(allocator, .{
+                try warnings.append(allocator, .{
                     .message = "StatefulSmartContract auto-injects state continuation; calling getStateScript() manually is redundant",
                     .severity = .warning,
-                }) catch {};
+                });
             }
-            for (mc.args) |arg| walkExprForPreimage(allocator, arg, method_name, warnings);
+            for (mc.args) |arg| try walkExprForPreimage(allocator, arg, method_name, warnings);
         },
         .binary_op => |b| {
-            walkExprForPreimage(allocator, b.left, method_name, warnings);
-            walkExprForPreimage(allocator, b.right, method_name, warnings);
+            try walkExprForPreimage(allocator, b.left, method_name, warnings);
+            try walkExprForPreimage(allocator, b.right, method_name, warnings);
         },
-        .unary_op => |u| walkExprForPreimage(allocator, u.operand, method_name, warnings),
+        .unary_op => |u| try walkExprForPreimage(allocator, u.operand, method_name, warnings),
         .ternary => |t| {
-            walkExprForPreimage(allocator, t.condition, method_name, warnings);
-            walkExprForPreimage(allocator, t.then_expr, method_name, warnings);
-            walkExprForPreimage(allocator, t.else_expr, method_name, warnings);
+            try walkExprForPreimage(allocator, t.condition, method_name, warnings);
+            try walkExprForPreimage(allocator, t.then_expr, method_name, warnings);
+            try walkExprForPreimage(allocator, t.else_expr, method_name, warnings);
         },
         .index_access => |ia| {
-            walkExprForPreimage(allocator, ia.object, method_name, warnings);
-            walkExprForPreimage(allocator, ia.index, method_name, warnings);
+            try walkExprForPreimage(allocator, ia.object, method_name, warnings);
+            try walkExprForPreimage(allocator, ia.index, method_name, warnings);
         },
-        .increment => |inc| walkExprForPreimage(allocator, inc.operand, method_name, warnings),
-        .decrement => |dec| walkExprForPreimage(allocator, dec.operand, method_name, warnings),
+        .increment => |inc| try walkExprForPreimage(allocator, inc.operand, method_name, warnings),
+        .decrement => |dec| try walkExprForPreimage(allocator, dec.operand, method_name, warnings),
         .literal_int, .literal_bool, .literal_bytes, .identifier,
         .property_access, .array_literal,
         => {},
@@ -391,7 +391,7 @@ fn checkNoRecursion(
 
         var calls = StringSet{};
         for (method.body) |stmt| {
-            collectMethodCalls(allocator, stmt, &calls);
+            try collectMethodCalls(allocator, stmt, &calls);
         }
         try call_graph.put(allocator, method.name, calls);
     }
@@ -404,10 +404,10 @@ fn checkNoRecursion(
         defer stack.deinit(allocator);
 
         if (try hasCycle(allocator, method.name, &call_graph, &method_names, &visited, &stack)) {
-            errors.append(allocator, .{
+            try errors.append(allocator, .{
                 .message = "recursion detected: method calls itself directly or indirectly",
                 .severity = .@"error",
-            }) catch {};
+            });
         }
     }
 }
@@ -443,61 +443,61 @@ fn hasCycle(
 }
 
 /// Collect method calls from statements.
-fn collectMethodCalls(allocator: Allocator, stmt: Statement, calls: *StringSet) void {
+fn collectMethodCalls(allocator: Allocator, stmt: Statement, calls: *StringSet) !void {
     switch (stmt) {
-        .expr_stmt => |expr| collectMethodCallsInExpr(allocator, expr, calls),
-        .const_decl => |cd| collectMethodCallsInExpr(allocator, cd.value, calls),
+        .expr_stmt => |expr| try collectMethodCallsInExpr(allocator, expr, calls),
+        .const_decl => |cd| try collectMethodCallsInExpr(allocator, cd.value, calls),
         .let_decl => |ld| {
-            if (ld.value) |v| collectMethodCallsInExpr(allocator, v, calls);
+            if (ld.value) |v| try collectMethodCallsInExpr(allocator, v, calls);
         },
-        .assign => |a| collectMethodCallsInExpr(allocator, a.value, calls),
+        .assign => |a| try collectMethodCallsInExpr(allocator, a.value, calls),
         .if_stmt => |if_s| {
-            collectMethodCallsInExpr(allocator, if_s.condition, calls);
-            for (if_s.then_body) |s| collectMethodCalls(allocator, s, calls);
+            try collectMethodCallsInExpr(allocator, if_s.condition, calls);
+            for (if_s.then_body) |s| try collectMethodCalls(allocator, s, calls);
             if (if_s.else_body) |eb| {
-                for (eb) |s| collectMethodCalls(allocator, s, calls);
+                for (eb) |s| try collectMethodCalls(allocator, s, calls);
             }
         },
         .for_stmt => |fs| {
-            for (fs.body) |s| collectMethodCalls(allocator, s, calls);
+            for (fs.body) |s| try collectMethodCalls(allocator, s, calls);
         },
-        .assert_stmt => |a| collectMethodCallsInExpr(allocator, a.condition, calls),
+        .assert_stmt => |a| try collectMethodCallsInExpr(allocator, a.condition, calls),
         .return_stmt => |opt_expr| {
-            if (opt_expr) |expr| collectMethodCallsInExpr(allocator, expr, calls);
+            if (opt_expr) |expr| try collectMethodCallsInExpr(allocator, expr, calls);
         },
     }
 }
 
-fn collectMethodCallsInExpr(allocator: Allocator, expr: Expression, calls: *StringSet) void {
+fn collectMethodCallsInExpr(allocator: Allocator, expr: Expression, calls: *StringSet) !void {
     switch (expr) {
         .call => |c| {
             // Bare function calls that might be method references
-            calls.put(allocator, c.callee, {}) catch {};
-            for (c.args) |arg| collectMethodCallsInExpr(allocator, arg, calls);
+            try calls.put(allocator, c.callee, {});
+            for (c.args) |arg| try collectMethodCallsInExpr(allocator, arg, calls);
         },
         .method_call => |mc| {
             // this.methodName() calls
             if (std.mem.eql(u8, mc.object, "this")) {
-                calls.put(allocator, mc.method, {}) catch {};
+                try calls.put(allocator, mc.method, {});
             }
-            for (mc.args) |arg| collectMethodCallsInExpr(allocator, arg, calls);
+            for (mc.args) |arg| try collectMethodCallsInExpr(allocator, arg, calls);
         },
         .binary_op => |b| {
-            collectMethodCallsInExpr(allocator, b.left, calls);
-            collectMethodCallsInExpr(allocator, b.right, calls);
+            try collectMethodCallsInExpr(allocator, b.left, calls);
+            try collectMethodCallsInExpr(allocator, b.right, calls);
         },
-        .unary_op => |u| collectMethodCallsInExpr(allocator, u.operand, calls),
+        .unary_op => |u| try collectMethodCallsInExpr(allocator, u.operand, calls),
         .ternary => |t| {
-            collectMethodCallsInExpr(allocator, t.condition, calls);
-            collectMethodCallsInExpr(allocator, t.then_expr, calls);
-            collectMethodCallsInExpr(allocator, t.else_expr, calls);
+            try collectMethodCallsInExpr(allocator, t.condition, calls);
+            try collectMethodCallsInExpr(allocator, t.then_expr, calls);
+            try collectMethodCallsInExpr(allocator, t.else_expr, calls);
         },
         .index_access => |ia| {
-            collectMethodCallsInExpr(allocator, ia.object, calls);
-            collectMethodCallsInExpr(allocator, ia.index, calls);
+            try collectMethodCallsInExpr(allocator, ia.object, calls);
+            try collectMethodCallsInExpr(allocator, ia.index, calls);
         },
-        .increment => |inc| collectMethodCallsInExpr(allocator, inc.operand, calls),
-        .decrement => |dec| collectMethodCallsInExpr(allocator, dec.operand, calls),
+        .increment => |inc| try collectMethodCallsInExpr(allocator, inc.operand, calls),
+        .decrement => |dec| try collectMethodCallsInExpr(allocator, dec.operand, calls),
         .literal_int, .literal_bool, .literal_bytes, .identifier,
         .property_access, .array_literal,
         => {},

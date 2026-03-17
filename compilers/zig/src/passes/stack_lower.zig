@@ -282,73 +282,73 @@ const LowerCtx = struct {
             .literal_int, .literal_bigint, .literal_bool, .literal_bytes, .nop => {},
             .load_param, .load_prop, .load_const, .get_state_script => {},
             .ref => |name| {
-                self.last_uses.put(self.allocator, name, idx) catch {};
+                self.last_uses.put(self.allocator, name, idx) catch return;
             },
             .property_read => {},
             .property_write => |pw| {
-                self.last_uses.put(self.allocator, pw.value_ref, idx) catch {};
+                self.last_uses.put(self.allocator, pw.value_ref, idx) catch return;
             },
             .binary_op => |bop| {
-                self.last_uses.put(self.allocator, bop.left, idx) catch {};
-                self.last_uses.put(self.allocator, bop.right, idx) catch {};
+                self.last_uses.put(self.allocator, bop.left, idx) catch return;
+                self.last_uses.put(self.allocator, bop.right, idx) catch return;
             },
             .bin_op => |bop| {
-                self.last_uses.put(self.allocator, bop.left, idx) catch {};
-                self.last_uses.put(self.allocator, bop.right, idx) catch {};
+                self.last_uses.put(self.allocator, bop.left, idx) catch return;
+                self.last_uses.put(self.allocator, bop.right, idx) catch return;
             },
             .unary_op => |uop| {
-                self.last_uses.put(self.allocator, uop.operand, idx) catch {};
+                self.last_uses.put(self.allocator, uop.operand, idx) catch return;
             },
             .builtin_call => |call| {
                 for (call.args) |arg| {
-                    self.last_uses.put(self.allocator, arg, idx) catch {};
+                    self.last_uses.put(self.allocator, arg, idx) catch return;
                 }
             },
             .call => |c| {
                 for (c.args) |arg| {
-                    self.last_uses.put(self.allocator, arg, idx) catch {};
+                    self.last_uses.put(self.allocator, arg, idx) catch return;
                 }
             },
             .method_call => |mc| {
                 for (mc.args) |arg| {
-                    self.last_uses.put(self.allocator, arg, idx) catch {};
+                    self.last_uses.put(self.allocator, arg, idx) catch return;
                 }
             },
             .if_expr => |ie| {
-                self.last_uses.put(self.allocator, ie.condition, idx) catch {};
+                self.last_uses.put(self.allocator, ie.condition, idx) catch return;
             },
             .@"if" => |ie| {
-                self.last_uses.put(self.allocator, ie.cond, idx) catch {};
+                self.last_uses.put(self.allocator, ie.cond, idx) catch return;
             },
             .for_loop, .loop => {},
             .assert_op => |a| {
-                self.last_uses.put(self.allocator, a.condition, idx) catch {};
+                self.last_uses.put(self.allocator, a.condition, idx) catch return;
             },
             .assert => |a| {
-                self.last_uses.put(self.allocator, a.value, idx) catch {};
+                self.last_uses.put(self.allocator, a.value, idx) catch return;
             },
             .update_prop => |up| {
-                self.last_uses.put(self.allocator, up.value, idx) catch {};
+                self.last_uses.put(self.allocator, up.value, idx) catch return;
             },
             .check_preimage => |cp| {
-                self.last_uses.put(self.allocator, cp.preimage, idx) catch {};
+                self.last_uses.put(self.allocator, cp.preimage, idx) catch return;
             },
             .deserialize_state => |ds| {
-                self.last_uses.put(self.allocator, ds.preimage, idx) catch {};
+                self.last_uses.put(self.allocator, ds.preimage, idx) catch return;
             },
             .add_output => |ao| {
-                self.last_uses.put(self.allocator, ao.satoshis, idx) catch {};
+                self.last_uses.put(self.allocator, ao.satoshis, idx) catch return;
                 for (ao.state_refs) |sr| {
-                    self.last_uses.put(self.allocator, sr, idx) catch {};
+                    self.last_uses.put(self.allocator, sr, idx) catch return;
                 }
             },
             .add_raw_output => |aro| {
-                self.last_uses.put(self.allocator, aro.satoshis, idx) catch {};
-                self.last_uses.put(self.allocator, aro.script_ref, idx) catch {};
+                self.last_uses.put(self.allocator, aro.satoshis, idx) catch return;
+                self.last_uses.put(self.allocator, aro.script_ref, idx) catch return;
             },
             .array_literal => |al| {
                 for (al.elements) |elem| {
-                    self.last_uses.put(self.allocator, elem, idx) catch {};
+                    self.last_uses.put(self.allocator, elem, idx) catch return;
                 }
             },
         }

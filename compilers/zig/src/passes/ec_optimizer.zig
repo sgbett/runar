@@ -451,7 +451,7 @@ fn eliminateDeadBindings(allocator: Allocator, body: []types.ANFBinding) ![]type
         var used = std.StringHashMap(void).init(allocator);
         defer used.deinit();
 
-        for (current) |binding| collectRefs(binding.value, &used);
+        for (current) |binding| try collectRefs(binding.value, &used);
 
         var filtered = std.ArrayListUnmanaged(types.ANFBinding).empty;
         defer filtered.deinit(allocator);
@@ -474,14 +474,14 @@ fn eliminateDeadBindings(allocator: Allocator, body: []types.ANFBinding) ![]type
 }
 
 /// Walk an ANFValue and collect all binding name references.
-fn collectRefs(v: types.ANFValue, used: *std.StringHashMap(void)) void {
+fn collectRefs(v: types.ANFValue, used: *std.StringHashMap(void)) !void {
     switch (v) {
         .load_param => return,
         .load_const => |lc| {
             switch (lc.value) {
                 .string => |s| {
                     if (std.mem.startsWith(u8, s, "@ref:"))
-                        used.put(s[5..], {}) catch {};
+                        try used.put(s[5..], {});
                 },
                 else => {},
             }
@@ -489,61 +489,61 @@ fn collectRefs(v: types.ANFValue, used: *std.StringHashMap(void)) void {
         },
         .load_prop, .get_state_script => return,
         .bin_op => |bo| {
-            used.put(bo.left, {}) catch {};
-            used.put(bo.right, {}) catch {};
+            try used.put(bo.left, {});
+            try used.put(bo.right, {});
         },
-        .unary_op => |uo| used.put(uo.operand, {}) catch {},
+        .unary_op => |uo| try used.put(uo.operand, {}),
         .call => |c| {
-            for (c.args) |arg| used.put(arg, {}) catch {};
+            for (c.args) |arg| try used.put(arg, {});
         },
         .method_call => |mc| {
-            used.put(mc.object, {}) catch {};
-            for (mc.args) |arg| used.put(arg, {}) catch {};
+            try used.put(mc.object, {});
+            for (mc.args) |arg| try used.put(arg, {});
         },
         .@"if" => |if_val| {
-            used.put(if_val.cond, {}) catch {};
-            for (if_val.then) |b| collectRefs(b.value, used);
-            for (if_val.@"else") |b| collectRefs(b.value, used);
+            try used.put(if_val.cond, {});
+            for (if_val.then) |b| try collectRefs(b.value, used);
+            for (if_val.@"else") |b| try collectRefs(b.value, used);
         },
         .loop => |loop_val| {
-            for (loop_val.body) |b| collectRefs(b.value, used);
+            for (loop_val.body) |b| try collectRefs(b.value, used);
         },
-        .assert => |a| used.put(a.value, {}) catch {},
-        .update_prop => |up| used.put(up.value, {}) catch {},
-        .check_preimage => |cp| used.put(cp.preimage, {}) catch {},
-        .deserialize_state => |ds| used.put(ds.preimage, {}) catch {},
+        .assert => |a| try used.put(a.value, {}),
+        .update_prop => |up| try used.put(up.value, {}),
+        .check_preimage => |cp| try used.put(cp.preimage, {}),
+        .deserialize_state => |ds| try used.put(ds.preimage, {}),
         .add_output => |ao| {
-            used.put(ao.satoshis, {}) catch {};
-            for (ao.state_values) |sv| used.put(sv, {}) catch {};
-            if (ao.preimage.len > 0) used.put(ao.preimage, {}) catch {};
+            try used.put(ao.satoshis, {});
+            for (ao.state_values) |sv| try used.put(sv, {});
+            if (ao.preimage.len > 0) try used.put(ao.preimage, {});
         },
         .add_raw_output => |aro| {
-            used.put(aro.satoshis, {}) catch {};
-            if (aro.script_bytes.len > 0) used.put(aro.script_bytes, {}) catch {};
-            if (aro.script_ref.len > 0) used.put(aro.script_ref, {}) catch {};
+            try used.put(aro.satoshis, {});
+            if (aro.script_bytes.len > 0) try used.put(aro.script_bytes, {});
+            if (aro.script_ref.len > 0) try used.put(aro.script_ref, {});
         },
         .array_literal => |al| {
-            for (al.elements) |e| used.put(e, {}) catch {};
+            for (al.elements) |e| try used.put(e, {});
         },
         // Legacy variants
         .binary_op => |bo| {
-            used.put(bo.left, {}) catch {};
-            used.put(bo.right, {}) catch {};
+            try used.put(bo.left, {});
+            try used.put(bo.right, {});
         },
         .builtin_call => |bc| {
-            for (bc.args) |arg| used.put(arg, {}) catch {};
+            for (bc.args) |arg| try used.put(arg, {});
         },
-        .property_write => |pw| used.put(pw.value_ref, {}) catch {},
+        .property_write => |pw| try used.put(pw.value_ref, {}),
         .if_expr => |ie| {
-            used.put(ie.condition, {}) catch {};
-            for (ie.then_bindings) |b| collectRefs(b.value, used);
-            if (ie.else_bindings) |eb| for (eb) |b| collectRefs(b.value, used);
+            try used.put(ie.condition, {});
+            for (ie.then_bindings) |b| try collectRefs(b.value, used);
+            if (ie.else_bindings) |eb| for (eb) |b| try collectRefs(b.value, used);
         },
         .for_loop => |fl| {
-            for (fl.body_bindings) |b| collectRefs(b.value, used);
+            for (fl.body_bindings) |b| try collectRefs(b.value, used);
         },
-        .assert_op => |a| used.put(a.condition, {}) catch {},
-        .ref => |r| used.put(r, {}) catch {},
+        .assert_op => |a| try used.put(a.condition, {}),
+        .ref => |r| try used.put(r, {}),
         .literal_int, .literal_bigint, .literal_bool, .literal_bytes, .property_read, .nop => {},
     }
 }
