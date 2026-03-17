@@ -67,6 +67,44 @@ RSpec.describe Runar::ECDSA do
     it 'returns nil for an empty string' do
       expect(described_class.parse_der_signature('')).to be_nil
     end
+
+    # --- Issue #54: zero-length r or s component ---
+
+    it 'returns nil when r has zero length' do
+      # 0x30 0x06 0x02 0x00 0x02 0x02 0x01 0x01  (8 bytes, passes minimum-length guard)
+      # Sequence len=6: r-tag, r-len=0, s-tag, s-len=2, s=[0x01,0x01]
+      expect(described_class.parse_der_signature('3006020002020101')).to be_nil
+    end
+
+    it 'returns nil when s has zero length' do
+      # 0x30 0x06 0x02 0x02 0x01 0x01 0x02 0x00  (8 bytes, passes minimum-length guard)
+      # Sequence len=6: r-tag, r-len=2, r=[0x01,0x01], s-tag, s-len=0
+      expect(described_class.parse_der_signature('3006020201010200')).to be_nil
+    end
+
+    # --- Issue #55: non-minimal DER encoding ---
+
+    it 'returns nil when r has a non-minimal leading 0x00 (high bit not set on next byte)' do
+      # r = 0x0001 encoded as 02 02 00 01 — non-minimal; 02 01 01 would be correct
+      # 0x30 0x07 0x02 0x02 0x00 0x01 0x02 0x01 0x01  (sequence len=7, total 9 bytes)
+      expect(described_class.parse_der_signature('300702020001020101')).to be_nil
+    end
+
+    it 'returns nil when s has a non-minimal leading 0x00 (high bit not set on next byte)' do
+      # s = 0x0001 encoded as 02 02 00 01 — non-minimal
+      # 0x30 0x07 0x02 0x01 0x01 0x02 0x02 0x00 0x01  (sequence len=7, total 9 bytes)
+      expect(described_class.parse_der_signature('300702010102020001')).to be_nil
+    end
+
+    it 'parses correctly when r has a valid leading 0x00 (high bit set on next byte)' do
+      # r has high bit set so a 0x00 pad byte is required — this IS minimal/valid
+      # Use a real Alice sig which has a 0x00-padded r (the 0x21-length component)
+      # Alice sig r starts with 0x00 e2... where 0xe2 has high bit set — valid padding
+      result = described_class.parse_der_signature(ALICE_SIG_HEX)
+      expect(result).not_to be_nil
+      r, = result
+      expect(r).to eq(0xe2aa1265ce57f54b981ffc6a5f3d229e908d7772fceb75a50c8c2d6076313df0)
+    end
   end
 
   # -------------------------------------------------------------------------
@@ -180,8 +218,12 @@ RSpec.describe Runar::ECDSA do
       expect(described_class.verify(TEST_DIGEST_HEX, sig_with_sighash, ALICE_PUB_HEX)).to be true
     end
 
-    it 'returns true for a high-S signature (verification does not enforce low-S)' do
-      expect(described_class.verify(TEST_DIGEST_HEX, ALICE_HIGH_S_SIG_HEX, ALICE_PUB_HEX)).to be true
+    it 'rejects a high-S signature (BIP-62 low-S enforcement)' do
+      expect(described_class.verify(TEST_DIGEST_HEX, ALICE_HIGH_S_SIG_HEX, ALICE_PUB_HEX)).to be false
+    end
+
+    it 'accepts the original low-S signature that the high-S variant was derived from' do
+      expect(described_class.verify(TEST_DIGEST_HEX, ALICE_SIG_HEX, ALICE_PUB_HEX)).to be true
     end
 
     it 'returns false for a malformed DER signature' do

@@ -124,6 +124,12 @@ module Runar
       sig_r, sig_s = parsed
       return false if sig_r <= 0 || sig_r >= CURVE_N || sig_s <= 0 || sig_s >= CURVE_N
 
+      # BIP-62 rule 5 / SCRIPT_VERIFY_LOW_S: reject high-S signatures.
+      # Bitcoin nodes enforce this on-chain; the signer already normalizes to
+      # low-S (see ecdsa_sign), so the verifier must mirror that enforcement.
+      half_n = CURVE_N >> 1
+      return false if sig_s > half_n
+
       qx, qy = decompress_pubkey_bytes(pk_bytes)
 
       z   = msg_hash.unpack1('H*').to_i(16)
@@ -202,9 +208,14 @@ module Runar
       idx   += 1
       r_len  = bytes[idx]
       idx   += 1
+      return nil if r_len.zero?
       return nil if idx + r_len > bytes.length
 
-      parsed_r  = bytes[idx, r_len].pack('C*').unpack1('H*').to_i(16)
+      r_component = bytes[idx, r_len]
+      # Non-minimal encoding: leading 0x00 when the next byte's high bit is clear
+      return nil if r_len > 1 && r_component[0] == 0x00 && r_component[1] & 0x80 == 0
+
+      parsed_r  = r_component.pack('C*').unpack1('H*').to_i(16)
       idx      += r_len
 
       # Parse s
@@ -213,9 +224,14 @@ module Runar
       idx   += 1
       s_len  = bytes[idx]
       idx   += 1
+      return nil if s_len.zero?
       return nil if idx + s_len > bytes.length
 
-      parsed_s = bytes[idx, s_len].pack('C*').unpack1('H*').to_i(16)
+      s_component = bytes[idx, s_len]
+      # Non-minimal encoding: leading 0x00 when the next byte's high bit is clear
+      return nil if s_len > 1 && s_component[0] == 0x00 && s_component[1] & 0x80 == 0
+
+      parsed_s = s_component.pack('C*').unpack1('H*').to_i(16)
 
       [parsed_r, parsed_s]
     end
