@@ -1679,7 +1679,7 @@ class RbParser {
       return expr;
     }
 
-    // Array literal
+    // Array literal: [elem, ...]
     if (tok.type === '[') {
       this.advance();
       const elements: Expression[] = [];
@@ -1688,16 +1688,7 @@ class RbParser {
         if (!this.match(',')) break;
       }
       this.expect(']');
-      // Arrays are not directly in the AST as a dedicated node.
-      // Return the first element or a placeholder. This is an edge case;
-      // the Python parser handles it the same way through index access.
-      // For now, if used, it will be accessed via index_access.
-      // We produce a call_expr to a fictitious 'array' constructor.
-      return {
-        kind: 'call_expr',
-        callee: { kind: 'identifier', name: 'array' },
-        args: elements,
-      };
+      return { kind: 'array_literal', elements };
     }
 
     // Identifier or function call

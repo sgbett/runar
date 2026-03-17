@@ -390,6 +390,11 @@ fn validate_expression(expr: &Expression, errors: &mut Vec<String>) {
         Expression::IncrementExpr { operand, .. } | Expression::DecrementExpr { operand, .. } => {
             validate_expression(operand, errors);
         }
+        Expression::ArrayLiteral { elements } => {
+            for elem in elements {
+                validate_expression(elem, errors);
+            }
+        }
         // Leaf nodes -- nothing to validate
         Expression::Identifier { .. }
         | Expression::BigIntLiteral { .. }

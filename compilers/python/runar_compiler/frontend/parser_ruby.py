@@ -22,6 +22,7 @@ from __future__ import annotations
 import re
 
 from runar_compiler.frontend.ast_nodes import (
+    ArrayLiteralExpr,
     ContractNode, PropertyNode, MethodNode, ParamNode, SourceLocation,
     PrimitiveType, FixedArrayType, CustomType, TypeNode,
     BigIntLiteral, BoolLiteral, ByteStringLiteral, Identifier,
@@ -1612,12 +1613,7 @@ class _RbParser:
                 if not self._match(TOK_COMMA):
                     break
             self._expect(TOK_RBRACKET, "]")
-            # Arrays are not a dedicated AST node; produce a call_expr
-            # (same approach as the TypeScript reference parser)
-            return CallExpr(
-                callee=Identifier(name="array"),
-                args=elements,
-            )
+            return ArrayLiteralExpr(elements=elements)
 
         # Identifier or function call (including ``assert`` as identifier)
         if kind in (TOK_IDENT, TOK_ASSERT):

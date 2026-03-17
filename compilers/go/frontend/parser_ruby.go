@@ -1743,7 +1743,7 @@ func (p *rbParser) parsePrimary() Expression {
 		return expr
 	}
 
-	// Array literal
+	// Array literal: [elem, ...]
 	if tok.kind == rbTokLBracket {
 		p.advance()
 		var elements []Expression
@@ -1754,10 +1754,7 @@ func (p *rbParser) parsePrimary() Expression {
 			}
 		}
 		p.expect(rbTokRBracket)
-		return CallExpr{
-			Callee: Identifier{Name: "FixedArray"},
-			Args:   elements,
-		}
+		return ArrayLiteralExpr{Elements: elements}
 	}
 
 	// super keyword
