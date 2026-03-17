@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { lowerToStack } from "../../../packages/runar-compiler/dist/passes/05-stack-lower.js";
 import { emit } from "../../../packages/runar-compiler/dist/passes/06-emit.js";
+import { optimizeStackIR } from "../../../packages/runar-compiler/dist/optimizer/peephole.js";
 
 function printHelp() {
   process.stdout.write(
@@ -74,6 +75,9 @@ function main() {
   let result;
   try {
     stack = lowerToStack(anf);
+    for (const method of stack.methods) {
+      method.ops = optimizeStackIR(method.ops);
+    }
     result = emit(stack);
   } catch (error) {
     const message = error instanceof Error ? error.stack ?? error.message : String(error);

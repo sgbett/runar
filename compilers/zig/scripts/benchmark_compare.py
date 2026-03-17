@@ -9,6 +9,7 @@ import json
 import math
 import os
 import platform
+import re
 import shlex
 import shutil
 import statistics
@@ -24,6 +25,9 @@ DEFAULT_SOURCE_CONTRACTS = ROOT / "compilers" / "zig" / "benchmarks" / "contract
 DEFAULT_IR_CONTRACTS = ROOT / "compilers" / "zig" / "benchmarks" / "contracts-ir.txt"
 TS_SOURCE_HELPER = ROOT / "compilers" / "zig" / "scripts" / "ts_compile_source_hex.mjs"
 TS_IR_HELPER = ROOT / "compilers" / "zig" / "scripts" / "ts_compile_ir_hex.mjs"
+TS_DIST = ROOT / "packages" / "runar-compiler" / "dist"
+JS_MAX_SAFE_INTEGER = 9_007_199_254_740_991
+IR_LOAD_CONST_INT_RE = re.compile(r'"kind"\s*:\s*"load_const"\s*,\s*"value"\s*:\s*(-?\d+)')
 
 
 def parse_args() -> argparse.Namespace:
@@ -95,6 +99,18 @@ def read_contracts(path: Path) -> list[str]:
     return names
 
 
+def normalize_repo_path(path: Path) -> Path:
+    return path if path.is_absolute() else (ROOT / path).resolve()
+
+
+def contracts_sha256(contracts: list[str]) -> str:
+    digest = hashlib.sha256()
+    for name in contracts:
+        digest.update(name.encode("utf-8"))
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
 def normalize_hex(value: str) -> str:
     return "".join(value.split()).lower()
 
@@ -108,6 +124,22 @@ def file_sha256(path: Path) -> str:
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
+    return digest.hexdigest()
+
+
+def path_sha256(path: Path) -> str:
+    if path.is_file():
+        return file_sha256(path)
+    if not path.is_dir():
+        raise FileNotFoundError(f"cannot hash missing path: {path}")
+
+    digest = hashlib.sha256()
+    for child in sorted(entry for entry in path.rglob("*") if entry.is_file()):
+        rel = child.relative_to(path).as_posix()
+        digest.update(rel.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(file_sha256(child).encode("ascii"))
+        digest.update(b"\0")
     return digest.hexdigest()
 
 
@@ -149,6 +181,17 @@ def resolve_ir_path(contract: str) -> Path:
     if not ir_path.exists():
         raise FileNotFoundError(f"cannot resolve expected-ir.json for {contract}")
     return ir_path
+
+
+def ensure_ir_json_safe_for_ts_helper(path: Path) -> None:
+    text = path.read_text()
+    for match in IR_LOAD_CONST_INT_RE.finditer(text):
+        value = int(match.group(1))
+        if abs(value) > JS_MAX_SAFE_INTEGER:
+            raise RuntimeError(
+                f"{path.relative_to(ROOT)} contains load_const integer {value} outside JS safe integer range; "
+                "the TypeScript IR benchmark helper cannot benchmark this input safely"
+            )
 
 
 def run_checked(cmd: list[str], timeout_sec: float) -> str:
@@ -280,7 +323,8 @@ def benchmark_contract(
         ts_cmd = [node_bin, str(TS_SOURCE_HELPER), "--file", str(input_path)]
     else:
         input_path = resolve_ir_path(contract)
-        zig_cmd = [str(zig_bin), "compile-ir", str(input_path)]
+        ensure_ir_json_safe_for_ts_helper(input_path)
+        zig_cmd = [str(zig_bin), "compile-ir", str(input_path), "--hex"]
         ts_cmd = [node_bin, str(TS_IR_HELPER), "--file", str(input_path)]
 
     zig_samples, ts_samples, zig_hex_raw, ts_hex_raw = time_commands_paired(
@@ -300,8 +344,10 @@ def benchmark_contract(
         "contract": contract,
         "input": str(input_path.relative_to(ROOT)),
         "input_bytes": input_bytes,
+        "input_sha256": file_sha256(input_path),
         "mode": mode,
         "match": match,
+        "comparable": match,
         "zig": {
             "command": zig_cmd,
             "command_pretty": shell_join(zig_cmd),
@@ -317,8 +363,8 @@ def benchmark_contract(
             **ts_stats,
         },
         "hex_diff": diff_hex(zig_hex, ts_hex) if not match else None,
-        "speedup_vs_ts": speedup,
-        "delta_mean_ms_vs_ts": ts_stats["mean_ms"] - zig_stats["mean_ms"],
+        "speedup_vs_ts": speedup if match else None,
+        "delta_mean_ms_vs_ts": (ts_stats["mean_ms"] - zig_stats["mean_ms"]) if match else None,
     }
 
 
@@ -398,7 +444,7 @@ def print_report(
                 f"{row['zig']['p95_ms']:.2f} | "
                 f"{row['ts']['mean_ms']:.2f} | "
                 f"{row['ts']['p95_ms']:.2f} | "
-                f"{format_speedup(row['speedup_vs_ts'])} | "
+                f"{format_speedup(row['speedup_vs_ts']) if row['match'] else 'n/a'} | "
                 f"{'yes' if row['match'] else 'no'} | "
                 f"{row['zig']['cv_pct']:.1f}% | "
                 f"{row['ts']['cv_pct']:.1f}% |"
@@ -463,6 +509,12 @@ def preflight(args: argparse.Namespace) -> None:
     if missing_paths:
         joined = "\n".join(str(path) for path in missing_paths)
         raise SystemExit(f"missing benchmark helper script(s):\n{joined}")
+    if not TS_DIST.exists():
+        raise SystemExit(
+            f"missing TypeScript dist output: {TS_DIST}\n"
+            "build it first with:\n"
+            "  cd /Users/satchmo/code/runar && pnpm --filter runar-compiler build"
+        )
     if shutil.which(args.node_bin) is None:
         raise SystemExit(f"missing required executable: {args.node_bin}")
 
@@ -493,7 +545,7 @@ def collect_environment(args: argparse.Namespace) -> dict[str, object]:
     git_commit = maybe_read_command_output(["git", "rev-parse", "HEAD"])
     git_status = maybe_read_command_output(["git", "status", "--short"])
     node_version = maybe_read_command_output([args.node_bin, "--version"])
-    zig_version = maybe_read_command_output([str(args.zig_bin), "version"]) if args.zig_bin.exists() else None
+    zig_version = maybe_read_command_output(["zig", "version"])
     return {
         "generated_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
         "cwd": str(ROOT),
@@ -512,12 +564,13 @@ def build_payload(
     args: argparse.Namespace, contracts: list[str], contracts_file: Path | None, results: list[dict]
 ) -> dict:
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "config": {
             "mode": args.mode,
             "suite": infer_suite_name(args.mode, contracts_file, contracts),
             "label": args.label,
             "contracts": contracts,
+            "contracts_sha256": contracts_sha256(contracts),
             "contracts_file": str(contracts_file.relative_to(ROOT)) if contracts_file is not None else None,
             "contracts_file_sha256": file_sha256(contracts_file) if contracts_file is not None else None,
             "iterations": args.iterations,
@@ -529,6 +582,12 @@ def build_payload(
             "helpers": {
                 "ts_source_helper": str(TS_SOURCE_HELPER.relative_to(ROOT)),
                 "ts_ir_helper": str(TS_IR_HELPER.relative_to(ROOT)),
+            },
+            "artifacts": {
+                "zig_bin_sha256": file_sha256(args.zig_bin),
+                "ts_source_helper_sha256": file_sha256(TS_SOURCE_HELPER),
+                "ts_ir_helper_sha256": file_sha256(TS_IR_HELPER),
+                "ts_dist_sha256": path_sha256(TS_DIST),
             },
             "recommended_invocation": shell_join([
                 sys.executable,
@@ -552,7 +611,7 @@ def main() -> int:
     preflight(args)
 
     default_contracts_file = DEFAULT_SOURCE_CONTRACTS if args.mode == "source" else DEFAULT_IR_CONTRACTS
-    contracts_file = None if args.contracts else (args.contracts_file or default_contracts_file)
+    contracts_file = None if args.contracts else normalize_repo_path(args.contracts_file or default_contracts_file)
     contracts = args.contracts or read_contracts(contracts_file)
 
     if args.list_contracts:

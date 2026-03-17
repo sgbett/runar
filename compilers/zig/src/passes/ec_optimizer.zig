@@ -242,7 +242,7 @@ fn tryOptimize(
         }
     }
 
-    // Rule 12: ecMul(k, G) -> ecMulGen(k)
+    // Rule 12: ecMul(G, k) -> ecMulGen(k)
     if (eql(func, "ecMul") and args.len == 2 and isGenerator(args[0], vm))
         return makeCall(allocator, "ecMulGen", &.{args[1]});
 
@@ -253,34 +253,8 @@ fn tryOptimize(
 // Helpers -- value inspection
 // ============================================================================
 
-/// Resolve a binding name through @ref: chains to its underlying ANFValue.
 fn resolve(name: []const u8, vm: *std.StringHashMap(types.ANFValue)) ?types.ANFValue {
-    var current = name;
-    var depth: usize = 0;
-    while (depth < 64) : (depth += 1) {
-        const val = vm.get(current) orelse return null;
-        switch (val) {
-            .load_param => |lp| {
-                if (std.mem.startsWith(u8, lp.name, "@ref:")) {
-                    current = lp.name[5..];
-                    continue;
-                }
-                return val;
-            },
-            .load_const => |lc| switch (lc.value) {
-                .string => |s| {
-                    if (std.mem.startsWith(u8, s, "@ref:")) {
-                        current = s[5..];
-                        continue;
-                    }
-                    return val;
-                },
-                else => return val,
-            },
-            else => return val,
-        }
-    }
-    return vm.get(current);
+    return vm.get(name);
 }
 
 /// Resolve a binding name and return the inner ANFCall if it is a call, else null.
@@ -290,36 +264,6 @@ fn resolveCall(name: []const u8, vm: *std.StringHashMap(types.ANFValue)) ?types.
         .call => |call| call,
         else => null,
     };
-}
-
-/// Follow @ref: chains to get the canonical binding name.
-fn canonical(name: []const u8, vm: *std.StringHashMap(types.ANFValue)) []const u8 {
-    var current = name;
-    var depth: usize = 0;
-    while (depth < 64) : (depth += 1) {
-        const val = vm.get(current) orelse break;
-        switch (val) {
-            .load_param => |lp| {
-                if (std.mem.startsWith(u8, lp.name, "@ref:")) {
-                    current = lp.name[5..];
-                    continue;
-                }
-                break;
-            },
-            .load_const => |lc| switch (lc.value) {
-                .string => |s| {
-                    if (std.mem.startsWith(u8, s, "@ref:")) {
-                        current = s[5..];
-                        continue;
-                    }
-                    break;
-                },
-                else => break,
-            },
-            else => break,
-        }
-    }
-    return current;
 }
 
 fn isInfinity(name: []const u8, vm: *std.StringHashMap(types.ANFValue)) bool {
@@ -367,7 +311,8 @@ fn getConstInt(name: []const u8, vm: *std.StringHashMap(types.ANFValue)) ?i128 {
 }
 
 fn sameBinding(a: []const u8, b: []const u8, vm: *std.StringHashMap(types.ANFValue)) bool {
-    return eql(canonical(a, vm), canonical(b, vm));
+    _ = vm;
+    return eql(a, b);
 }
 
 // ============================================================================

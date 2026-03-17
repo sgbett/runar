@@ -18,6 +18,32 @@ const CompileOptions = struct {
     disable_constant_folding: bool = false,
 };
 
+const ParseOptionsError = error{
+    UnknownFlag,
+    UnsupportedFlag,
+};
+
+fn parseCompileOptions(args: []const []const u8, allow_disable_constant_folding: bool) ParseOptionsError!CompileOptions {
+    var opts = CompileOptions{};
+    for (args) |arg| {
+        if (std.mem.eql(u8, arg, "--emit-ir")) {
+            opts.emit_ir = true;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--hex")) {
+            opts.hex_only = true;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--disable-constant-folding")) {
+            if (!allow_disable_constant_folding) return error.UnsupportedFlag;
+            opts.disable_constant_folding = true;
+            continue;
+        }
+        return error.UnknownFlag;
+    }
+    return opts;
+}
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -39,7 +65,15 @@ pub fn main() !void {
             std.debug.print("error: missing file argument\n", .{});
             std.process.exit(1);
         }
-        compileFromIR(allocator, args[2], .{}) catch |err| {
+        const opts = parseCompileOptions(args[3..], false) catch |err| {
+            const message = switch (err) {
+                error.UnknownFlag => "error: unknown compile-ir flag\n",
+                error.UnsupportedFlag => "error: --disable-constant-folding is only valid for source compilation\n",
+            };
+            std.debug.print("{s}", .{message});
+            std.process.exit(1);
+        };
+        compileFromIR(allocator, args[2], opts) catch |err| {
             std.debug.print("error: {s}\n", .{@errorName(err)});
             std.process.exit(1);
         };
@@ -50,11 +84,14 @@ pub fn main() !void {
             std.debug.print("error: missing file argument\n", .{});
             std.process.exit(1);
         }
-        var opts = CompileOptions{};
-        var i: usize = 3;
-        while (i < args.len) : (i += 1) {
-            if (std.mem.eql(u8, args[i], "--emit-ir")) opts.emit_ir = true else if (std.mem.eql(u8, args[i], "--hex")) opts.hex_only = true else if (std.mem.eql(u8, args[i], "--disable-constant-folding")) opts.disable_constant_folding = true;
-        }
+        const opts = parseCompileOptions(args[3..], true) catch |err| {
+            const message = switch (err) {
+                error.UnknownFlag => "error: unknown compile flag\n",
+                error.UnsupportedFlag => "error: unsupported compile flag\n",
+            };
+            std.debug.print("{s}", .{message});
+            std.process.exit(1);
+        };
         compileFromSource(allocator, args[2], opts) catch |err| {
             std.debug.print("error: {s}\n", .{@errorName(err)});
             std.process.exit(1);
@@ -73,11 +110,14 @@ pub fn main() !void {
             std.process.exit(1);
         }
         const file_path = args[2];
-        var opts = CompileOptions{};
-        var i: usize = 3;
-        while (i < args.len) : (i += 1) {
-            if (std.mem.eql(u8, args[i], "--emit-ir")) opts.emit_ir = true else if (std.mem.eql(u8, args[i], "--hex")) opts.hex_only = true else if (std.mem.eql(u8, args[i], "--disable-constant-folding")) opts.disable_constant_folding = true;
-        }
+        const opts = parseCompileOptions(args[3..], true) catch |err| {
+            const message = switch (err) {
+                error.UnknownFlag => "error: unknown source flag\n",
+                error.UnsupportedFlag => "error: unsupported source flag\n",
+            };
+            std.debug.print("{s}", .{message});
+            std.process.exit(1);
+        };
         const format = detectFormat(file_path);
         const result = if (format == .anf_json)
             compileFromIR(allocator, file_path, opts)
@@ -172,17 +212,20 @@ fn compileFromIR(allocator: std.mem.Allocator, path: []const u8, opts: CompileOp
 
 /// Full pipeline: source -> parse -> validate -> typecheck -> ANF -> stack -> emit
 fn compileFromSource(allocator: std.mem.Allocator, path: []const u8, opts: CompileOptions) !void {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const work_allocator = arena.allocator();
+
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
-    const source = try file.readToEndAlloc(allocator, 1 * 1024 * 1024);
-    defer allocator.free(source);
+    const source = try file.readToEndAlloc(work_allocator, 1 * 1024 * 1024);
 
     const format = detectFormat(path);
 
     // Pass 1: Parse (dispatch by format, extract contract or fail)
     const contract: types.ContractNode = switch (format) {
         .runar_zig => blk: {
-            const r = parse_zig.parseZig(allocator, source, path);
+            const r = parse_zig.parseZig(work_allocator, source, path);
             if (r.errors.len > 0) {
                 for (r.errors) |err| std.debug.print("  parse error: {s}\n", .{err});
                 return error.ParseFailed;
@@ -190,7 +233,7 @@ fn compileFromSource(allocator: std.mem.Allocator, path: []const u8, opts: Compi
             break :blk r.contract orelse return error.ParseFailed;
         },
         .runar_ts => blk: {
-            const r = parse_ts.parseTs(allocator, source, path);
+            const r = parse_ts.parseTs(work_allocator, source, path);
             if (r.errors.len > 0) {
                 for (r.errors) |err| std.debug.print("  parse error: {s}\n", .{err});
                 return error.ParseFailed;
@@ -204,7 +247,7 @@ fn compileFromSource(allocator: std.mem.Allocator, path: []const u8, opts: Compi
     };
 
     // Pass 2: Validate
-    const val_result = try validate_pass.validate(allocator, contract);
+    const val_result = try validate_pass.validate(work_allocator, contract);
     if (val_result.errors.len > 0) {
         for (val_result.errors) |diag| std.debug.print("  validation error: {s}\n", .{diag.message});
         return error.ValidationFailed;
@@ -212,36 +255,35 @@ fn compileFromSource(allocator: std.mem.Allocator, path: []const u8, opts: Compi
     for (val_result.warnings) |diag| std.debug.print("  warning: {s}\n", .{diag.message});
 
     // Pass 3: Typecheck
-    const tc_result = try typecheck_pass.typeCheck(allocator, contract);
+    const tc_result = try typecheck_pass.typeCheck(work_allocator, contract);
     if (tc_result.errors.len > 0) {
         for (tc_result.errors) |err| std.debug.print("  type error: {s}\n", .{err});
         return error.TypeCheckFailed;
     }
 
     // Pass 4: ANF Lower
-    var program = try anf_lower.lowerToANF(allocator, contract);
+    var program = try anf_lower.lowerToANF(work_allocator, contract);
 
     // Pass 4.25: Constant Fold
     if (!opts.disable_constant_folding) {
-        program = try constant_fold.foldConstants(allocator, program);
+        program = try constant_fold.foldConstants(work_allocator, program);
     }
 
     // Pass 4.5: EC Optimize
-    program = try ec_optimizer.optimize(allocator, program);
+    program = try ec_optimizer.optimize(work_allocator, program);
 
     // --emit-ir: output canonical ANF IR JSON and stop
     if (opts.emit_ir) {
-        const canonical = try json_parser.serializeCanonicalJSON(allocator, program);
-        defer allocator.free(canonical);
+        const canonical = try json_parser.serializeCanonicalJSON(work_allocator, program);
         const stdout = std.fs.File.stdout();
         try stdout.writeAll(canonical);
         return;
     }
 
     // Pass 5: Stack Lower
-    const stack_program = try stack_lower.lower(allocator, program);
-    defer stack_program.deinit(allocator);
-    const optimized_methods = try peephole.optimize(allocator, stack_program.methods);
+    const stack_program = try stack_lower.lower(work_allocator, program);
+    defer stack_program.deinit(work_allocator);
+    const optimized_methods = try peephole.optimize(work_allocator, stack_program.methods);
     const optimized_stack_program = types.StackProgram{
         .methods = optimized_methods,
         .contract_name = stack_program.contract_name,
@@ -253,8 +295,7 @@ fn compileFromSource(allocator: std.mem.Allocator, path: []const u8, opts: Compi
     if (opts.hex_only) {
         const stdout = std.fs.File.stdout();
         for (optimized_stack_program.methods) |method| {
-            const hex = try emit.emitMethodScript(allocator, method.instructions);
-            defer allocator.free(hex);
+            const hex = try emit.emitMethodScript(work_allocator, method.instructions);
             try stdout.writeAll(hex);
             try stdout.writeAll("\n");
         }
@@ -262,8 +303,7 @@ fn compileFromSource(allocator: std.mem.Allocator, path: []const u8, opts: Compi
     }
 
     // Pass 6: Emit full artifact
-    const artifact = try emit.emitArtifact(allocator, optimized_stack_program, program);
-    defer allocator.free(artifact);
+    const artifact = try emit.emitArtifact(work_allocator, optimized_stack_program, program);
 
     const stdout = std.fs.File.stdout();
     try stdout.writeAll(artifact);

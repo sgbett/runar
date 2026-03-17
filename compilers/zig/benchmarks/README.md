@@ -14,6 +14,7 @@ The harness is intentionally low-risk:
 ## Files
 
 - `contracts-source.txt`: default contracts for full source benchmarks
+- `contracts-source-representative.txt`: larger parity-clean source suite for PR-ready representative numbers
 - `contracts-ir.txt`: default contracts for backend-only benchmarks
 - [`../scripts/benchmark_compare.py`](/Users/satchmo/code/runar/compilers/zig/scripts/benchmark_compare.py): main benchmark runner
 - [`../scripts/ts_compile_source_hex.mjs`](/Users/satchmo/code/runar/compilers/zig/scripts/ts_compile_source_hex.mjs): TS full-source helper
@@ -28,8 +29,8 @@ The harness is intentionally low-risk:
 
 `ir` mode compares:
 
-- Zig: `runar-zig compile-ir <expected-ir.json>`
-- TypeScript: `lowerToStack(anf)` + `emit(stack)`
+- Zig: `runar-zig compile-ir <expected-ir.json> --hex`
+- TypeScript: `lowerToStack(anf)` + peephole + `emit(stack)`
 
 ## Prerequisites
 
@@ -96,6 +97,12 @@ Use a custom contract list:
 
 ```bash
 python3 compilers/zig/scripts/benchmark_compare.py source --contracts-file compilers/zig/benchmarks/contracts-source.txt
+```
+
+Run the committed representative source suite:
+
+```bash
+python3 compilers/zig/scripts/benchmark_compare.py source --contracts-file compilers/zig/benchmarks/contracts-source-representative.txt
 ```
 
 Write machine-readable results:
@@ -174,14 +181,15 @@ The Python runner now:
 - supports `--summary-only` for CI logs or quick spot checks
 - supports `--show-commands` so the exact command pair for each contract is visible
 - stores per-sample timings, workload size (`input_bytes`), per-tool variability (`cv_pct`), and first-difference metadata for hex mismatches
+- records SHA-256 hashes for benchmark inputs, helper scripts, the Zig binary, and the TypeScript `dist` tree so runs can be compared against the same artifacts
+- rejects `ir` benchmark inputs whose numeric `load_const` values exceed JavaScript's safe integer range, rather than benchmarking them unsafely
 
 ## Notes
 
-- The default lists avoid the currently unstable stateful and post-quantum cases.
 - The runner verifies hex equality between Zig and TypeScript for each contract and reports mismatches.
-- The reported geomean speedup only includes parity-matched rows. Do not make performance claims from mismatched contracts.
-- JSON output includes the git commit, dirty-state flag, host/platform details, Python version, Node version, Zig version, selected helper paths, contract-list hash, and measurement order so runs can be compared later with less guesswork.
+- The reported geomean speedup only includes parity-matched rows, and mismatched rows are shown as `n/a` in the speedup column. Do not make performance claims from mismatched contracts.
+- JSON output includes the git commit, dirty-state flag, host/platform details, Python version, Node version, Zig toolchain version, selected helper paths, contract-list hash, artifact hashes, and measurement order so runs can be compared later with less guesswork.
 - Use `--keep-going --allow-failures` while parity is still moving. Once correctness is green, the default strict exit behavior is the right CI-friendly mode.
-- On the current branch, `source` mode is the safer benchmark to trust first. `ir` mode is wired and useful, but if it reports a hex mismatch, treat that as backend parity debt rather than a harness bug.
-- Once conformance is fully green, expand the contract lists to include the larger stateful and crypto-heavy cases.
-- Compare runs only on the same machine, same build mode, and same Node/Zig toolchain versions. These numbers are cold CLI subprocess timings, not in-process compiler microbenchmarks.
+- Publish benchmark claims only from a committed contract manifest whose rows all parity-match.
+- Treat `source` and `ir` as separate workloads. Report them separately rather than blending them into one headline number.
+- Compare runs only on the same machine, same build mode, same Node/Zig toolchain versions, and the same hashed benchmark artifacts. These numbers are cold CLI subprocess timings, not in-process compiler microbenchmarks.

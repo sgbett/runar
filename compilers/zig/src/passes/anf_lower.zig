@@ -92,15 +92,6 @@ fn isByteTypedExpr(expr: Expression, ctx: *const LowerCtx) bool {
     switch (expr) {
         .literal_bytes => return true,
         .identifier => |name| {
-            // Check parameter types
-            for (ctx.contract.constructor.params) |p| {
-                if (std.mem.eql(u8, p.name, name) and isByteType(p.type_info)) return true;
-            }
-            for (ctx.contract.methods) |m| {
-                for (m.params) |p| {
-                    if (std.mem.eql(u8, p.name, name) and isByteType(p.type_info)) return true;
-                }
-            }
             // Check property types
             for (ctx.contract.properties) |p| {
                 if (std.mem.eql(u8, p.name, name) and isByteType(p.type_info)) return true;
@@ -183,6 +174,11 @@ fn lowerMethods(allocator: Allocator, contract: ContractNode) LowerError![]ANFMe
     // Lower constructor
     {
         var ctor_ctx = LowerCtx.init(allocator, contract);
+        defer ctor_ctx.deinit();
+        for (contract.constructor.params) |param| {
+            ctor_ctx.addParam(param.name);
+            if (isByteType(param.type_info)) ctor_ctx.markByteTyped(param.name);
+        }
         try lowerConstructorBody(&ctor_ctx, contract.constructor);
         const bindings = try ctor_ctx.bindings.toOwnedSlice(allocator);
         try result.append(allocator, ANFMethod{
@@ -197,6 +193,11 @@ fn lowerMethods(allocator: Allocator, contract: ContractNode) LowerError![]ANFMe
     // Lower each method
     for (contract.methods) |method| {
         var method_ctx = LowerCtx.init(allocator, contract);
+        defer method_ctx.deinit();
+        for (method.params) |param| {
+            method_ctx.addParam(param.name);
+            if (isByteType(param.type_info)) method_ctx.markByteTyped(param.name);
+        }
 
         if (contract.parent_class == .stateful_smart_contract and method.is_public) {
             try lowerStatefulPublicMethod(allocator, &method_ctx, method, contract);
@@ -279,11 +280,13 @@ fn lowerStatefulPublicMethod(
     if (needs_change_output) {
         ctx.addParam("_changePKH");
         ctx.addParam("_changeAmount");
+        ctx.markByteTyped("_changePKH");
     }
     if (needs_new_amount) {
         ctx.addParam("_newAmount");
     }
     ctx.addParam("txPreimage");
+    ctx.markByteTyped("txPreimage");
 
     // Inject checkPreimage(txPreimage)
     const preimage_ref = try ctx.emit(.{ .load_param = .{ .name = "txPreimage" } });
@@ -347,11 +350,9 @@ fn lowerStatefulPublicMethod(
             _ = try ctx.emit(.{ .assert = .{ .value = eq_ref } });
         } else {
             // Single-output continuation
-            _ = try ctx.emit(.{ .get_state_script = {} });
+            const state_script_ref = try ctx.emit(.{ .get_state_script = {} });
             const preimage_ref2 = try ctx.emit(.{ .load_param = .{ .name = "txPreimage" } });
             const new_amount_ref = try ctx.emit(.{ .load_param = .{ .name = "_newAmount" } });
-            // get_state_script result is the second-to-last binding
-            const state_script_ref = ctx.bindings.items[ctx.bindings.items.len - 3].name;
             const contract_output_ref = try ctx.emit(.{ .call = .{
                 .func = "computeStateOutput",
                 .args = try ctx.allocSlice(&.{ preimage_ref2, state_script_ref, new_amount_ref }),
@@ -437,6 +438,10 @@ const LowerCtx = struct {
         self.param_names.put(self.allocator, name, {}) catch {};
     }
 
+    fn markByteTyped(self: *LowerCtx, name: []const u8) void {
+        self.local_byte_vars.put(self.allocator, name, {}) catch {};
+    }
+
     fn isParam(self: *const LowerCtx, name: []const u8) bool {
         return self.param_names.get(name) != null;
     }
@@ -494,6 +499,14 @@ const LowerCtx = struct {
         if (sub.counter > self.counter) {
             self.counter = sub.counter;
         }
+    }
+
+    fn deinit(self: *LowerCtx) void {
+        self.local_names.deinit(self.allocator);
+        self.param_names.deinit(self.allocator);
+        self.local_aliases.deinit(self.allocator);
+        self.local_byte_vars.deinit(self.allocator);
+        self.add_output_refs.deinit(self.allocator);
     }
 
     /// Allocate a slice of string refs on the arena allocator.
