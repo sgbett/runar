@@ -62,6 +62,23 @@ sed -i '' "s/runar-compiler-rust = { version = \"$OLD\"/runar-compiler-rust = { 
   "$ROOT/packages/runar-rs/Cargo.toml"
 echo "  ✓ packages/runar-rs/Cargo.toml (inter-crate deps)"
 
+# Update all tracked Cargo.lock files
+RUST_LOCK_DIRS=(
+  "$ROOT/compilers/rust"
+  "$ROOT/packages/runar-rs"
+  "$ROOT/packages/runar-rs-macros"
+  "$ROOT/examples/rust"
+  "$ROOT/end2end-example/rust"
+  "$ROOT/integration/rust"
+)
+
+for d in "${RUST_LOCK_DIRS[@]}"; do
+  if [ -f "$d/Cargo.lock" ]; then
+    (cd "$d" && cargo update --workspace 2>/dev/null)
+    echo "  ✓ $(echo "$d" | sed "s|$ROOT/||")/Cargo.lock"
+  fi
+done
+
 # --- Python packages ---
 PY_FILES=(
   "$ROOT/packages/runar-py/pyproject.toml"

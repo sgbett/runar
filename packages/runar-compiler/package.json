@@ -1,6 +1,6 @@
 {
   "name": "runar-compiler",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "description": "Rúnar reference compiler (TypeScript): nanopass pipeline from TS to Bitcoin Script",
   "main": "dist/index.js",
