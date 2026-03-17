@@ -61,6 +61,7 @@ pub const FunctionPatterns = struct {
 
     fn roundDown(self: *const FunctionPatterns, value: i64, step: i64) i64 {
         _ = self;
-        return value - runar.safemod(value, step);
+        const remainder = runar.safemod(value, step);
+        return value - remainder;
     }
 };

@@ -9,7 +9,6 @@ pub const BoundedCounter = struct {
 
     pub fn init(maxCount: i64) BoundedCounter {
         return .{
-            .count = 0,
             .maxCount = maxCount,
             .active = true,
         };

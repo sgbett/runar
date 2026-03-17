@@ -77,4 +77,9 @@ pub const ECDemo = struct {
     pub fn checkAddOnCurve(self: *const ECDemo, other: runar.Point) void {
         runar.assert(runar.ecOnCurve(runar.ecAdd(self.pt, other)));
     }
+
+    pub fn checkMulGenOnCurve(self: *const ECDemo, scalar: i64) void {
+        _ = self;
+        runar.assert(runar.ecOnCurve(runar.ecMulGen(scalar)));
+    }
 };

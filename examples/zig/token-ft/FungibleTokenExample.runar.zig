@@ -24,10 +24,9 @@ pub const FungibleTokenExample = struct {
         amount: i64,
         outputSatoshis: i64,
     ) void {
-        const totalBalance = self.balance + self.mergeBalance;
-
         runar.assert(runar.checkSig(sig, self.owner));
         runar.assert(outputSatoshis >= 1);
+        const totalBalance = self.balance + self.mergeBalance;
         runar.assert(amount > 0);
         runar.assert(amount <= totalBalance);
 
@@ -50,14 +49,14 @@ pub const FungibleTokenExample = struct {
         allPrevouts: runar.ByteString,
         outputSatoshis: i64,
     ) void {
-        const myOutpoint = runar.extractOutpoint(self.txPreimage);
-        const firstOutpoint = runar.substr(allPrevouts, 0, 36);
-        const myBalance = self.balance + self.mergeBalance;
-
         runar.assert(runar.checkSig(sig, self.owner));
         runar.assert(outputSatoshis >= 1);
         runar.assert(otherBalance >= 0);
         runar.assert(runar.hash256(allPrevouts) == runar.extractHashPrevouts(self.txPreimage));
+
+        const myOutpoint = runar.extractOutpoint(self.txPreimage);
+        const firstOutpoint = runar.substr(allPrevouts, 0, 36);
+        const myBalance = self.balance + self.mergeBalance;
 
         if (myOutpoint == firstOutpoint) {
             self.addOutput(outputSatoshis, self.owner, myBalance, otherBalance);

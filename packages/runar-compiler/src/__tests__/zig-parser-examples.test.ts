@@ -7,6 +7,7 @@ import { existsSync, readdirSync, readFileSync } from 'fs';
 import { join, relative } from 'path';
 import { parse } from '../passes/01-parse.js';
 import { parseZigSource } from '../passes/01-parse-zig.js';
+import { compile } from '../index.js';
 
 const REPO_ROOT = join(__dirname, '..', '..', '..', '..');
 const EXAMPLES_ZIG_DIR = join(REPO_ROOT, 'examples', 'zig');
@@ -60,6 +61,24 @@ describe('Zig parser: example contracts', () => {
       expect(directResult.contract).not.toBeNull();
       expect(dispatchResult.contract).not.toBeNull();
       expect(dispatchResult.contract!.name).toBe(directResult.contract!.name);
+    });
+
+    it(`compiles ${relativePath} through the TypeScript compiler frontend`, () => {
+      const fullPath = join(EXAMPLES_ZIG_DIR, relativePath);
+      const source = readFileSync(fullPath, 'utf-8');
+      const fileName = relativePath.split('/').pop()!;
+
+      const result = compile(source, {
+        fileName,
+        disableConstantFolding: true,
+      });
+
+      const errors = result.diagnostics.filter(diagnostic => diagnostic.severity === 'error');
+
+      expect(errors).toEqual([]);
+      expect(result.success).toBe(true);
+      expect(typeof result.scriptHex).toBe('string');
+      expect(result.scriptHex!.length).toBeGreaterThan(0);
     });
   }
 });

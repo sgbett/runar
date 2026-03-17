@@ -324,8 +324,7 @@ const Parser = struct {
 
         var parent_class: ?ParentClass = null;
         var properties: std.ArrayListUnmanaged(PropertyNode) = .empty;
-        var ctor_params: std.ArrayListUnmanaged(ParamNode) = .empty;
-        var has_constructor = false;
+        var constructor: ?ConstructorNode = null;
         var methods: std.ArrayListUnmanaged(MethodNode) = .empty;
         var fields_with_defaults: std.ArrayListUnmanaged([]const u8) = .empty;
 
@@ -351,9 +350,8 @@ const Parser = struct {
                     _ = self.bump();
                     const fn_name = self.expect(.ident) orelse continue;
                     if (std.mem.eql(u8, fn_name.text, "init")) {
-                        if (self.parseInitParams()) |params| {
-                            ctor_params = params;
-                            has_constructor = true;
+                        if (self.parseConstructor(properties.items)) |ctor| {
+                            constructor = ctor;
                         }
                     } else {
                         if (self.parseMethod(fn_name.text, true)) |m| methods.append(self.allocator, m) catch {};
@@ -396,7 +394,7 @@ const Parser = struct {
 
         return ContractNode{
             .name = name_tok.text, .parent_class = pc, .properties = properties.items,
-            .constructor = .{ .params = ctor_params.items, .super_args = &.{}, .assignments = &.{} },
+            .constructor = constructor orelse .{ .params = &.{}, .super_args = &.{}, .assignments = &.{} },
             .methods = methods.items,
         };
     }
@@ -469,7 +467,7 @@ const Parser = struct {
 
     // ---- Constructor ----
 
-    fn parseInitParams(self: *Parser) ?std.ArrayListUnmanaged(ParamNode) {
+    fn parseConstructor(self: *Parser, properties: []const PropertyNode) ?ConstructorNode {
         if (self.expect(.lparen) == null) return null;
         var params: std.ArrayListUnmanaged(ParamNode) = .empty;
         while (self.current.kind != .rparen and self.current.kind != .eof) {
@@ -479,9 +477,67 @@ const Parser = struct {
         _ = self.expect(.rparen);
         if (self.current.kind == .ident) _ = self.bump(); // return type
         if (self.expect(.lbrace) == null) return null;
-        // Skip the constructor body (assignments handled by ANF lowering)
-        _ = self.parseBlock();
-        return params;
+        var assignments: std.ArrayListUnmanaged(AssignmentNode) = .empty;
+        var found_struct_return = false;
+
+        while (self.current.kind != .rbrace and self.current.kind != .eof) {
+            if (self.current.kind == .kw_return) {
+                _ = self.bump();
+                if (self.current.kind == .dot) {
+                    _ = self.bump();
+                    if (self.current.kind == .lbrace) {
+                        self.parseStructReturnAssignments(&assignments);
+                        found_struct_return = true;
+                        _ = self.expect(.semicolon);
+                        continue;
+                    }
+                }
+
+                _ = self.parseExpression();
+                _ = self.expect(.semicolon);
+                continue;
+            }
+
+            _ = self.parseStatement();
+        }
+
+        _ = self.expect(.rbrace);
+
+        if (!found_struct_return) {
+            for (params.items) |param| {
+                for (properties) |prop| {
+                    if (std.mem.eql(u8, prop.name, param.name)) {
+                        assignments.append(self.allocator, .{
+                            .target = prop.name,
+                            .value = .{ .identifier = param.name },
+                        }) catch {};
+                        break;
+                    }
+                }
+            }
+        }
+
+        return .{
+            .params = params.items,
+            .super_args = &.{},
+            .assignments = assignments.items,
+        };
+    }
+
+    fn parseStructReturnAssignments(self: *Parser, assignments: *std.ArrayListUnmanaged(AssignmentNode)) void {
+        _ = self.expect(.lbrace);
+        while (self.current.kind != .rbrace and self.current.kind != .eof) {
+            if (self.current.kind == .dot) _ = self.bump();
+            const field = self.expect(.ident) orelse return;
+            if (self.expect(.assign) == null) return;
+            const value = self.parseExpression() orelse return;
+            assignments.append(self.allocator, .{
+                .target = field.text,
+                .value = value,
+            }) catch {};
+            if (self.current.kind == .comma) _ = self.bump();
+        }
+        _ = self.expect(.rbrace);
     }
 
     // ---- Methods ----
@@ -935,11 +991,49 @@ test "parse Counter contract (stateful)" {
     try std.testing.expectEqual(@as(usize, 2), c.properties.len);
     try std.testing.expect(c.properties[0].readonly); // owner: no default
     try std.testing.expect(!c.properties[1].readonly); // count: has default
+    try std.testing.expectEqual(@as(usize, 2), c.constructor.params.len);
+    try std.testing.expectEqual(@as(usize, 2), c.constructor.assignments.len);
+    try std.testing.expectEqualStrings("owner", c.constructor.assignments[0].target);
+    try std.testing.expectEqualStrings("count", c.constructor.assignments[1].target);
     try std.testing.expectEqual(@as(usize, 2), c.methods.len);
     try std.testing.expectEqual(@as(usize, 3), c.methods[0].body.len);
     try std.testing.expectEqual(std.meta.Tag(Statement).expr_stmt, std.meta.activeTag(c.methods[0].body[0]));
     try std.testing.expectEqual(std.meta.Tag(Statement).assign, std.meta.activeTag(c.methods[0].body[1]));
     try std.testing.expectEqual(std.meta.Tag(Statement).expr_stmt, std.meta.activeTag(c.methods[0].body[2]));
+}
+
+test "parse constructor struct return assignments" {
+    const source =
+        \\const runar = @import("runar");
+        \\pub const Example = struct {
+        \\    pub const Contract = runar.StatefulSmartContract;
+        \\    count: i64 = 0,
+        \\    active: bool,
+        \\    pub fn init(count: i64) Example {
+        \\        return .{
+        \\            .count = count,
+        \\            .active = true,
+        \\        };
+        \\    }
+        \\};
+    ;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const res = parseZig(arena.allocator(), source, "Example.runar.zig");
+    try std.testing.expectEqual(@as(usize, 0), res.errors.len);
+    const ctor = res.contract.?.constructor;
+    try std.testing.expectEqual(@as(usize, 1), ctor.params.len);
+    try std.testing.expectEqual(@as(usize, 2), ctor.assignments.len);
+    try std.testing.expectEqualStrings("count", ctor.assignments[0].target);
+    try std.testing.expectEqualStrings("active", ctor.assignments[1].target);
+    switch (ctor.assignments[0].value) {
+        .identifier => |name| try std.testing.expectEqualStrings("count", name),
+        else => return error.UnexpectedVariant,
+    }
+    switch (ctor.assignments[1].value) {
+        .literal_bool => |value| try std.testing.expect(value),
+        else => return error.UnexpectedVariant,
+    }
 }
 
 test "parse Escrow contract (multi-method)" {

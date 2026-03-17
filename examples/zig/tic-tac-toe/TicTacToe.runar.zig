@@ -5,6 +5,8 @@ pub const TicTacToe = struct {
 
     playerX: runar.PubKey,
     betAmount: i64,
+    p2pkhPrefix: runar.ByteString,
+    p2pkhSuffix: runar.ByteString,
     playerO: runar.PubKey = "000000000000000000000000000000000000000000000000000000000000000000",
     c0: i64 = 0,
     c1: i64 = 0,
@@ -22,18 +24,20 @@ pub const TicTacToe = struct {
         return .{
             .playerX = playerX,
             .betAmount = betAmount,
+            .p2pkhPrefix = "1976a914",
+            .p2pkhSuffix = "88ac",
         };
     }
 
-    pub fn join(self: *TicTacToe, opponentPk: runar.PubKey, sig: runar.Sig) void {
+    pub fn join(self: *TicTacToe, opponentPK: runar.PubKey, sig: runar.Sig) void {
         runar.assert(self.status == 0);
-        runar.assert(runar.checkSig(sig, opponentPk));
-        self.playerO = opponentPk;
+        runar.assert(runar.checkSig(sig, opponentPK));
+        self.playerO = opponentPK;
         self.status = 1;
         self.turn = 1;
     }
 
-    pub fn movePiece(self: *TicTacToe, position: i64, player: runar.PubKey, sig: runar.Sig) void {
+    pub fn move(self: *TicTacToe, position: i64, player: runar.PubKey, sig: runar.Sig) void {
         runar.assert(self.status == 1);
         runar.assert(runar.checkSig(sig, player));
         self.assertCorrectPlayer(player);
@@ -51,23 +55,27 @@ pub const TicTacToe = struct {
         position: i64,
         player: runar.PubKey,
         sig: runar.Sig,
-        changePkh: runar.ByteString,
+        changePKH: runar.ByteString,
         changeAmount: i64,
     ) void {
-        const playerMark = self.playerMark(player);
-
         runar.assert(self.status == 1);
         runar.assert(runar.checkSig(sig, player));
         self.assertCorrectPlayer(player);
         self.assertCellEmpty(position);
-        runar.assert(self.checkWinAfterMove(position, playerMark));
+        runar.assert(self.checkWinAfterMove(position, self.turn));
 
-        const winnerOutput = self.buildP2PKHOutput(self.betAmount * 2, runar.hash160(player));
+        const payout = runar.cat(
+            runar.cat(runar.num2bin(self.betAmount * 2, 8), self.p2pkhPrefix),
+            runar.cat(runar.hash160(player), self.p2pkhSuffix),
+        );
         if (changeAmount > 0) {
-            const changeOutput = self.buildP2PKHOutput(changeAmount, changePkh);
-            runar.assert(runar.hash256(runar.cat(winnerOutput, changeOutput)) == runar.extractOutputHash(self.txPreimage));
+            const change = runar.cat(
+                runar.cat(runar.num2bin(changeAmount, 8), self.p2pkhPrefix),
+                runar.cat(changePKH, self.p2pkhSuffix),
+            );
+            runar.assert(runar.hash256(runar.cat(payout, change)) == runar.extractOutputHash(self.txPreimage));
         } else {
-            runar.assert(runar.hash256(winnerOutput) == runar.extractOutputHash(self.txPreimage));
+            runar.assert(runar.hash256(payout) == runar.extractOutputHash(self.txPreimage));
         }
     }
 
@@ -76,42 +84,54 @@ pub const TicTacToe = struct {
         position: i64,
         player: runar.PubKey,
         sig: runar.Sig,
-        changePkh: runar.ByteString,
+        changePKH: runar.ByteString,
         changeAmount: i64,
     ) void {
-        const playerMark = self.playerMark(player);
-
         runar.assert(self.status == 1);
         runar.assert(runar.checkSig(sig, player));
         self.assertCorrectPlayer(player);
         self.assertCellEmpty(position);
-        runar.assert(!self.checkWinAfterMove(position, playerMark));
         runar.assert(self.countOccupied() == 8);
+        runar.assert(!self.checkWinAfterMove(position, self.turn));
 
-        const outputX = self.buildP2PKHOutput(self.betAmount, runar.hash160(self.playerX));
-        const outputO = self.buildP2PKHOutput(self.betAmount, runar.hash160(self.playerO));
-        const outputs = runar.cat(outputX, outputO);
+        const out1 = runar.cat(
+            runar.cat(runar.num2bin(self.betAmount, 8), self.p2pkhPrefix),
+            runar.cat(runar.hash160(self.playerX), self.p2pkhSuffix),
+        );
+        const out2 = runar.cat(
+            runar.cat(runar.num2bin(self.betAmount, 8), self.p2pkhPrefix),
+            runar.cat(runar.hash160(self.playerO), self.p2pkhSuffix),
+        );
         if (changeAmount > 0) {
-            const changeOutput = self.buildP2PKHOutput(changeAmount, changePkh);
-            runar.assert(runar.hash256(runar.cat(outputs, changeOutput)) == runar.extractOutputHash(self.txPreimage));
+            const change = runar.cat(
+                runar.cat(runar.num2bin(changeAmount, 8), self.p2pkhPrefix),
+                runar.cat(changePKH, self.p2pkhSuffix),
+            );
+            runar.assert(runar.hash256(runar.cat(runar.cat(out1, out2), change)) == runar.extractOutputHash(self.txPreimage));
         } else {
-            runar.assert(runar.hash256(outputs) == runar.extractOutputHash(self.txPreimage));
+            runar.assert(runar.hash256(runar.cat(out1, out2)) == runar.extractOutputHash(self.txPreimage));
         }
     }
 
     pub fn cancelBeforeJoin(
         self: *const TicTacToe,
         sig: runar.Sig,
-        changePkh: runar.ByteString,
+        changePKH: runar.ByteString,
         changeAmount: i64,
     ) void {
         runar.assert(self.status == 0);
         runar.assert(runar.checkSig(sig, self.playerX));
 
-        const payout = self.buildP2PKHOutput(self.betAmount, runar.hash160(self.playerX));
+        const payout = runar.cat(
+            runar.cat(runar.num2bin(self.betAmount, 8), self.p2pkhPrefix),
+            runar.cat(runar.hash160(self.playerX), self.p2pkhSuffix),
+        );
         if (changeAmount > 0) {
-            const changeOutput = self.buildP2PKHOutput(changeAmount, changePkh);
-            runar.assert(runar.hash256(runar.cat(payout, changeOutput)) == runar.extractOutputHash(self.txPreimage));
+            const change = runar.cat(
+                runar.cat(runar.num2bin(changeAmount, 8), self.p2pkhPrefix),
+                runar.cat(changePKH, self.p2pkhSuffix),
+            );
+            runar.assert(runar.hash256(runar.cat(payout, change)) == runar.extractOutputHash(self.txPreimage));
         } else {
             runar.assert(runar.hash256(payout) == runar.extractOutputHash(self.txPreimage));
         }
@@ -121,30 +141,29 @@ pub const TicTacToe = struct {
         self: *const TicTacToe,
         sigX: runar.Sig,
         sigO: runar.Sig,
-        changePkh: runar.ByteString,
+        changePKH: runar.ByteString,
         changeAmount: i64,
     ) void {
-        const outputX = self.buildP2PKHOutput(self.betAmount, runar.hash160(self.playerX));
-        const outputO = self.buildP2PKHOutput(self.betAmount, runar.hash160(self.playerO));
-        const outputs = runar.cat(outputX, outputO);
-
+        const out1 = runar.cat(
+            runar.cat(runar.num2bin(self.betAmount, 8), self.p2pkhPrefix),
+            runar.cat(runar.hash160(self.playerX), self.p2pkhSuffix),
+        );
+        const out2 = runar.cat(
+            runar.cat(runar.num2bin(self.betAmount, 8), self.p2pkhPrefix),
+            runar.cat(runar.hash160(self.playerO), self.p2pkhSuffix),
+        );
         if (changeAmount > 0) {
-            const changeOutput = self.buildP2PKHOutput(changeAmount, changePkh);
-            runar.assert(runar.hash256(runar.cat(outputs, changeOutput)) == runar.extractOutputHash(self.txPreimage));
+            const change = runar.cat(
+                runar.cat(runar.num2bin(changeAmount, 8), self.p2pkhPrefix),
+                runar.cat(changePKH, self.p2pkhSuffix),
+            );
+            runar.assert(runar.hash256(runar.cat(runar.cat(out1, out2), change)) == runar.extractOutputHash(self.txPreimage));
         } else {
-            runar.assert(runar.hash256(outputs) == runar.extractOutputHash(self.txPreimage));
+            runar.assert(runar.hash256(runar.cat(out1, out2)) == runar.extractOutputHash(self.txPreimage));
         }
 
         runar.assert(runar.checkSig(sigX, self.playerX));
         runar.assert(runar.checkSig(sigO, self.playerO));
-    }
-
-    fn playerMark(self: *const TicTacToe, player: runar.PubKey) i64 {
-        self.assertCorrectPlayer(player);
-        if (player == self.playerX) {
-            return 1;
-        }
-        return 2;
     }
 
     fn assertCorrectPlayer(self: *const TicTacToe, player: runar.PubKey) void {
@@ -204,38 +223,35 @@ pub const TicTacToe = struct {
         }
     }
 
-    fn getCellOrOverride(self: *const TicTacToe, index: i64, overridePos: i64, overrideVal: i64) i64 {
-        if (index == overridePos) {
+    fn getCellOrOverride(self: *const TicTacToe, cellIndex: i64, overridePos: i64, overrideVal: i64) i64 {
+        if (cellIndex == overridePos) {
             return overrideVal;
         }
-        if (index == 0) {
+        if (cellIndex == 0) {
             return self.c0;
         }
-        if (index == 1) {
+        if (cellIndex == 1) {
             return self.c1;
         }
-        if (index == 2) {
+        if (cellIndex == 2) {
             return self.c2;
         }
-        if (index == 3) {
+        if (cellIndex == 3) {
             return self.c3;
         }
-        if (index == 4) {
+        if (cellIndex == 4) {
             return self.c4;
         }
-        if (index == 5) {
+        if (cellIndex == 5) {
             return self.c5;
         }
-        if (index == 6) {
+        if (cellIndex == 6) {
             return self.c6;
         }
-        if (index == 7) {
+        if (cellIndex == 7) {
             return self.c7;
         }
-        if (index == 8) {
-            return self.c8;
-        }
-        return 0;
+        return self.c8;
     }
 
     fn checkWinAfterMove(self: *const TicTacToe, position: i64, player: i64) bool {
@@ -290,12 +306,5 @@ pub const TicTacToe = struct {
             count += 1;
         }
         return count;
-    }
-
-    fn buildP2PKHOutput(self: *const TicTacToe, amount: i64, pkh: runar.ByteString) runar.ByteString {
-        _ = self;
-        const scriptPrefix = runar.cat("1976a914", pkh);
-        const script = runar.cat(scriptPrefix, "88ac");
-        return runar.cat(runar.num2bin(amount, 8), script);
     }
 };
