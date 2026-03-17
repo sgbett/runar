@@ -516,10 +516,6 @@ fn mergeEnv(parent: *ConstEnv, branch: *const ConstEnv) void {
     }
 }
 
-fn strEql(a: []const u8, b: []const u8) bool {
-    return std.mem.eql(u8, a, b);
-}
-
 // ============================================================================
 // Public API
 // ============================================================================

@@ -406,7 +406,7 @@ fn freshConstName(allocator: Allocator, value: i128, vm: *std.StringHashMap(type
     counter.* += 1;
     const buf = allocator.alloc(u8, 24) catch return "";
     const name = std.fmt.bufPrint(buf, "__ec_opt_{d}", .{counter.*}) catch return "";
-    vm.put(name, makeConstInt(value)) catch {};
+    vm.put(name, makeConstInt(value)) catch return "";
     return name;
 }
 

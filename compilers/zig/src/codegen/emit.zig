@@ -453,7 +453,7 @@ pub fn emitArtifact(
 
     try w.writeByte('}');
 
-    return try allocator.dupe(u8, json_buf.items);
+    return try json_buf.toOwnedSlice(allocator);
 }
 
 // ============================================================================
