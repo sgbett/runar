@@ -87,6 +87,13 @@ module Runar
     #
     # Returns +k * point+, or +nil+ (point at infinity) when +k+ is zero.
     #
+    # WARNING: This implementation uses a simple double-and-add algorithm that is
+    # NOT constant-time. Execution time leaks information about the scalar via
+    # branch timing on each bit. This is acceptable for test/verification use
+    # (e.g., ECDSA verify, OP_PUSH_TX with k=1) but MUST NOT be used with real
+    # private keys in a networked/production context. For production signing,
+    # use a constant-time implementation (e.g., Montgomery ladder).
+    #
     # @param k     [Integer]                        scalar
     # @param point [Array(Integer, Integer), nil]   base point
     # @return [Array(Integer, Integer), nil]

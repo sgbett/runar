@@ -1,5 +1,11 @@
 # frozen_string_literal: true
 
+# WARNING: TEST-ONLY KEY MATERIAL
+#
+# These keys are derived from well-known values (e.g., ALICE's private key is
+# SHA-256 of the empty string). They MUST NEVER be used on mainnet or to hold
+# real funds. They exist solely for deterministic testing of ECDSA verification.
+
 # Pre-generated deterministic test keys for use across all Ruby test suites.
 #
 # These keys match the Python reference implementation (runar/test_keys.py)
@@ -33,6 +39,7 @@ module Runar
     #   - hash160                       (RIPEMD160(SHA256(pub_key)))
     #   - ECDSA.sign_test_message       (RFC 6979 deterministic signing)
 
+    # TEST-ONLY: private key = SHA-256("") — a well-known value. Never use on mainnet.
     ALICE = TestKeyPair.new(
       'alice',
       'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
@@ -42,6 +49,7 @@ module Runar
       '0220607dbca2f9f695438b49eefea4e445664c740163af8b62b1373f87d50eb64417'
     ).freeze
 
+    # TEST-ONLY: well-known repeating byte pattern private key. Never use on mainnet.
     BOB = TestKeyPair.new(
       'bob',
       'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
@@ -50,6 +58,7 @@ module Runar
       '3044022058329072a0f9e6133d93109502ddea833f043f00b460950683fa80c00ca4d98802200328ff8f8c1da673a489c93ed0b8e83b143afbeb3495ae4aad4714c256984608'
     ).freeze
 
+    # TEST-ONLY: well-known "deadbeef" repeating private key. Never use on mainnet.
     CHARLIE = TestKeyPair.new(
       'charlie',
       'deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
@@ -59,6 +68,7 @@ module Runar
       '021e277740c4409c641cfb47370f510b3ecfff752488a855aacfc9913e66d038'
     ).freeze
 
+    # TEST-ONLY: well-known "cafebabe" repeating private key. Never use on mainnet.
     DAVE = TestKeyPair.new(
       'dave',
       'cafebabecafebabecafebabecafebabecafebabecafebabecafebabecafebabe',
@@ -68,6 +78,7 @@ module Runar
       '02201a2157c935108716ec41d53b7137238083a331f57e0f8e34953f2a5f54acb7c9'
     ).freeze
 
+    # TEST-ONLY: well-known "abcdef01" repeating private key. Never use on mainnet.
     EVE = TestKeyPair.new(
       'eve',
       'abcdef01abcdef01abcdef01abcdef01abcdef01abcdef01abcdef01abcdef01',
@@ -77,6 +88,7 @@ module Runar
       '022029443a9aafa6dc08231043f06940cfcf045c6e3783314ccac252d4333fb7a114'
     ).freeze
 
+    # TEST-ONLY: well-known "1111..." private key. Never use on mainnet.
     FRANK = TestKeyPair.new(
       'frank',
       '1111111111111111111111111111111111111111111111111111111111111111',
@@ -86,6 +98,7 @@ module Runar
       '02207f49fd920e6b947d09a394072b7804900fa81a6d46d86066e217b4ffc3691b3d'
     ).freeze
 
+    # TEST-ONLY: well-known "2222..." private key. Never use on mainnet.
     GRACE = TestKeyPair.new(
       'grace',
       '2222222222222222222222222222222222222222222222222222222222222222',
@@ -95,6 +108,7 @@ module Runar
       '02204738757bbf407e42cd292375387e38fa53c983a2c75d5eeeaf0512e44b4e9a91'
     ).freeze
 
+    # TEST-ONLY: well-known "3333..." private key. Never use on mainnet.
     HEIDI = TestKeyPair.new(
       'heidi',
       '3333333333333333333333333333333333333333333333333333333333333333',
@@ -104,6 +118,7 @@ module Runar
       '02205b1f04cac7da387a46e7beb958fa8b523a803ace06148a0d7557960ff2388790'
     ).freeze
 
+    # TEST-ONLY: well-known "4444..." private key. Never use on mainnet.
     IVAN = TestKeyPair.new(
       'ivan',
       '4444444444444444444444444444444444444444444444444444444444444444',
@@ -113,6 +128,7 @@ module Runar
       '022060b010c949554d8301e09ea42700bffedb2f08f75336ce3aa0f66f955ece6e02'
     ).freeze
 
+    # TEST-ONLY: well-known "5555..." private key. Never use on mainnet.
     JUDY = TestKeyPair.new(
       'judy',
       '5555555555555555555555555555555555555555555555555555555555555555',
