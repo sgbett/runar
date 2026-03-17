@@ -572,6 +572,14 @@ export class RunarInterpreter {
         return { kind: 'void' };
       }
 
+      if (methodName === 'addRawOutput') {
+        const evaluatedArgs = argExprs.map(a => this.evalExpr(a, env, methods));
+        const satoshis = evaluatedArgs[0]!;
+        const scriptBytes = evaluatedArgs[1]!;
+        this._outputs.push({ satoshis, stateValues: { _rawScript: scriptBytes } });
+        return { kind: 'void' };
+      }
+
       if (methodName === 'getStateScript') {
         return { kind: 'bytes', value: new Uint8Array(0) };
       }

@@ -46,6 +46,16 @@ else
   SKIP_PYTHON=1
 fi
 
+# --- Prompt for npm OTP ---
+NPM_OTP=""
+if [ -z "$DRY_RUN" ]; then
+  read -rp "Enter npm OTP code: " NPM_OTP
+  if [ -z "$NPM_OTP" ]; then
+    echo "Error: OTP is required for publishing"
+    exit 1
+  fi
+fi
+
 echo ""
 
 # --- Build all ---
@@ -65,7 +75,11 @@ echo ""
 echo "=== Publishing npm packages ==="
 cd "$ROOT"
 # Tolerate "already exists" so re-runs continue to later stages.
-if output=$(pnpm -r publish --access public --no-git-checks $DRY_RUN 2>&1); then
+OTP_FLAG=""
+if [ -n "$NPM_OTP" ]; then
+  OTP_FLAG="--otp $NPM_OTP"
+fi
+if output=$(pnpm -r publish --access public --no-git-checks $OTP_FLAG $DRY_RUN 2>&1); then
   echo "$output"
 elif echo "$output" | grep -q "previously published"; then
   echo "$output"
