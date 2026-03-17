@@ -158,28 +158,35 @@ fn validateConstructor(
     // that means super() was not called with all params.
     // However, the Zig AST models super_args explicitly. If there are params but
     // no super_args, the super() call is missing or incomplete.
-    if (ctor.params.len > 0 and ctor.super_args.len == 0) {
+    // Zig-style constructors use `return .{ .field = val }` which the parser
+    // models as a MethodNode body, not ConstructorNode super_args/assignments.
+    // Only check super()/assignments for TS-style constructors that have them.
+    const is_zig_style = ctor.super_args.len == 0 and ctor.assignments.len == 0;
+
+    if (!is_zig_style and ctor.params.len > 0 and ctor.super_args.len == 0) {
         try errors.append(allocator, .{
             .message = "constructor must call super() with all parameters",
             .severity = .@"error",
         });
     }
 
-    // Check all properties are assigned in constructor
-    for (contract.properties) |prop| {
-        var assigned = false;
-        for (ctor.assignments) |assignment| {
-            if (std.mem.eql(u8, assignment.target, prop.name)) {
-                assigned = true;
-                break;
+    // Check all properties are assigned in constructor (skip for Zig-style)
+    if (!is_zig_style) {
+        for (contract.properties) |prop| {
+            var assigned = false;
+            for (ctor.assignments) |assignment| {
+                if (std.mem.eql(u8, assignment.target, prop.name)) {
+                    assigned = true;
+                    break;
+                }
             }
-        }
-        // Properties with initializers don't need constructor assignments
-        if (!assigned and prop.initializer == null) {
-            try errors.append(allocator, .{
-                .message = "property must be assigned in the constructor",
-                .severity = .@"error",
-            });
+            // Properties with initializers don't need constructor assignments
+            if (!assigned and prop.initializer == null) {
+                try errors.append(allocator, .{
+                    .message = "property must be assigned in the constructor",
+                    .severity = .@"error",
+                });
+            }
         }
     }
 }

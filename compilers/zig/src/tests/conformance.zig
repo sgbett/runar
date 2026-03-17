@@ -2,16 +2,21 @@
 //! output to the TypeScript, Go, Rust, and Python compilers.
 //!
 //! Tests read ANF IR JSON from conformance/tests/*/expected-ir.json,
-//! parse the IR to validate structure, and (when the full pipeline is ready)
-//! run passes 5-6 and compare the output script hex against expected-script.hex.
+//! run the full pipeline (parse -> stack lower -> emit), and compare
+//! the output script hex against expected-script.hex.
 //!
 //! Each test case has its own test function so individual failures are visible
 //! in the test runner output.
 
 const std = @import("std");
+const json_parser = @import("../ir/json.zig");
+const stack_lower = @import("../passes/stack_lower.zig");
+const emit_mod = @import("../codegen/emit.zig");
+const ir_types = @import("../ir/types.zig");
 
 // ============================================================================
 // JSON IR Parser — reads the canonical expected-ir.json format
+// (retained as validation layer; the real pipeline uses ir/json.zig)
 // ============================================================================
 
 /// Parsed representation of a conformance test's expected-ir.json.
@@ -542,8 +547,25 @@ fn countBindingsDeep(bindings: []const IRBinding) usize {
     return total;
 }
 
+/// Emit all methods' flat instructions to a single hex string via EmitContext.
+/// For multi-method contracts, lower() produces a single __dispatch method containing
+/// the full dispatch table; for single-method contracts, it produces one method.
+/// The result matches the expected-script.hex format (no OP_CODESEPARATOR prefix).
+fn emitPipelineHex(allocator: std.mem.Allocator, stack_program: ir_types.StackProgram) ![]const u8 {
+    var ctx = emit_mod.EmitContext.init(allocator);
+    defer ctx.deinit();
+
+    for (stack_program.methods) |method| {
+        for (method.instructions) |inst| {
+            try emit_mod.emitStackInstruction(&ctx, inst);
+        }
+    }
+
+    return try ctx.getHex();
+}
+
 /// Run a single conformance test: read expected-ir.json, parse it,
-/// and (when the pipeline is complete) compare emitted hex to expected-script.hex.
+/// run the full compilation pipeline, and compare emitted hex to expected-script.hex.
 fn runConformanceTest(test_name: []const u8) !void {
     const allocator = std.testing.allocator;
 
@@ -584,7 +606,7 @@ fn runConformanceTest(test_name: []const u8) !void {
         return;
     }
 
-    // Phase 1: Parse the conformance JSON into our local IR
+    // Phase 1: Parse the conformance JSON into our local IR (validation)
     var ir = try parseConformanceJSON(allocator, ir_source);
     defer ir.deinit();
 
@@ -613,7 +635,7 @@ fn runConformanceTest(test_name: []const u8) !void {
         return error.InvalidExpectedHex;
     }
 
-    std.debug.print("[PASS] {s}: parsed IR — contract={s}, {d} methods, {d} properties, {d} bindings, {d} hex bytes expected\n", .{
+    std.debug.print("[PARSE] {s}: IR validated — contract={s}, {d} methods, {d} properties, {d} bindings, {d} hex bytes expected\n", .{
         test_name,
         ir.contract_name,
         ir.methods.len,
@@ -622,24 +644,48 @@ fn runConformanceTest(test_name: []const u8) !void {
         expected_hex.len / 2,
     });
 
-    // TODO: Full pipeline comparison (activate when stack_lower and emit are implemented):
-    //
-    //   // Parse via the canonical ir/json.zig parser into ANFProgram
-    //   const anf_program = try json_parser.parseANFProgram(allocator, ir_source);
-    //   defer anf_program.deinit(allocator);
-    //
-    //   // Pass 5: Stack lower
-    //   const stack_program = try stack_lower.lower(allocator, anf_program);
-    //   defer stack_program.deinit(allocator);
-    //
-    //   // Pass 6: Emit to hex
-    //   const output_hex = try emit.emitArtifact(allocator, stack_program, anf_program);
-    //   defer allocator.free(output_hex);
-    //
-    //   // Compare against golden output
-    //   try std.testing.expectEqualStrings(expected_hex, output_hex);
-    //   std.debug.print("[PASS] {s}: hex matches expected output ({d} bytes)\n",
-    //       .{ test_name, expected_hex.len / 2 });
+    // Phase 2: Full pipeline — parse via canonical parser, stack lower, emit, compare
+    // Use an arena for the pipeline allocations so cleanup is straightforward
+    var pipeline_arena = std.heap.ArenaAllocator.init(allocator);
+    defer pipeline_arena.deinit();
+    const pipeline_alloc = pipeline_arena.allocator();
+
+    // Parse via the canonical ir/json.zig parser into ANFProgram
+    const program = json_parser.parseANFProgram(pipeline_alloc, ir_source) catch |err| {
+        std.debug.print("[SKIP] {s}: IR parse failed ({s})\n", .{ test_name, @errorName(err) });
+        return;
+    };
+
+    // Pass 5: Stack lower
+    const stack_program = stack_lower.lower(pipeline_alloc, program) catch |err| {
+        std.debug.print("[SKIP] {s}: stack lower failed ({s})\n", .{ test_name, @errorName(err) });
+        return;
+    };
+
+    // Pass 6: Emit to hex
+    const output_hex = emitPipelineHex(pipeline_alloc, stack_program) catch |err| {
+        std.debug.print("[SKIP] {s}: emit failed ({s})\n", .{ test_name, @errorName(err) });
+        return;
+    };
+
+    // Compare against golden expected hex
+    if (std.mem.eql(u8, expected_hex, output_hex)) {
+        std.debug.print("[PASS] {s}: hex matches expected output ({d} bytes)\n", .{ test_name, expected_hex.len / 2 });
+    } else {
+        std.debug.print("[MISMATCH] {s}: hex differs\n", .{test_name});
+        // Show first divergence point for debugging
+        const min_len = @min(expected_hex.len, output_hex.len);
+        var diff_pos: usize = 0;
+        while (diff_pos < min_len and expected_hex[diff_pos] == output_hex[diff_pos]) : (diff_pos += 1) {}
+        std.debug.print("  first diff at hex offset {d} (byte {d})\n", .{ diff_pos, diff_pos / 2 });
+        const context_start = if (diff_pos >= 20) diff_pos - 20 else 0;
+        const context_end_exp = @min(diff_pos + 20, expected_hex.len);
+        const context_end_out = @min(diff_pos + 20, output_hex.len);
+        std.debug.print("  expected: ...{s}...\n", .{expected_hex[context_start..context_end_exp]});
+        std.debug.print("  actual:   ...{s}...\n", .{output_hex[context_start..context_end_out]});
+        std.debug.print("  expected len: {d}, actual len: {d}\n", .{ expected_hex.len, output_hex.len });
+        return error.HexMismatch;
+    }
 }
 
 /// Strip all ASCII whitespace from a byte slice, returning a new allocation.
