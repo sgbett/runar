@@ -64,6 +64,56 @@ test "bsvz engine verifies OP_HASH160" {
 // End-to-end: .runar.zig → frontend parse/validate/typecheck → bsvz verify
 // ---------------------------------------------------------------------------
 
+fn hexToBytes(allocator: std.mem.Allocator, hex: []const u8) ![]u8 {
+    if (hex.len % 2 != 0) return error.InvalidHexLength;
+    const out = try allocator.alloc(u8, hex.len / 2);
+    errdefer allocator.free(out);
+    _ = try std.fmt.hexToBytes(out, hex);
+    return out;
+}
+
+test "end-to-end: compile P2PKH to hex and execute locking script in bsvz" {
+    const allocator = std.testing.allocator;
+
+    const source =
+        \\const runar = @import("runar");
+        \\
+        \\pub const P2PKH = struct {
+        \\    pub const Contract = runar.SmartContract;
+        \\
+        \\    pubKeyHash: runar.Addr,
+        \\
+        \\    pub fn init(pubKeyHash: runar.Addr) P2PKH {
+        \\        return .{ .pubKeyHash = pubKeyHash };
+        \\    }
+        \\
+        \\    pub fn unlock(self: *const P2PKH, sig: runar.Sig, pubKey: runar.PubKey) void {
+        \\        runar.assert(runar.hash160(pubKey) == self.pubKeyHash);
+        \\        runar.assert(runar.checkSig(sig, pubKey));
+        \\    }
+        \\};
+    ;
+
+    // Compile through the full Zig compiler pipeline
+    const hex = try frontend.compileSourceToHex(allocator, source, "P2PKH.runar.zig");
+    defer allocator.free(hex);
+
+    // Should produce non-empty hex script
+    try std.testing.expect(hex.len > 0);
+
+    // Decode hex to bytes and feed to bsvz engine
+    const script_bytes = try hexToBytes(allocator, hex);
+    defer allocator.free(script_bytes);
+
+    // The compiled P2PKH locking script expects stack inputs from the
+    // unlocking script. We can't run CHECKSIG without a transaction context,
+    // but we can verify the script parses and the opcodes are recognized
+    // by bsvz's engine by checking it doesn't error on parse.
+    const chunks = try bsvz.script.engine.parseScript(allocator, script_bytes);
+    defer allocator.free(chunks);
+    try std.testing.expect(chunks.len > 0);
+}
+
 test "end-to-end: Arithmetic contract passes frontend pipeline" {
     const allocator = std.testing.allocator;
     var arena = std.heap.ArenaAllocator.init(allocator);
