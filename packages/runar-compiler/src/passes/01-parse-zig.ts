@@ -21,6 +21,7 @@ import type {
   TypeNode,
   PrimitiveTypeName,
   Statement,
+  ForStatement,
   Expression,
   SourceLocation,
   BinaryOp,
@@ -584,7 +585,17 @@ class ZigParser extends ParserCore<ZigToken> {
     const body: Statement[] = [];
     while (this.current().type !== '}' && this.current().type !== 'eof') {
       const statement = this.parseStatement();
-      if (statement) body.push(statement);
+      if (statement) {
+        // Merge `var i = 0; while (i < N) : (i += 1) { ... }` into a single ForStatement
+        const lastStmt = body.length > 0 ? body[body.length - 1] : undefined;
+        if (statement.kind === 'for_statement' &&
+            (statement as ForStatement).init.name === '__while_no_init' &&
+            lastStmt?.kind === 'variable_decl') {
+          body.pop();
+          (statement as ForStatement).init = lastStmt as any;
+        }
+        body.push(statement);
+      }
     }
     this.expect('}');
     return body;
@@ -672,9 +683,13 @@ class ZigParser extends ParserCore<ZigToken> {
       return null;
     }
 
-    if (this.current().type === 'while' || this.current().type === 'for') {
+    if (this.current().type === 'while') {
+      return this.parseWhileStatement();
+    }
+
+    if (this.current().type === 'for') {
       this.errors.push(makeDiagnostic(
-        `Unsupported Zig loop syntax '${this.current().value || this.current().type}'`,
+        `Unsupported Zig 'for' syntax — use 'while' loops instead`,
         'error',
         sourceLocation,
       ));
@@ -758,6 +773,70 @@ class ZigParser extends ParserCore<ZigToken> {
       else: elseBranch,
       sourceLocation,
     };
+  }
+
+  /**
+   * Parse Zig while loop: `while (condition) : (continue_expr) { body }`
+   *
+   * Emits a ForStatement. The init is synthesized as `var _while_dummy: i64 = 0`
+   * unless `parseBlockStatements` merges the preceding variable decl (see below).
+   * The continue expression becomes the update.
+   */
+  private parseWhileStatement(): Statement {
+    const sourceLocation = this.loc();
+    this.expect('while');
+
+    // Condition: while (i < 5)
+    if (this.current().type === '(') this.advance();
+    const condition = this.parseExpression();
+    if (this.current().type === ')') this.advance();
+
+    // Continue expression: : (i += 1)
+    let update: Statement;
+    if (this.current().type === ':') {
+      this.advance();
+      if (this.current().type === '(') this.advance();
+      const updateTarget = this.parseExpression();
+      const compoundOp = this.parseCompoundAssignmentOperator();
+      if (compoundOp) {
+        const rhs = this.parseExpression();
+        update = {
+          kind: 'assignment',
+          target: updateTarget,
+          value: { kind: 'binary_expr', op: compoundOp, left: updateTarget, right: rhs },
+          sourceLocation,
+        };
+      } else {
+        update = { kind: 'expression_statement', expression: updateTarget, sourceLocation };
+      }
+      if (this.current().type === ')') this.advance();
+    } else {
+      // No continue expression — synthesize a no-op
+      update = {
+        kind: 'expression_statement',
+        expression: { kind: 'bigint_literal', value: 0n },
+        sourceLocation,
+      };
+    }
+
+    const body = this.parseBlockStatements();
+
+    // Emit a for_statement. The init will be patched by parseBlockStatements
+    // if the preceding statement was a variable_decl for the loop variable.
+    return {
+      kind: 'for_statement',
+      init: {
+        kind: 'variable_decl',
+        name: '__while_no_init',
+        mutable: true,
+        init: { kind: 'bigint_literal', value: 0n },
+        sourceLocation,
+      },
+      condition,
+      update,
+      body,
+      sourceLocation,
+    } as ForStatement;
   }
 
   private parseCompoundAssignmentOperator(): BinaryOp | null {
