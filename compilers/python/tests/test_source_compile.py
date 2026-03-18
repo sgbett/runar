@@ -15,12 +15,27 @@ from conftest import conformance_dir, must_compile_source, load_conformance_scri
 
 
 def _source_path(test_name: str) -> str:
-    """Get the .runar.ts source path for a conformance test."""
+    """Get the .runar.ts source path for a conformance test.
+
+    Checks for a direct .runar.ts file first, then falls back to resolving
+    the .runar.ts reference in source.json.
+    """
+    import json
     source_dir = conformance_dir() / test_name
+    # Direct .runar.ts file in the conformance directory
     for f in source_dir.iterdir():
         if f.name.endswith(".runar.ts"):
             return str(f)
-    raise FileNotFoundError(f"No .runar.ts file in {source_dir}")
+    # Resolve via source.json reference
+    source_json = source_dir / "source.json"
+    if source_json.exists():
+        refs = json.loads(source_json.read_text(encoding="utf-8"))
+        ts_ref = refs.get("sources", {}).get(".runar.ts")
+        if ts_ref:
+            resolved = (source_dir / ts_ref).resolve()
+            if resolved.exists():
+                return str(resolved)
+    raise FileNotFoundError(f"No .runar.ts source for {test_name}")
 
 
 # ---------------------------------------------------------------------------
@@ -59,23 +74,50 @@ class TestSourceCompile:
 
 
 # ---------------------------------------------------------------------------
-# Compiler parity — golden file match
+# All conformance tests — IR-to-script golden file match
 # ---------------------------------------------------------------------------
 
-PARITY_TESTS = [
+ALL_CONFORMANCE_TESTS = [
     "arithmetic",
+    "auction",
     "basic-p2pkh",
+    "blake3",
     "boolean-logic",
     "bounded-loop",
+    "convergence-proof",
+    "covenant-vault",
+    "ec-demo",
+    "ec-primitives",
+    "escrow",
+    "function-patterns",
     "if-else",
+    "if-without-else",
+    "math-demo",
     "multi-method",
+    "oracle-price",
+    "post-quantum-slhdsa",
+    "post-quantum-wallet",
+    "post-quantum-wots",
+    "property-initializers",
+    "schnorr-zkp",
+    "sphincs-wallet",
     "stateful",
+    "stateful-counter",
+    "token-ft",
+    "token-nft",
 ]
 
+# All conformance tests have source files (either direct .runar.ts or via source.json)
+SOURCE_TESTS = ALL_CONFORMANCE_TESTS
+
+
+# ---------------------------------------------------------------------------
+# Compiler parity — source compilation golden file match
+# ---------------------------------------------------------------------------
 
 class TestCompilerParity:
-    @pytest.mark.parametrize("test_name", PARITY_TESTS)
-    def test_compiler_parity_all(self, test_name: str):
+    @pytest.mark.parametrize("test_name", SOURCE_TESTS)
+    def test_compiler_parity_from_source(self, test_name: str):
         source_path = _source_path(test_name)
         expected_hex = load_conformance_script(test_name)
 
@@ -83,8 +125,8 @@ class TestCompilerParity:
         artifact = must_compile_source(source_path, disable_constant_folding=True)
         assert artifact.script == expected_hex, (
             f"Parity mismatch for {test_name}:\n"
-            f"  expected: {expected_hex}\n"
-            f"  got:      {artifact.script}"
+            f"  expected: {expected_hex[:200]}...\n"
+            f"  got:      {artifact.script[:200]}..."
         )
 
 
