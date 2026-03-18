@@ -1,5 +1,8 @@
 const std = @import("std");
+
 const root = @import("../examples_test.zig");
+const runar = @import("runar");
+const ECDemo = @import("ECDemo.runar.zig").ECDemo;
 
 fn contractPath(comptime basename: []const u8) []const u8 {
     return "ec-demo/" ++ basename;
@@ -9,67 +12,48 @@ fn runCompileChecks(comptime basename: []const u8) !void {
     try root.runar.compileCheckSource(std.testing.allocator, @embedFile(basename), basename);
     try root.runar.compileCheckFile(std.testing.allocator, contractPath(basename));
 }
-const Point = struct {
-    x: i64,
-    y: i64,
-};
-
-fn makePoint(x: i64, y: i64) Point {
-    return .{ .x = x, .y = y };
-}
-
-fn onCurve(point: Point) bool {
-    return point.x >= 0 and point.y >= 0;
-}
-
-fn addPoints(a: Point, b: Point) Point {
-    return .{ .x = a.x + b.x, .y = a.y + b.y };
-}
-
-fn mulPoint(point: Point, scalar: i64) Point {
-    return .{ .x = point.x * scalar, .y = point.y * scalar };
-}
-
-fn mulGen(scalar: i64) Point {
-    return .{ .x = scalar, .y = scalar * 2 };
-}
-
-fn negate(point: Point) Point {
-    return .{ .x = point.x, .y = -point.y };
-}
-
-fn modReduce(value: i64, modulus: i64) i64 {
-    const remainder = @mod(value, modulus);
-    return remainder;
-}
-
-const MirrorECDemo = struct {
-    pt: Point,
-
-    fn init(pt: Point) MirrorECDemo {
-        return .{ .pt = pt };
-    }
-};
 
 test "compile-check ECDemo.runar.zig" {
     try runCompileChecks("ECDemo.runar.zig");
 }
 
-test "ECDemo init stores the point" {
-    const point = makePoint(3, 5);
-    const contract = MirrorECDemo.init(point);
-    try std.testing.expectEqual(point.x, contract.pt.x);
-    try std.testing.expectEqual(point.y, contract.pt.y);
+test "ECDemo init stores the real point" {
+    const point = runar.ecMulGen(3);
+    const contract = ECDemo.init(point);
+    try std.testing.expectEqual(runar.ecPointX(point), runar.ecPointX(contract.pt));
+    try std.testing.expectEqual(runar.ecPointY(point), runar.ecPointY(contract.pt));
 }
 
-test "ECDemo point helpers preserve core arithmetic" {
-    const point = makePoint(3, 5);
-    const other = makePoint(4, 7);
+test "ECDemo real contract covers the EC helper surface" {
+    const point = runar.ecMulGen(3);
+    const other = runar.ecMulGen(5);
+    const contract = ECDemo.init(point);
 
-    try std.testing.expect(onCurve(point));
-    try std.testing.expectEqualDeep(makePoint(7, 12), addPoints(point, other));
-    try std.testing.expectEqualDeep(makePoint(6, 10), mulPoint(point, 2));
-    try std.testing.expectEqualDeep(makePoint(9, 18), mulGen(9));
-    try std.testing.expectEqualDeep(point, negate(negate(point)));
-    try std.testing.expectEqual(@as(i64, 2), modReduce(17, 5));
+    contract.checkX(runar.ecPointX(point));
+    contract.checkY(runar.ecPointY(point));
+    contract.checkMakePoint(7, 11, 7, 11);
+    contract.checkOnCurve();
+
+    const added = runar.ecAdd(point, other);
+    contract.checkAdd(other, runar.ecPointX(added), runar.ecPointY(added));
+
+    const doubled = runar.ecMul(point, 2);
+    contract.checkMul(2, runar.ecPointX(doubled), runar.ecPointY(doubled));
+
+    const mul_gen = runar.ecMulGen(9);
+    contract.checkMulGen(9, runar.ecPointX(mul_gen), runar.ecPointY(mul_gen));
+
+    const neg = runar.ecNegate(point);
+    contract.checkNegate(runar.ecPointY(neg));
+    contract.checkNegateRoundtrip();
+    contract.checkModReduce(17, 5, 2);
+    contract.checkEncodeCompressed(runar.ecEncodeCompressed(point));
+    contract.checkMulIdentity();
+    contract.checkAddOnCurve(other);
+    contract.checkMulGenOnCurve(7);
+}
+
+test "ECDemo rejects mismatched scalar and encoding expectations" {
+    try root.expectAssertFailure("ec-demo-wrong-x");
+    try root.expectAssertFailure("ec-demo-wrong-encoding");
 }

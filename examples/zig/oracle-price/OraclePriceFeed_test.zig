@@ -1,5 +1,8 @@
 const std = @import("std");
+
 const root = @import("../examples_test.zig");
+const runar = @import("runar");
+const OraclePriceFeed = @import("OraclePriceFeed.runar.zig").OraclePriceFeed;
 
 fn contractPath(comptime basename: []const u8) []const u8 {
     return "oracle-price/" ++ basename;
@@ -10,59 +13,41 @@ fn runCompileChecks(comptime basename: []const u8) !void {
     try root.runar.compileCheckFile(std.testing.allocator, contractPath(basename));
 }
 
-fn num2bin8(value: u64) [8]u8 {
-    var out = [_]u8{0} ** 8;
-    var current = value;
-    var index: usize = 0;
-    while (index < out.len) : (index += 1) {
-        out[index] = @truncate(current & 0xff);
-        current >>= 8;
+fn findRabinPadding(message: []const u8, modulus: []const u8) ![]const u8 {
+    var pad_value: u16 = 0;
+    while (pad_value <= std.math.maxInt(u8)) : (pad_value += 1) {
+        const candidate = [_]u8{@truncate(pad_value)};
+        if (runar.verifyRabinSig(message, &[_]u8{0x00}, &candidate, modulus)) {
+            return std.testing.allocator.dupe(u8, &candidate);
+        }
     }
-    return out;
+    return error.PaddingNotFound;
 }
-
-const MirrorOraclePriceFeed = struct {
-    oracle_pub_key: []const u8,
-    receiver: []const u8,
-
-    fn init(oracle_pub_key: []const u8, receiver: []const u8) MirrorOraclePriceFeed {
-        return .{
-            .oracle_pub_key = oracle_pub_key,
-            .receiver = receiver,
-        };
-    }
-
-    fn settle(
-        self: MirrorOraclePriceFeed,
-        price: u64,
-        rabin_sig_ok: bool,
-        sig_ok: bool,
-        expected_msg: [8]u8,
-    ) bool {
-        _ = self;
-        const msg = num2bin8(price);
-        return rabin_sig_ok and
-            sig_ok and
-            price > 50_000 and
-            std.mem.eql(u8, msg[0..], expected_msg[0..]);
-    }
-};
 
 test "compile-check OraclePriceFeed.runar.zig" {
     try runCompileChecks("OraclePriceFeed.runar.zig");
 }
 
 test "OraclePriceFeed init stores oracle and receiver" {
-    const contract = MirrorOraclePriceFeed.init("oracle", "receiver");
-    try std.testing.expectEqualStrings("oracle", contract.oracle_pub_key);
-    try std.testing.expectEqualStrings("receiver", contract.receiver);
+    const oracle_pub_key = [_]u8{0xfb};
+    const contract = OraclePriceFeed.init(&oracle_pub_key, runar.ALICE.pubKey);
+    try std.testing.expectEqualSlices(u8, &oracle_pub_key, contract.oraclePubKey);
+    try std.testing.expectEqualSlices(u8, runar.ALICE.pubKey, contract.receiver);
 }
 
-test "OraclePriceFeed settle requires an encoded oracle message, threshold, and receiver signature" {
-    const contract = MirrorOraclePriceFeed.init("oracle", "receiver");
-    const expected_msg = num2bin8(60_000);
+test "OraclePriceFeed settle accepts a real oracle proof above the threshold" {
+    const oracle_pub_key = [_]u8{0xfb};
+    const contract = OraclePriceFeed.init(&oracle_pub_key, runar.ALICE.pubKey);
+    const price: i64 = 60_000;
+    const msg = runar.num2bin(price, 8);
+    const padding = try findRabinPadding(msg, &oracle_pub_key);
+    defer std.testing.allocator.free(padding);
 
-    try std.testing.expect(contract.settle(60_000, true, true, expected_msg));
-    try std.testing.expect(!contract.settle(49_999, true, true, num2bin8(49_999)));
-    try std.testing.expect(!contract.settle(60_000, false, true, expected_msg));
+    contract.settle(price, &[_]u8{0x00}, padding, runar.signTestMessage(runar.ALICE));
+}
+
+test "OraclePriceFeed rejects invalid oracle proofs, thresholds, and receiver signatures" {
+    try root.expectAssertFailure("oracle-price-wrong-rabin-proof");
+    try root.expectAssertFailure("oracle-price-below-threshold");
+    try root.expectAssertFailure("oracle-price-wrong-receiver-sig");
 }

@@ -1,23 +1,10 @@
 const std = @import("std");
 
 const root = @import("../examples_test.zig");
+const runar = @import("runar");
+const NFTExample = @import("NFTExample.runar.zig").NFTExample;
 
 const contract_source = @embedFile("NFTExample.runar.zig");
-
-const NFTMirror = struct {
-    owner: i64,
-
-    fn transfer(self: *NFTMirror, authorized: bool, new_owner: i64, output_satoshis: i64) !void {
-        if (!authorized) return error.Unauthorized;
-        if (output_satoshis < 1) return error.InvalidSatoshis;
-        self.owner = new_owner;
-    }
-
-    fn burn(self: *const NFTMirror, authorized: bool) !void {
-        _ = self;
-        if (!authorized) return error.Unauthorized;
-    }
-};
 
 test "compile-check NFTExample.runar.zig" {
     const allocator = std.testing.allocator;
@@ -31,14 +18,33 @@ test "compile-check NFTExample.runar.zig" {
     try root.runar.compileCheckSource(allocator, contract_source, "NFTExample.runar.zig");
 }
 
-test "nft mirror transfer changes owner when authorized" {
-    var nft = NFTMirror{ .owner = 1 };
-    try nft.transfer(true, 2, 1);
-    try std.testing.expectEqual(@as(i64, 2), nft.owner);
+fn expectBytes(value: runar.OutputValue, expected: []const u8) !void {
+    switch (value) {
+        .bytes => |bytes| try std.testing.expectEqualSlices(u8, expected, bytes),
+        else => return error.TestUnexpectedResult,
+    }
 }
 
-test "nft mirror enforces authorization for transfer and burn" {
-    var nft = NFTMirror{ .owner = 1 };
-    try std.testing.expectError(error.Unauthorized, nft.transfer(false, 2, 1));
-    try std.testing.expectError(error.Unauthorized, nft.burn(false));
+test "nft transfer records a single new-owner output through the real contract" {
+    var runtime = runar.StatefulSmartContract.init(std.testing.allocator);
+    defer runtime.deinit();
+    var nft = NFTExample.init(runar.ALICE.pubKey, "token", "metadata");
+    const ctx = try runar.StatefulContext.init(&runtime, runar.mockPreimage(.{}));
+
+    nft.transfer(ctx, runar.signTestMessage(runar.ALICE), runar.BOB.pubKey, 1);
+
+    try std.testing.expectEqual(@as(usize, 1), ctx.outputs().len);
+    try std.testing.expectEqual(@as(i64, 1), ctx.outputs()[0].satoshis);
+    try expectBytes(ctx.outputs()[0].values[0], runar.BOB.pubKey);
+}
+
+test "nft burn authorizes the owner through the real contract" {
+    const nft = NFTExample.init(runar.ALICE.pubKey, "token", "metadata");
+    nft.burn(runar.signTestMessage(runar.ALICE));
+}
+
+test "nft transfer and burn reject invalid authorization or satoshis" {
+    try root.expectAssertFailure("token-nft-transfer-wrong-sig");
+    try root.expectAssertFailure("token-nft-transfer-invalid-satoshis");
+    try root.expectAssertFailure("token-nft-burn-wrong-sig");
 }

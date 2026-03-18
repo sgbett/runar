@@ -20,9 +20,9 @@ pub const PostQuantumWallet = struct {
         sig: runar.Sig,
         pubKey: runar.PubKey,
     ) void {
-        runar.assert(runar.hash160(pubKey) == self.ecdsaPubKeyHash);
+        runar.assert(runar.bytesEq(runar.hash160(pubKey), self.ecdsaPubKeyHash));
         runar.assert(runar.checkSig(sig, pubKey));
-        runar.assert(runar.hash160(wotsPubKey) == self.wotsPubKeyHash);
+        runar.assert(runar.bytesEq(runar.hash160(wotsPubKey), self.wotsPubKeyHash));
         runar.assert(runar.verifyWOTS(sig, wotsSig, wotsPubKey));
     }
 };

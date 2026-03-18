@@ -50,6 +50,7 @@ pub const TicTacToe = struct {
 
     pub fn moveAndWin(
         self: *const TicTacToe,
+        ctx: runar.StatefulContext,
         position: i64,
         player: runar.PubKey,
         sig: runar.Sig,
@@ -71,14 +72,15 @@ pub const TicTacToe = struct {
                 runar.cat(runar.num2bin(changeAmount, 8), self.p2pkhPrefix),
                 runar.cat(changePKH, self.p2pkhSuffix),
             );
-            runar.assert(runar.hash256(runar.cat(payout, change)) == runar.extractOutputHash(self.txPreimage));
+            runar.assert(runar.bytesEq(runar.hash256(runar.cat(payout, change)), runar.extractOutputHash(ctx.txPreimage)));
         } else {
-            runar.assert(runar.hash256(payout) == runar.extractOutputHash(self.txPreimage));
+            runar.assert(runar.bytesEq(runar.hash256(payout), runar.extractOutputHash(ctx.txPreimage)));
         }
     }
 
     pub fn moveAndTie(
         self: *const TicTacToe,
+        ctx: runar.StatefulContext,
         position: i64,
         player: runar.PubKey,
         sig: runar.Sig,
@@ -105,14 +107,15 @@ pub const TicTacToe = struct {
                 runar.cat(runar.num2bin(changeAmount, 8), self.p2pkhPrefix),
                 runar.cat(changePKH, self.p2pkhSuffix),
             );
-            runar.assert(runar.hash256(runar.cat(runar.cat(out1, out2), change)) == runar.extractOutputHash(self.txPreimage));
+            runar.assert(runar.bytesEq(runar.hash256(runar.cat(runar.cat(out1, out2), change)), runar.extractOutputHash(ctx.txPreimage)));
         } else {
-            runar.assert(runar.hash256(runar.cat(out1, out2)) == runar.extractOutputHash(self.txPreimage));
+            runar.assert(runar.bytesEq(runar.hash256(runar.cat(out1, out2)), runar.extractOutputHash(ctx.txPreimage)));
         }
     }
 
     pub fn cancelBeforeJoin(
         self: *const TicTacToe,
+        ctx: runar.StatefulContext,
         sig: runar.Sig,
         changePKH: runar.ByteString,
         changeAmount: i64,
@@ -129,14 +132,15 @@ pub const TicTacToe = struct {
                 runar.cat(runar.num2bin(changeAmount, 8), self.p2pkhPrefix),
                 runar.cat(changePKH, self.p2pkhSuffix),
             );
-            runar.assert(runar.hash256(runar.cat(payout, change)) == runar.extractOutputHash(self.txPreimage));
+            runar.assert(runar.bytesEq(runar.hash256(runar.cat(payout, change)), runar.extractOutputHash(ctx.txPreimage)));
         } else {
-            runar.assert(runar.hash256(payout) == runar.extractOutputHash(self.txPreimage));
+            runar.assert(runar.bytesEq(runar.hash256(payout), runar.extractOutputHash(ctx.txPreimage)));
         }
     }
 
     pub fn cancel(
         self: *const TicTacToe,
+        ctx: runar.StatefulContext,
         sigX: runar.Sig,
         sigO: runar.Sig,
         changePKH: runar.ByteString,
@@ -155,9 +159,9 @@ pub const TicTacToe = struct {
                 runar.cat(runar.num2bin(changeAmount, 8), self.p2pkhPrefix),
                 runar.cat(changePKH, self.p2pkhSuffix),
             );
-            runar.assert(runar.hash256(runar.cat(runar.cat(out1, out2), change)) == runar.extractOutputHash(self.txPreimage));
+            runar.assert(runar.bytesEq(runar.hash256(runar.cat(runar.cat(out1, out2), change)), runar.extractOutputHash(ctx.txPreimage)));
         } else {
-            runar.assert(runar.hash256(runar.cat(out1, out2)) == runar.extractOutputHash(self.txPreimage));
+            runar.assert(runar.bytesEq(runar.hash256(runar.cat(out1, out2)), runar.extractOutputHash(ctx.txPreimage)));
         }
 
         runar.assert(runar.checkSig(sigX, self.playerX));
@@ -166,9 +170,9 @@ pub const TicTacToe = struct {
 
     fn assertCorrectPlayer(self: *const TicTacToe, player: runar.PubKey) void {
         if (self.turn == 1) {
-            runar.assert(player == self.playerX);
+            runar.assert(runar.bytesEq(player, self.playerX));
         } else {
-            runar.assert(player == self.playerO);
+            runar.assert(runar.bytesEq(player, self.playerO));
         }
     }
 

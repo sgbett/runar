@@ -260,6 +260,7 @@ const TypeChecker = struct {
     prop_types: std.StringHashMapUnmanaged(RunarType),
     method_sigs: std.StringHashMapUnmanaged(FuncSig),
     consumed_values: std.StringHashMapUnmanaged(bool),
+    stateful_ctx_params: std.StringHashMapUnmanaged(void),
 
     fn init(allocator: Allocator, contract: ContractNode) !TypeChecker {
         var self = TypeChecker{
@@ -269,6 +270,7 @@ const TypeChecker = struct {
             .prop_types = .empty,
             .method_sigs = .empty,
             .consumed_values = .empty,
+            .stateful_ctx_params = .empty,
         };
 
         // Register property types
@@ -301,6 +303,7 @@ const TypeChecker = struct {
         self.method_sigs.deinit(self.allocator);
         self.prop_types.deinit(self.allocator);
         self.consumed_values.deinit(self.allocator);
+        self.stateful_ctx_params.deinit(self.allocator);
         // Note: self.errors ownership transfers to caller via toOwnedSlice
     }
 
@@ -320,6 +323,7 @@ const TypeChecker = struct {
         defer env.deinit();
 
         self.consumed_values.clearRetainingCapacity();
+        self.stateful_ctx_params.clearRetainingCapacity();
 
         const ctor = self.contract.constructor;
         for (ctor.params) |param| env.define(param.name, param.type_info);
@@ -336,8 +340,14 @@ const TypeChecker = struct {
         defer env.deinit();
 
         self.consumed_values.clearRetainingCapacity();
+        self.stateful_ctx_params.clearRetainingCapacity();
 
-        for (method.params) |param| env.define(param.name, param.type_info);
+        for (method.params) |param| {
+            env.define(param.name, param.type_info);
+            if (std.mem.eql(u8, param.type_name, "StatefulContext")) {
+                self.stateful_ctx_params.put(self.allocator, param.name, {}) catch {};
+            }
+        }
 
         self.checkStatements(method.body, &env);
     }
@@ -450,6 +460,9 @@ const TypeChecker = struct {
                     if (self.method_sigs.get(pa.property) != null) return .unknown;
                     if (std.mem.eql(u8, pa.property, "getStateScript")) return .unknown;
                     return .unknown;
+                }
+                if (self.stateful_ctx_params.get(pa.object) != null and std.mem.eql(u8, pa.property, "txPreimage")) {
+                    return .sig_hash_preimage;
                 }
                 if (std.mem.eql(u8, pa.object, "SigHash")) return .bigint;
                 return .unknown;
@@ -653,8 +666,9 @@ const TypeChecker = struct {
 
     fn checkMethodCallExpr(self: *TypeChecker, mc: *const types.MethodCall, env: *TypeEnv) RunarType {
         const is_this = std.mem.eql(u8, mc.object, "this") or std.mem.eql(u8, mc.object, "self");
+        const is_stateful_ctx = self.stateful_ctx_params.get(mc.object) != null;
 
-        if (is_this) {
+        if (is_this or is_stateful_ctx) {
             if (std.mem.eql(u8, mc.method, "getStateScript")) return .byte_string;
             if (std.mem.eql(u8, mc.method, "addOutput")) {
                 if (self.contract.parent_class != .stateful_smart_contract) {
@@ -673,7 +687,7 @@ const TypeChecker = struct {
             if (self.method_sigs.get(mc.method)) |method_sig| {
                 return self.checkCallArgs(mc.method, method_sig, mc.args, env);
             }
-            self.addError("unknown method 'this.{s}' -- only Runar built-in methods and contract methods are allowed", .{mc.method});
+            self.addError("unknown method '{s}.{s}' -- only Runar built-in methods and contract methods are allowed", .{ mc.object, mc.method });
             for (mc.args) |arg| _ = self.inferExprType(arg, env);
             return .unknown;
         }

@@ -15,10 +15,10 @@ pub const NFTExample = struct {
         };
     }
 
-    pub fn transfer(self: *NFTExample, sig: runar.Sig, newOwner: runar.PubKey, outputSatoshis: i64) void {
+    pub fn transfer(self: *NFTExample, ctx: runar.StatefulContext, sig: runar.Sig, newOwner: runar.PubKey, outputSatoshis: i64) void {
         runar.assert(runar.checkSig(sig, self.owner));
         runar.assert(outputSatoshis >= 1);
-        self.addOutput(outputSatoshis, newOwner);
+        ctx.addOutput(outputSatoshis, .{ newOwner });
     }
 
     pub fn burn(self: *const NFTExample, sig: runar.Sig) void {

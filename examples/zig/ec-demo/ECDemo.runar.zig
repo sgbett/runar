@@ -65,7 +65,7 @@ pub const ECDemo = struct {
     }
 
     pub fn checkEncodeCompressed(self: *const ECDemo, expected: runar.ByteString) void {
-        runar.assert(runar.ecEncodeCompressed(self.pt) == expected);
+        runar.assert(runar.bytesEq(runar.ecEncodeCompressed(self.pt), expected));
     }
 
     pub fn checkMulIdentity(self: *const ECDemo) void {

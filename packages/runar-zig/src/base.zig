@@ -101,6 +101,32 @@ pub const StatefulSmartContract = struct {
     }
 };
 
+pub const StatefulContext = struct {
+    runtime: *StatefulSmartContract,
+    txPreimage: SigHashPreimage,
+
+    pub fn init(runtime: *StatefulSmartContract, tx_preimage: SigHashPreimage) StatefulRuntimeError!StatefulContext {
+        runtime.resetOutputs();
+        try runtime.setTxPreimage(tx_preimage);
+        return .{
+            .runtime = runtime,
+            .txPreimage = runtime.txPreimage,
+        };
+    }
+
+    pub fn addOutput(self: StatefulContext, satoshis: Bigint, values: anytype) void {
+        self.runtime.addOutput(satoshis, values) catch @panic("failed to record output");
+    }
+
+    pub fn getStateScript(self: StatefulContext) ByteString {
+        return self.runtime.getStateScript();
+    }
+
+    pub fn outputs(self: StatefulContext) []const OutputSnapshot {
+        return self.runtime.outputs();
+    }
+};
+
 fn duplicateTupleValues(allocator: std.mem.Allocator, values: anytype) StatefulRuntimeError![]OutputValue {
     const Values = @TypeOf(values);
     const info = @typeInfo(Values);
@@ -160,4 +186,16 @@ test "stateful runtime records and resets outputs" {
 
 test "Readonly returns the wrapped type unchanged" {
     try std.testing.expect(Readonly(i64) == i64);
+}
+
+test "StatefulContext exposes txPreimage and mutating output helpers" {
+    var runtime = StatefulSmartContract.init(std.testing.allocator);
+    defer runtime.deinit();
+
+    const ctx = try StatefulContext.init(&runtime, "preimage");
+    try std.testing.expectEqualStrings("preimage", ctx.txPreimage);
+
+    ctx.addOutput(21, .{ "alice", @as(i64, 7) });
+    try std.testing.expectEqual(@as(usize, 1), ctx.outputs().len);
+    try std.testing.expectEqual(@as(i64, 21), ctx.outputs()[0].satoshis);
 }

@@ -1,87 +1,10 @@
 const std = @import("std");
 
 const root = @import("../examples_test.zig");
+const runar = @import("runar");
+const FungibleTokenExample = @import("FungibleTokenExample.runar.zig").FungibleTokenExample;
 
 const contract_source = @embedFile("FungibleTokenExample.runar.zig");
-
-const TokenOutput = struct {
-    owner: i64,
-    balance: i64,
-    merge_balance: i64,
-    satoshis: i64,
-};
-
-const TransferPlan = struct {
-    count: usize,
-    outputs: [2]TokenOutput,
-};
-
-const MergePlan = struct {
-    owner: i64,
-    balance: i64,
-    merge_balance: i64,
-    satoshis: i64,
-};
-
-const FungibleTokenMirror = struct {
-    owner: i64,
-    balance: i64,
-    merge_balance: i64,
-
-    fn totalBalance(self: *const FungibleTokenMirror) i64 {
-        return self.balance + self.merge_balance;
-    }
-
-    fn transfer(self: *const FungibleTokenMirror, to: i64, amount: i64, output_satoshis: i64) !TransferPlan {
-        if (output_satoshis < 1) return error.InvalidSatoshis;
-        const total_balance = self.totalBalance();
-        if (amount <= 0) return error.InvalidAmount;
-        if (amount > total_balance) return error.InsufficientBalance;
-
-        var plan = TransferPlan{
-            .count = 1,
-            .outputs = undefined,
-        };
-        plan.outputs[0] = .{
-            .owner = to,
-            .balance = amount,
-            .merge_balance = 0,
-            .satoshis = output_satoshis,
-        };
-        if (amount < total_balance) {
-            plan.count = 2;
-            plan.outputs[1] = .{
-                .owner = self.owner,
-                .balance = total_balance - amount,
-                .merge_balance = 0,
-                .satoshis = output_satoshis,
-            };
-        }
-        return plan;
-    }
-
-    fn send(self: *const FungibleTokenMirror, to: i64, output_satoshis: i64) !TokenOutput {
-        if (output_satoshis < 1) return error.InvalidSatoshis;
-        return .{
-            .owner = to,
-            .balance = self.totalBalance(),
-            .merge_balance = 0,
-            .satoshis = output_satoshis,
-        };
-    }
-
-    fn merge(self: *const FungibleTokenMirror, other_balance: i64, my_is_first: bool, output_satoshis: i64) !MergePlan {
-        if (output_satoshis < 1) return error.InvalidSatoshis;
-        if (other_balance < 0) return error.InvalidMergeBalance;
-        const my_balance = self.totalBalance();
-        return .{
-            .owner = self.owner,
-            .balance = if (my_is_first) my_balance else other_balance,
-            .merge_balance = if (my_is_first) other_balance else my_balance,
-            .satoshis = output_satoshis,
-        };
-    }
-};
 
 test "compile-check FungibleTokenExample.runar.zig" {
     const allocator = std.testing.allocator;
@@ -95,33 +18,74 @@ test "compile-check FungibleTokenExample.runar.zig" {
     try root.runar.compileCheckSource(allocator, contract_source, "FungibleTokenExample.runar.zig");
 }
 
-test "fungible token mirror transfer creates recipient and change outputs" {
-    const token = FungibleTokenMirror{
-        .owner = 1,
-        .balance = 40,
-        .merge_balance = 10,
-    };
-
-    const plan = try token.transfer(2, 30, 1);
-    try std.testing.expectEqual(@as(usize, 2), plan.count);
-    try std.testing.expectEqual(@as(i64, 2), plan.outputs[0].owner);
-    try std.testing.expectEqual(@as(i64, 30), plan.outputs[0].balance);
-    try std.testing.expectEqual(@as(i64, 1), plan.outputs[1].owner);
-    try std.testing.expectEqual(@as(i64, 20), plan.outputs[1].balance);
+fn expectBytes(value: runar.OutputValue, expected: []const u8) !void {
+    switch (value) {
+        .bytes => |bytes| try std.testing.expectEqualSlices(u8, expected, bytes),
+        else => return error.TestUnexpectedResult,
+    }
 }
 
-test "fungible token mirror merge preserves first-input ordering" {
-    const token = FungibleTokenMirror{
-        .owner = 7,
-        .balance = 25,
-        .merge_balance = 5,
-    };
+fn expectBigint(value: runar.OutputValue, expected: i64) !void {
+    switch (value) {
+        .bigint => |bigint| try std.testing.expectEqual(expected, bigint),
+        else => return error.TestUnexpectedResult,
+    }
+}
 
-    const first = try token.merge(12, true, 1);
-    try std.testing.expectEqual(@as(i64, 30), first.balance);
-    try std.testing.expectEqual(@as(i64, 12), first.merge_balance);
+test "fungible token transfer records recipient and change outputs" {
+    var runtime = runar.StatefulSmartContract.init(std.testing.allocator);
+    defer runtime.deinit();
+    var token = FungibleTokenExample.init(runar.ALICE.pubKey, 40, 10, "token");
+    const ctx = try runar.StatefulContext.init(&runtime, runar.mockPreimage(.{}));
 
-    const second = try token.merge(12, false, 1);
-    try std.testing.expectEqual(@as(i64, 12), second.balance);
-    try std.testing.expectEqual(@as(i64, 30), second.merge_balance);
+    token.transfer(ctx, runar.signTestMessage(runar.ALICE), runar.BOB.pubKey, 30, 1);
+
+    try std.testing.expectEqual(@as(usize, 2), ctx.outputs().len);
+    try std.testing.expectEqual(@as(i64, 1), ctx.outputs()[0].satoshis);
+    try expectBytes(ctx.outputs()[0].values[0], runar.BOB.pubKey);
+    try expectBigint(ctx.outputs()[0].values[1], 30);
+    try expectBigint(ctx.outputs()[0].values[2], 0);
+    try expectBytes(ctx.outputs()[1].values[0], runar.ALICE.pubKey);
+    try expectBigint(ctx.outputs()[1].values[1], 20);
+    try expectBigint(ctx.outputs()[1].values[2], 0);
+}
+
+test "fungible token send records a single full-balance output" {
+    var runtime = runar.StatefulSmartContract.init(std.testing.allocator);
+    defer runtime.deinit();
+    var token = FungibleTokenExample.init(runar.ALICE.pubKey, 25, 5, "token");
+    const ctx = try runar.StatefulContext.init(&runtime, runar.mockPreimage(.{}));
+
+    token.send(ctx, runar.signTestMessage(runar.ALICE), runar.BOB.pubKey, 1);
+
+    try std.testing.expectEqual(@as(usize, 1), ctx.outputs().len);
+    try expectBytes(ctx.outputs()[0].values[0], runar.BOB.pubKey);
+    try expectBigint(ctx.outputs()[0].values[1], 30);
+    try expectBigint(ctx.outputs()[0].values[2], 0);
+}
+
+test "fungible token merge preserves first-input ordering through the real contract" {
+    var runtime = runar.StatefulSmartContract.init(std.testing.allocator);
+    defer runtime.deinit();
+    var token = FungibleTokenExample.init(runar.ALICE.pubKey, 25, 5, "token");
+    const first = [_]u8{'a'} ** 36;
+    const second = [_]u8{'b'} ** 36;
+    const all_prevouts = first ++ second;
+    const ctx = try runar.StatefulContext.init(&runtime, runar.mockPreimage(.{
+        .hashPrevouts = runar.hash256(all_prevouts[0..]),
+        .outpoint = first[0..],
+    }));
+
+    token.merge(ctx, runar.signTestMessage(runar.ALICE), 12, all_prevouts[0..], 1);
+
+    try std.testing.expectEqual(@as(usize, 1), ctx.outputs().len);
+    try expectBytes(ctx.outputs()[0].values[0], runar.ALICE.pubKey);
+    try expectBigint(ctx.outputs()[0].values[1], 30);
+    try expectBigint(ctx.outputs()[0].values[2], 12);
+}
+
+test "fungible token rejects invalid transfers and prevout mismatches" {
+    try root.expectAssertFailure("token-ft-transfer-too-much");
+    try root.expectAssertFailure("token-ft-transfer-wrong-sig");
+    try root.expectAssertFailure("token-ft-merge-prevouts-mismatch");
 }

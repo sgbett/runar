@@ -219,7 +219,11 @@ fn lowerMethods(allocator: Allocator, contract: ContractNode) LowerError![]ANFMe
             const needs_new_amount = methodMutatesState(method, contract) and !methodHasAddOutput(method);
 
             var aug_params: std.ArrayListUnmanaged(ParamNode) = .empty;
-            try aug_params.appendSlice(allocator, method.params);
+            for (method.params) |param| {
+                if (!std.mem.eql(u8, param.type_name, "StatefulContext")) {
+                    try aug_params.append(allocator, param);
+                }
+            }
             if (needs_change_output) {
                 try aug_params.append(allocator, .{ .name = "_changePKH", .type_info = .ripemd160, .type_name = "Ripemd160" });
                 try aug_params.append(allocator, .{ .name = "_changeAmount", .type_info = .bigint, .type_name = "bigint" });
@@ -688,6 +692,9 @@ fn lowerExprToRef(ctx: *LowerCtx, expr: Expression) LowerError![]const u8 {
             if (ctx.isParam(pa.property)) {
                 return try ctx.emit(.{ .load_param = .{ .name = pa.property } });
             }
+            if (isStatefulContextParam(ctx, pa.object) and std.mem.eql(u8, pa.property, "txPreimage")) {
+                return try ctx.emit(.{ .load_param = .{ .name = "txPreimage" } });
+            }
             // this.x -> load_prop
             return try ctx.emit(.{ .load_prop = .{ .name = pa.property } });
         },
@@ -800,6 +807,17 @@ fn lowerIdentifier(ctx: *LowerCtx, name: []const u8) LowerError![]const u8 {
     return try ctx.emit(.{ .load_param = .{ .name = name } });
 }
 
+fn isStatefulContextParam(ctx: *const LowerCtx, name: []const u8) bool {
+    for (ctx.contract.methods) |method| {
+        for (method.params) |param| {
+            if (std.mem.eql(u8, param.name, name) and std.mem.eql(u8, param.type_name, "StatefulContext")) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 fn lowerCallExpr(ctx: *LowerCtx, c: *const types.CallExpr) LowerError![]const u8 {
     // super() call
     if (std.mem.eql(u8, c.callee, "super")) {
@@ -838,10 +856,11 @@ fn lowerCallExpr(ctx: *LowerCtx, c: *const types.CallExpr) LowerError![]const u8
 
 fn lowerMethodCallExpr(ctx: *LowerCtx, mc: *const types.MethodCall) LowerError![]const u8 {
     const is_self = std.mem.eql(u8, mc.object, "this") or std.mem.eql(u8, mc.object, "self");
+    const is_stateful_ctx = isStatefulContextParam(ctx, mc.object);
 
     // this.addOutput(satoshis, val1, val2, ...)
-    if (is_self and std.mem.eql(u8, mc.method, "addOutput")) {
-        const arg_refs = try lowerArgs(ctx, mc.args);
+    if ((is_self or is_stateful_ctx) and std.mem.eql(u8, mc.method, "addOutput")) {
+        const arg_refs = try lowerAddOutputArgs(ctx, mc.args);
         if (arg_refs.len > 0) {
             const ref = try ctx.emit(.{ .add_output = .{
                 .satoshis = arg_refs[0],
@@ -854,7 +873,7 @@ fn lowerMethodCallExpr(ctx: *LowerCtx, mc: *const types.MethodCall) LowerError![
     }
 
     // this.addRawOutput(satoshis, scriptBytes)
-    if (is_self and std.mem.eql(u8, mc.method, "addRawOutput")) {
+    if ((is_self or is_stateful_ctx) and std.mem.eql(u8, mc.method, "addRawOutput")) {
         const arg_refs = try lowerArgs(ctx, mc.args);
         if (arg_refs.len >= 2) {
             const ref = try ctx.emit(.{ .add_raw_output = .{
@@ -867,7 +886,7 @@ fn lowerMethodCallExpr(ctx: *LowerCtx, mc: *const types.MethodCall) LowerError![
     }
 
     // this.getStateScript()
-    if (is_self and std.mem.eql(u8, mc.method, "getStateScript")) {
+    if ((is_self or is_stateful_ctx) and std.mem.eql(u8, mc.method, "getStateScript")) {
         return try ctx.emit(.{ .get_state_script = {} });
     }
 
@@ -922,6 +941,23 @@ fn lowerTernaryExpr(ctx: *LowerCtx, t: *const types.Ternary) LowerError![]const 
         .@"else" = try else_ctx.bindings.toOwnedSlice(ctx.allocator),
     };
     return try ctx.emit(.{ .@"if" = if_val });
+}
+
+fn lowerAddOutputArgs(ctx: *LowerCtx, args: []const Expression) LowerError![]const []const u8 {
+    if (args.len == 2) {
+        switch (args[1]) {
+            .array_literal => |elems| {
+                var refs: std.ArrayListUnmanaged([]const u8) = .empty;
+                try refs.append(ctx.allocator, try lowerExprToRef(ctx, args[0]));
+                for (elems) |elem| {
+                    try refs.append(ctx.allocator, try lowerExprToRef(ctx, elem));
+                }
+                return try refs.toOwnedSlice(ctx.allocator);
+            },
+            else => {},
+        }
+    }
+    return try lowerArgs(ctx, args);
 }
 
 fn lowerIncrementExpr(ctx: *LowerCtx, inc: *const types.IncrementExpr) LowerError![]const u8 {

@@ -20,9 +20,9 @@ pub const SPHINCSWallet = struct {
         sig: runar.Sig,
         pubKey: runar.PubKey,
     ) void {
-        runar.assert(runar.hash160(pubKey) == self.ecdsaPubKeyHash);
+        runar.assert(runar.bytesEq(runar.hash160(pubKey), self.ecdsaPubKeyHash));
         runar.assert(runar.checkSig(sig, pubKey));
-        runar.assert(runar.hash160(slhdsaPubKey) == self.slhdsaPubKeyHash);
+        runar.assert(runar.bytesEq(runar.hash160(slhdsaPubKey), self.slhdsaPubKeyHash));
         runar.assert(runar.verifySLHDSA_SHA2_128s(sig, slhdsaSig, slhdsaPubKey));
     }
 };
