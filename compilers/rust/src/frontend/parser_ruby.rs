@@ -2031,7 +2031,7 @@ impl<'a> RbParser<'a> {
                 expr
             }
             Token::LBracket => {
-                // Array literal
+                // Array literal: [elem, ...]
                 let mut elements = Vec::new();
                 while *self.peek() != Token::RBracket && *self.peek() != Token::Eof {
                     elements.push(self.parse_expression());
@@ -2040,12 +2040,7 @@ impl<'a> RbParser<'a> {
                     }
                 }
                 self.expect(&Token::RBracket);
-                Expression::CallExpr {
-                    callee: Box::new(Expression::Identifier {
-                        name: "array".to_string(),
-                    }),
-                    args: elements,
-                }
+                Expression::ArrayLiteral { elements }
             }
             other => {
                 self.errors

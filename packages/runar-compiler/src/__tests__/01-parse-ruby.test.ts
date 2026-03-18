@@ -970,6 +970,78 @@ end
   });
 
   // ---------------------------------------------------------------------------
+  // Array literals
+  // ---------------------------------------------------------------------------
+
+  describe('array literals', () => {
+    it('parses a multi-element array literal as array_literal node', () => {
+      const rb = `
+class Foo < Runar::SmartContract
+  prop :x, Bigint
+  def initialize(x)
+    super(x)
+    @x = x
+  end
+  runar_public
+  def bar(a, b, c)
+    arr = [a, b, c]
+  end
+end
+`;
+      const result = parseRubySource(rb, 'Foo.runar.rb');
+      const bar = result.contract!.methods.find(m => m.name === 'bar')!;
+      const decl = bar.body[0] as VariableDeclStatement;
+      const init = decl.init as { kind: string; elements: unknown[] };
+      expect(init.kind).toBe('array_literal');
+      expect(init.elements).toHaveLength(3);
+    });
+
+    it('parses an empty array literal', () => {
+      const rb = `
+class Foo < Runar::SmartContract
+  prop :x, Bigint
+  def initialize(x)
+    super(x)
+    @x = x
+  end
+  runar_public
+  def bar
+    arr = []
+  end
+end
+`;
+      const result = parseRubySource(rb, 'Foo.runar.rb');
+      const bar = result.contract!.methods.find(m => m.name === 'bar')!;
+      const decl = bar.body[0] as VariableDeclStatement;
+      const init = decl.init as { kind: string; elements: unknown[] };
+      expect(init.kind).toBe('array_literal');
+      expect(init.elements).toHaveLength(0);
+    });
+
+    it('parses a single-element array literal', () => {
+      const rb = `
+class Foo < Runar::SmartContract
+  prop :x, Bigint
+  def initialize(x)
+    super(x)
+    @x = x
+  end
+  runar_public
+  def bar(a)
+    arr = [a]
+  end
+end
+`;
+      const result = parseRubySource(rb, 'Foo.runar.rb');
+      const bar = result.contract!.methods.find(m => m.name === 'bar')!;
+      const decl = bar.body[0] as VariableDeclStatement;
+      const init = decl.init as { kind: string; elements: unknown[] };
+      expect(init.kind).toBe('array_literal');
+      expect(init.elements).toHaveLength(1);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // Integration: full parse via dispatcher
   // ---------------------------------------------------------------------------
 
