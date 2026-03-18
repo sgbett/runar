@@ -13,4 +13,5 @@ test {
     _ = @import("passes/constant_fold.zig");
     _ = @import("passes/ec_optimizer.zig");
     _ = @import("tests/e2e.zig");
+    _ = @import("compiler_api.zig");
 }
