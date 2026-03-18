@@ -1,6 +1,7 @@
 const std = @import("std");
 const runtime = @import("runar");
-const build_options = @import("build_options");
+
+const assert_probe_path = "zig-out/bin/assert_probe";
 
 pub const runar = struct {
     pub fn compileCheckSource(
@@ -38,7 +39,7 @@ pub const runar = struct {
     ) !void {
         const result = try std.process.Child.run(.{
             .allocator = allocator,
-            .argv = &.{ build_options.assert_probe_path, probe_case },
+            .argv = &.{ assert_probe_path, probe_case },
             .max_output_bytes = 64 * 1024,
         });
         defer {

@@ -6,7 +6,7 @@ pub const compile_check = @import("compile_check.zig");
 pub const test_keys = @import("test_keys.zig");
 
 pub const Int = base.Int;
-pub const Bigint = base.Bigint;
+pub const Bigint = builtins.SignedBigint;
 pub const PubKey = base.PubKey;
 pub const Sig = base.Sig;
 pub const Addr = base.Addr;
@@ -36,6 +36,7 @@ pub const CompileCheckStage = compile_check.CompileCheckStage;
 pub const CompileCheckResult = compile_check.CompileCheckResult;
 pub const compileCheckSource = compile_check.compileCheckSource;
 pub const compileCheckFile = compile_check.compileCheckFile;
+pub const bigint = builtins.SignedBigint.from;
 
 pub const assert = builtins.assert;
 pub const sha256 = builtins.sha256;

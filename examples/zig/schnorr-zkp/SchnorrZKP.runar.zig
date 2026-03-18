@@ -9,7 +9,7 @@ pub const SchnorrZKP = struct {
         return .{ .pubKey = pubKey };
     }
 
-    pub fn verify(self: *const SchnorrZKP, rPoint: runar.Point, s: i64) void {
+    pub fn verify(self: *const SchnorrZKP, rPoint: runar.Point, s: runar.Bigint) void {
         runar.assert(runar.ecOnCurve(rPoint));
 
         const e = runar.bin2num(runar.hash256(runar.cat(rPoint, self.pubKey)));

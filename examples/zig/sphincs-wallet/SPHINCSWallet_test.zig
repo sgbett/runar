@@ -1,6 +1,7 @@
 const std = @import("std");
 const root = @import("../examples_test.zig");
 const runar = @import("runar");
+const fixtures = @import("fixtures.zig");
 const SPHINCSWallet = @import("SPHINCSWallet.runar.zig").SPHINCSWallet;
 
 fn contractPath(comptime basename: []const u8) []const u8 {
@@ -18,12 +19,12 @@ test "compile-check SPHINCSWallet.runar.zig" {
 
 test "SPHINCSWallet init stores both authorization hashes" {
     const ecdsa_hash = runar.hash160(runar.ALICE.pubKey);
-    const slhdsa_pub_key = "slhdsa-pub-key";
-    const slhdsa_hash = runar.hash160(slhdsa_pub_key);
+    const slhdsa_hash = runar.hash160(&fixtures.slhdsa_pub_key);
     const contract = SPHINCSWallet.init(ecdsa_hash, slhdsa_hash);
 
     try std.testing.expectEqualSlices(u8, ecdsa_hash, contract.ecdsaPubKeyHash);
     try std.testing.expectEqualSlices(u8, slhdsa_hash, contract.slhdsaPubKeyHash);
+    try std.testing.expectEqualSlices(u8, &fixtures.slhdsa_pub_key_hash, contract.slhdsaPubKeyHash);
 }
 
 test "SPHINCSWallet rejects invalid authorization paths through the real contract" {

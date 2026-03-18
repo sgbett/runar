@@ -13,14 +13,14 @@ Legend:
 |---|---|---|---|---|---|---|
 | Compiler correctness | 🟩 | 🟩 | 🟩 | 🟩 | 🟩 | Zig is fully green on compiler tests and conformance |
 | Native frontend syntax | 🟩 | 🟨 | 🟨 | 🟨 | 🟨 | Zig parses and compiles well, but the surface is not yet fully plain-Zig natural |
-| Native helper/runtime package | 🟩 | 🟩 | 🟩 | 🟩 | 🟨 | `packages/runar-zig` exists, compile-check is now honest, and hash/byte semantics are materially better, but advanced crypto is still scaffolded |
+| Native helper/runtime package | 🟩 | 🟩 | 🟩 | 🟩 | 🟨 | `packages/runar-zig` exists, compile-check is now honest, and hash/byte semantics are materially better; deeper crypto/runtime surface is still incomplete and SPHINCS remains fail-closed in the public runtime |
 | Example inventory parity | 🟩 | 🟩 | 🟩 | 🟩 | 🟩 | Zig now has the same 21-example tree |
 | Adjacent native tests | 🟩 | 🟩 | 🟩 | 🟩 | 🟩 | Zig now has tests beside the contracts |
-| Real contract execution in tests | 🟩 | 🟩 | 🟩 | 🟩 | 🟨 | The direct-contract set is now materially larger, including `tic-tac-toe` terminal-output paths, but the EC/PQ priority set is not done yet |
-| Stateful contract model fit | 🟨 | 🟨 | 🟨 | 🟨 | 🟧 | Zig now has an honest explicit `StatefulContext` bridge, but the full example tree has not migrated to it yet |
-| Byte/string equality fit | 🟩 | 🟩 | 🟩 | 🟩 | 🟨 | Zig now has an explicit `runar.bytesEq(...)` model and more contracts are using it, but migration is still incomplete |
+| Real contract execution in tests | 🟩 | 🟩 | 🟩 | 🟩 | 🟨 | The direct-contract set is now materially larger, including `tic-tac-toe` terminal-output paths and `sphincs-wallet`; the main remaining blocker is `schnorr-zkp` bigint width |
+| Stateful contract model fit | 🟨 | 🟨 | 🟨 | 🟨 | 🟨 | Zig now has an honest explicit `StatefulContext` bridge, and the live example tree has effectively migrated to it for output/preimage-touching contracts |
+| Byte/string equality fit | 🟩 | 🟩 | 🟩 | 🟩 | 🟨 | Zig now has an explicit `runar.bytesEq(...)` model and the active example tree uses it in the places that previously depended on dishonest slice equality |
 | Failure/assertion model fit | 🟩 | 🟨 | 🟨 | 🟨 | 🟧 | Zig needs a more deliberate contract-failure story |
-| Test quality vs mirrors | 🟩 | 🟩 | 🟩 | 🟩 | 🟧 | Mirror usage is shrinking, but many important Zig tests still do not hit the actual contract module |
+| Test quality vs mirrors | 🟩 | 🟩 | 🟩 | 🟩 | 🟨 | There are no remaining `Mirror*` example test structs; the gaps are now runtime-depth issues rather than fake-local-logic test structure |
 
 ## Language-Specific Boundaries
 
@@ -37,19 +37,19 @@ Legend:
 | Zig Area | Current State | Rating | Why |
 |---|---|---|---|
 | `pub const Contract = runar.StatefulSmartContract;` | treated like base-class inheritance | 🟥 | Zig does not work that way |
-| `self.addOutput(...)`, `self.txPreimage` | being replaced by explicit `ctx: runar.StatefulContext` in migrated contracts | 🟧 | the new shape is honest, but the old implicit surface still exists in unmigrated examples |
-| byte/content equality in contract syntax | written as if plain operators can carry DSL meaning | 🟥 | misleading to Zig users |
+| `self.addOutput(...)`, `self.txPreimage` | replaced in the live example tree by explicit `ctx: runar.StatefulContext` for output/preimage-touching contracts | 🟨 | the new shape is honest; the remaining gap is runtime depth, not hidden stateful members in examples |
+| byte/content equality in contract syntax | explicit `runar.bytesEq(...)` in the relevant live examples | 🟨 | the honest API exists and is in use, but it still needs to remain the documented norm |
 | `runar.Readonly(T)` | explicit type-level marker | 🟩 | this fits Zig reasonably well |
 | `packages/runar-zig` as helper/runtime layer | explicit package boundary | 🟨 | good direction, validator/compile-check is now honest, but advanced crypto remains scaffolded |
-| adjacent example tests | present and runnable | 🟨 | structure is right, and a few are now direct, but many assertions still target mirrors |
+| adjacent example tests | present and runnable | 🟨 | structure is right, and the remaining quality gap is runtime depth rather than mirror scaffolding |
 
 ## Zig-Specific Decision Matrix
 
 | Topic | Current Approach | Problem | Better Zig-Shaped Direction | Status |
 |---|---|---|---|---|
 | Contract base model | pseudo-inheritance via `pub const Contract = ...` | implies hidden fields/methods | explicit composition or explicit helper surface | Open |
-| Stateful helpers | explicit `ctx: runar.StatefulContext` on migrated contracts | still mixed with older implicit `self.*` examples | keep the explicit context model and migrate the remaining stateful tree to it | Partial |
-| Bytes equality | compiler-level semantics on plain operators | misleading in plain Zig | explicit helper such as `runar.bytesEq(a, b)` or a wrapped bytes type with honest API | Open |
+| Stateful helpers | explicit `ctx: runar.StatefulContext` on the live stateful/output-touching examples | runtime depth still varies across the hardest examples | keep the explicit context model and use runtime work, not syntax backsliding, to close the remaining gaps | Good |
+| Bytes equality | explicit `runar.bytesEq(...)` in the live examples that need byte-content comparison | remaining work is consistency and documentation, not inventing a new hidden operator meaning | keep `runar.bytesEq(a, b)` as the honest API | Good |
 | Readonly fields | `runar.Readonly(T)` | acceptable, but needs consistent examples/docs | keep, refine, and document as the canonical explicit marker | Good |
 | Contract failure model | mostly piggybacks on `runar.assert` | not yet clearly designed for Zig-native tests | explicit, documented assertion/failure behavior for `zig test` | Partial |
 | Ownership/allocation | hidden in helper calls | can become noisy or surprising | keep high-level helpers but make ownership rules explicit and boring | Partial |
@@ -71,15 +71,18 @@ Legend:
 - Migrated `token-nft` to the explicit context model and direct output-capture tests.
 - Migrated `tic-tac-toe` to the explicit context model for `cancel`, `moveAndWin`, and `moveAndTie`, and replaced dishonest pubkey/output equality with `runar.bytesEq(...)`.
 - Replaced mirror coverage in `ec-demo` and `convergence-proof` with direct real-contract execution.
-- Replaced the `oracle-price` mirror with a real Rabin-backed positive contract test and restored the example-suite `assert_probe` executable as a tracked source file instead of relying on cache luck.
+- Replaced the `oracle-price` mirror with a real Rabin-backed positive contract test.
 - Added a real positive direct-contract path for `post-quantum-wallet` using deterministic WOTS fixtures in the Zig test itself.
+- Restored `examples/zig/assert_probe.zig` as a real subprocess probe runner and got the full `examples/zig` lane green again on a fresh cache.
+- Prepared deterministic SPHINCS public-key and signature fixtures from the TypeScript reference implementation so the first honest positive Zig test can land as a small wiring step.
 - The remaining direct-execution blockers are now clearer:
   - the remaining EC/PQ-heavy examples that still lack honest positive-path direct tests
-  - byte-content equality expressed as plain `==` in unmigrated contracts
   - `schnorr-zkp` currently overflows the native `i64` bigint surface on `bin2num(hash256(...))`, so it still lacks an honest positive direct test
 - Advanced crypto helpers are still not honest enough:
-  - SLH-DSA verification is still scaffolded
+  - all public SLH-DSA helpers are still fail-closed today; the in-progress `SHA2_128s` verifier work is not wired into the public runtime yet because the first honest positive test still fails
   - some higher-level post-quantum example semantics are still scaffolded
+- The example negative-path harness still needs integrity work:
+  - the probe runner is restored, but it still needs to be committed so this stop being a local-only recovery
 
 ## Target Model
 
@@ -99,12 +102,15 @@ What “good” should look like for Zig:
 - `packages/runar-zig` now has materially better hash/byte/number helper semantics for the simpler examples.
 - The full 21-contract Zig example tree exists with adjacent tests.
 - `escrow`, `stateful-counter`, `property-initializers`, `auction`, `token-ft`, and `token-nft` now execute the real contract module for their positive-path tests.
+- `covenant-vault` now also covers its wrong-signature and wrong-output assertion paths through the shared subprocess probe.
 - `stateful-counter` and `property-initializers` now also cover their negative assertion paths through a dedicated subprocess probe instead of mirrors.
 - `p2pkh`, `p2blake3pkh`, `blake3`, `sha256-compress`, and `sha256-finalize` now use explicit `runar.bytesEq(...)` and execute real contract paths in their Zig tests, including real negative assertion probes.
 - `auction`, `token-ft`, and `token-nft` now prove the explicit `StatefulContext` direction in real tests instead of mirrors.
 - `tic-tac-toe` now has real-contract coverage for join/move/cancelBeforeJoin/cancel/moveAndWin/moveAndTie and their negative assertion rules.
 - `ec-demo` and `convergence-proof` now use direct real-contract tests rather than mirrors.
 - `oracle-price` and `post-quantum-wallet` now also have honest positive direct-contract tests.
+- `sphincs-wallet` now has deterministic real public-key and signature fixture material prepared from the TS reference flow instead of placeholder Zig-side values.
+- `sphincs-wallet` now also has a positive direct-contract Zig test backed by the verifier-only `SLH-DSA-SHA2-128s` runtime slice.
 - There are no remaining `Mirror*` example test structs in `examples/zig`; the remaining gaps are now runtime-depth problems rather than fake-local-logic test structure.
 - The public docs now describe the Zig package and example runner accurately.
 
@@ -118,9 +124,8 @@ Today some `.runar.zig` contracts compile through the Rúnar frontend correctly,
 
 Representative issues:
 
-- `sphincs-wallet` still has init/negative-path coverage only because SLH-DSA verification is still fail-closed in the runtime
 - contract-style assertions/failure expectations
-- advanced crypto helpers that are still not fully honest for the remaining PQ-heavy cases
+- advanced crypto helpers that are still not fully honest for the remaining PQ-heavy cases outside the `SLH-DSA-SHA2-128s` verifier slice
 - `schnorr-zkp` currently hits a real native runtime limit because `bin2num(hash256(...))` exceeds the current `i64` bigint surface
 - the remaining example tree still has some old `==` byte comparisons in unmigrated contracts
 
@@ -129,7 +134,7 @@ Representative issues:
 Some of the remaining blockers are not unique to Zig:
 
 - `schnorr-zkp` is also intentionally not fully native-executed in the Rust example tree because the Fiat-Shamir challenge derived from `bin2num(hash256(...))` exceeds the native fixed-width bigint model there too.
-- `sphincs-wallet` is gated behind an external `slh-dsa` dependency in the Python example tree, which means the remaining Zig gap is a real runtime-implementation gap, not just missing test wiring.
+- `sphincs-wallet` is gated behind an external `slh-dsa` dependency in the Python example tree, which made the Zig verifier slice a real runtime-implementation task rather than just test wiring.
 
 That does not make the Zig gaps acceptable, but it does change the shape of the work: the remaining frontier is mostly honest runtime depth, not example-tree housekeeping.
 
@@ -151,7 +156,6 @@ The test tree shape is now correct, but the quality bar is not met until the imp
 
 Priority contracts to move next:
 
-- `sphincs-wallet`
 - `schnorr-zkp` once the bigint/runtime limit is addressed
 
 ## Priority Ladder

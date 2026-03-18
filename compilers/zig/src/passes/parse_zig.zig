@@ -13,7 +13,7 @@
 //!   - `pub fn name(self, ...)` are public methods
 //!   - `fn name(self, ...)` are private methods
 //!   - Builtins: `runar.assert(...)`, `runar.hash160(...)`, `runar.checkSig(...)`, etc.
-//!   - Types: `runar.PubKey`, `runar.Sig`, `runar.Addr`, `runar.ByteString`, `i64`, `bool`, `void`
+//!   - Types: `runar.Bigint`, `runar.PubKey`, `runar.Sig`, `runar.Addr`, `runar.ByteString`, `i64`, `bool`, `void`
 
 const std = @import("std");
 const types = @import("../ir/types.zig");
@@ -514,6 +514,7 @@ const Parser = struct {
     }
 
     pub fn resolveRunarTypeNode(name: []const u8) TypeNode {
+        if (std.mem.eql(u8, name, "Bigint")) return .{ .primitive_type = .bigint };
         if (std.mem.eql(u8, name, "PubKey")) return .{ .primitive_type = .pub_key };
         if (std.mem.eql(u8, name, "Sig")) return .{ .primitive_type = .sig };
         if (std.mem.eql(u8, name, "Addr")) return .{ .primitive_type = .addr };

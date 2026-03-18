@@ -213,6 +213,7 @@ const ZIG_TYPE_MAP: Record<string, string> = {
   comptime_int: 'bigint',
   bool: 'boolean',
   void: 'void',
+  Bigint: 'bigint',
   ByteString: 'ByteString',
   PubKey: 'PubKey',
   Sig: 'Sig',

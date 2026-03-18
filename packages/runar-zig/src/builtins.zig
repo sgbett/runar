@@ -99,11 +99,40 @@ const blake3_iv_bytes = [_]u8{
 };
 
 const blake3_msg_perm = [_]u8{ 2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8 };
+const secp256k1_order_be = [_]u8{
+    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe,
+    0xba, 0xae, 0xdc, 0xe6, 0xaf, 0x48, 0xa0, 0x3b,
+    0xbf, 0xd2, 0x5e, 0x8c, 0xd0, 0x36, 0x41, 0x41,
+};
 const wots_w = 16;
 const wots_n = 32;
 const wots_len1 = 64;
 const wots_len2 = 3;
 const wots_len = wots_len1 + wots_len2;
+const slh_sha2_128s_n = 16;
+const slh_sha2_128s_h = 63;
+const slh_sha2_128s_d = 7;
+const slh_sha2_128s_hp = 9;
+const slh_sha2_128s_a = 12;
+const slh_sha2_128s_k = 14;
+const slh_sha2_128s_len = 35;
+const slh_sha2_128s_md_len = 21;
+const slh_sha2_128s_tree_idx_len = 7;
+const slh_sha2_128s_leaf_idx_len = 2;
+const slh_sha2_128s_digest_len = slh_sha2_128s_md_len + slh_sha2_128s_tree_idx_len + slh_sha2_128s_leaf_idx_len;
+const slh_sha2_128s_fors_sig_len = slh_sha2_128s_k * (1 + slh_sha2_128s_a) * slh_sha2_128s_n;
+const slh_sha2_128s_xmss_sig_len = (slh_sha2_128s_len + slh_sha2_128s_hp) * slh_sha2_128s_n;
+const slh_sha2_128s_sig_len = slh_sha2_128s_n + slh_sha2_128s_fors_sig_len + (slh_sha2_128s_d * slh_sha2_128s_xmss_sig_len);
+const slh_sha2_128s_wots_parts_len = slh_sha2_128s_len * slh_sha2_128s_n;
+const slh_sha2_128s_fors_roots_len = slh_sha2_128s_k * slh_sha2_128s_n;
+const slh_adrs_size = 32;
+const slh_adrs_wots_hash: u32 = 0;
+const slh_adrs_wots_pk: u32 = 1;
+const slh_adrs_tree: u32 = 2;
+const slh_adrs_fors_tree: u32 = 3;
+const slh_adrs_fors_roots: u32 = 4;
+const SlhAdrs = [slh_adrs_size]u8;
 
 pub const MockPreimageParts = struct {
     hashPrevouts: base.Sha256 = default_zero_32[0..],
@@ -236,64 +265,37 @@ pub fn substr(bytes: base.ByteString, start: base.Bigint, len: base.Bigint) base
     return dupeBytes(bytes[start_usize..end_usize]);
 }
 
-pub fn num2bin(value: base.Bigint, size: base.Bigint) base.ByteString {
+pub fn num2bin(value: anytype, size: base.Bigint) base.ByteString {
     if (size < 0) return &.{};
     const size_usize = std.math.cast(usize, size) orelse return &.{};
     if (size_usize == 0) {
-        if (value == 0) return &.{};
+        if (signedBigintFrom(value).isZero()) return &.{};
         @panic("num2bin: size too small");
     }
 
+    const bigint = signedBigintFrom(value);
     var out = std.heap.page_allocator.alloc(u8, size_usize) catch @panic("OOM");
     @memset(out, 0);
 
-    if (value == 0) return out;
+    if (bigint.isZero()) return out;
 
-    var magnitude = unsignedAbs(value);
-    var encoded: [9]u8 = undefined;
-    var encoded_len: usize = 0;
-    while (magnitude != 0) : (encoded_len += 1) {
-        encoded[encoded_len] = @truncate(magnitude & 0xff);
-        magnitude >>= 8;
-    }
+    var magnitude_buffer: [32]u8 = undefined;
+    const magnitude_bytes = bigint.toLeMagnitudeBytes(&magnitude_buffer);
+    var encoded_len = magnitude_bytes.len;
 
-    if ((encoded[encoded_len - 1] & 0x80) != 0) {
-        encoded[encoded_len] = 0;
+    if ((magnitude_bytes[encoded_len - 1] & 0x80) != 0) {
         encoded_len += 1;
     }
 
     if (encoded_len > size_usize) @panic("num2bin: size too small");
 
-    @memcpy(out[0..encoded_len], encoded[0..encoded_len]);
-    if (value < 0) out[size_usize - 1] |= 0x80;
+    @memcpy(out[0..magnitude_bytes.len], magnitude_bytes);
+    if (bigint.negative) out[size_usize - 1] |= 0x80;
     return out;
 }
 
-pub fn bin2num(bytes: base.ByteString) base.Bigint {
-    if (bytes.len == 0) return 0;
-
-    const last_index = bytes.len - 1;
-    const negative = (bytes[last_index] & 0x80) != 0;
-
-    var magnitude: u64 = 0;
-    for (bytes, 0..) |byte, index| {
-        const part: u8 = if (index == last_index) (byte & 0x7f) else byte;
-        if (index >= 8) {
-            if (part != 0) @panic("bin2num: magnitude too large");
-            continue;
-        }
-        magnitude |= @as(u64, part) << @intCast(index * 8);
-    }
-
-    if (!negative) {
-        if (magnitude > std.math.maxInt(i64)) @panic("bin2num: magnitude too large");
-        return @intCast(magnitude);
-    }
-
-    if (magnitude == 0) return 0;
-    if (magnitude == (@as(u64, 1) << 63)) return std.math.minInt(i64);
-    if (magnitude > std.math.maxInt(i64)) @panic("bin2num: magnitude too large");
-    return -@as(i64, @intCast(magnitude));
+pub fn bin2num(bytes: base.ByteString) SignedBigint {
+    return SignedBigint.fromLeSignedMagnitude(bytes);
 }
 
 pub fn clamp(value: base.Bigint, lo: base.Bigint, hi: base.Bigint) base.Bigint {
@@ -499,10 +501,7 @@ pub fn verifyWOTS(message: base.ByteString, sig: base.ByteString, pub_key: base.
 }
 
 pub fn verifySLHDSA_SHA2_128s(message: base.ByteString, sig: base.ByteString, pub_key: base.ByteString) bool {
-    _ = message;
-    _ = sig;
-    _ = pub_key;
-    return false;
+    return slhVerifySha2_128s(message, sig, pub_key);
 }
 
 pub fn verifySLHDSA_SHA2_128f(message: base.ByteString, sig: base.ByteString, pub_key: base.ByteString) bool {
@@ -540,6 +539,342 @@ pub fn verifySLHDSA_SHA2_256f(message: base.ByteString, sig: base.ByteString, pu
     return false;
 }
 
+fn slhVerifySha2_128s(message: []const u8, sig: []const u8, pub_key: []const u8) bool {
+    if (pub_key.len != 2 * slh_sha2_128s_n) return false;
+    if (sig.len < slh_sha2_128s_sig_len) return false;
+
+    const pk_seed = pub_key[0..slh_sha2_128s_n];
+    const pk_root = pub_key[slh_sha2_128s_n .. 2 * slh_sha2_128s_n];
+
+    var offset: usize = 0;
+    const r = sig[offset .. offset + slh_sha2_128s_n];
+    offset += slh_sha2_128s_n;
+
+    const fors_sig = sig[offset .. offset + slh_sha2_128s_fors_sig_len];
+    offset += slh_sha2_128s_fors_sig_len;
+
+    const digest = slhHmsg128s(r, pk_seed, pk_root, message);
+    const md = digest[0..slh_sha2_128s_md_len];
+
+    var tree_idx: u64 = 0;
+    for (digest[slh_sha2_128s_md_len .. slh_sha2_128s_md_len + slh_sha2_128s_tree_idx_len]) |byte| {
+        tree_idx = (tree_idx << 8) | @as(u64, byte);
+    }
+    tree_idx &= (@as(u64, 1) << (slh_sha2_128s_h - slh_sha2_128s_hp)) - 1;
+
+    var leaf_idx: u32 = 0;
+    for (digest[slh_sha2_128s_md_len + slh_sha2_128s_tree_idx_len ..]) |byte| {
+        leaf_idx = (leaf_idx << 8) | @as(u32, byte);
+    }
+    leaf_idx &= (@as(u32, 1) << slh_sha2_128s_hp) - 1;
+
+    var fors_adrs = slhNewAdrs();
+    slhSetTreeAddress(&fors_adrs, tree_idx);
+    slhSetType(&fors_adrs, slh_adrs_fors_tree);
+    slhSetKeyPairAddress(&fors_adrs, leaf_idx);
+    var current_msg = slhForsPkFromSig128s(fors_sig, md, pk_seed, &fors_adrs);
+
+    var current_tree_idx = tree_idx;
+    var current_leaf_idx = leaf_idx;
+
+    for (0..slh_sha2_128s_d) |layer| {
+        if (sig.len < offset + slh_sha2_128s_xmss_sig_len) return false;
+        const xmss_sig = sig[offset .. offset + slh_sha2_128s_xmss_sig_len];
+        offset += slh_sha2_128s_xmss_sig_len;
+
+        var layer_adrs = slhNewAdrs();
+        slhSetLayerAddress(&layer_adrs, @intCast(layer));
+        slhSetTreeAddress(&layer_adrs, current_tree_idx);
+
+        current_msg = slhXmssPkFromSig128s(current_leaf_idx, xmss_sig, &current_msg, pk_seed, &layer_adrs);
+        current_leaf_idx = @intCast(current_tree_idx & ((@as(u64, 1) << slh_sha2_128s_hp) - 1));
+        current_tree_idx >>= slh_sha2_128s_hp;
+    }
+
+    return std.mem.eql(u8, &current_msg, pk_root);
+}
+
+fn slhNewAdrs() SlhAdrs {
+    return [_]u8{0} ** slh_adrs_size;
+}
+
+fn slhSetLayerAddress(adrs: *SlhAdrs, layer: u32) void {
+    adrs[0] = @truncate(layer >> 24);
+    adrs[1] = @truncate(layer >> 16);
+    adrs[2] = @truncate(layer >> 8);
+    adrs[3] = @truncate(layer);
+}
+
+fn slhSetTreeAddress(adrs: *SlhAdrs, tree: u64) void {
+    for (0..12) |i| {
+        const shift = 8 * i;
+        adrs[4 + 11 - i] = if (shift < 64) @truncate(tree >> @intCast(shift)) else 0;
+    }
+}
+
+fn slhSetType(adrs: *SlhAdrs, value: u32) void {
+    adrs[16] = @truncate(value >> 24);
+    adrs[17] = @truncate(value >> 16);
+    adrs[18] = @truncate(value >> 8);
+    adrs[19] = @truncate(value);
+    @memset(adrs[20..32], 0);
+}
+
+fn slhSetKeyPairAddress(adrs: *SlhAdrs, value: u32) void {
+    adrs[20] = @truncate(value >> 24);
+    adrs[21] = @truncate(value >> 16);
+    adrs[22] = @truncate(value >> 8);
+    adrs[23] = @truncate(value);
+}
+
+fn slhSetChainAddress(adrs: *SlhAdrs, value: u32) void {
+    adrs[24] = @truncate(value >> 24);
+    adrs[25] = @truncate(value >> 16);
+    adrs[26] = @truncate(value >> 8);
+    adrs[27] = @truncate(value);
+}
+
+fn slhSetHashAddress(adrs: *SlhAdrs, value: u32) void {
+    adrs[28] = @truncate(value >> 24);
+    adrs[29] = @truncate(value >> 16);
+    adrs[30] = @truncate(value >> 8);
+    adrs[31] = @truncate(value);
+}
+
+fn slhSetTreeHeight(adrs: *SlhAdrs, value: u32) void {
+    slhSetChainAddress(adrs, value);
+}
+
+fn slhSetTreeIndex(adrs: *SlhAdrs, value: u32) void {
+    slhSetHashAddress(adrs, value);
+}
+
+fn slhGetKeyPairAddress(adrs: *const SlhAdrs) u32 {
+    return (@as(u32, adrs[20]) << 24) |
+        (@as(u32, adrs[21]) << 16) |
+        (@as(u32, adrs[22]) << 8) |
+        @as(u32, adrs[23]);
+}
+
+fn slhCompressAdrs(adrs: *const SlhAdrs) [22]u8 {
+    var compressed: [22]u8 = undefined;
+    compressed[0] = adrs[3];
+    @memcpy(compressed[1..9], adrs[8..16]);
+    compressed[9] = adrs[19];
+    @memcpy(compressed[10..22], adrs[20..32]);
+    return compressed;
+}
+
+fn slhSha256Hash(data: []const u8) [32]u8 {
+    var out: [32]u8 = undefined;
+    Sha256Hasher.hash(data, &out, .{});
+    return out;
+}
+
+fn slhT128s(pk_seed: []const u8, adrs: *const SlhAdrs, msg: []const u8) [slh_sha2_128s_n]u8 {
+    const compressed_adrs = slhCompressAdrs(adrs);
+    var input: std.ArrayList(u8) = .empty;
+    defer input.deinit(std.heap.page_allocator);
+
+    input.appendSlice(std.heap.page_allocator, pk_seed) catch @panic("OOM");
+    input.appendNTimes(std.heap.page_allocator, 0, 64 - slh_sha2_128s_n) catch @panic("OOM");
+    input.appendSlice(std.heap.page_allocator, &compressed_adrs) catch @panic("OOM");
+    input.appendSlice(std.heap.page_allocator, msg) catch @panic("OOM");
+
+    const hash = slhSha256Hash(input.items);
+    var out: [slh_sha2_128s_n]u8 = undefined;
+    @memcpy(&out, hash[0..slh_sha2_128s_n]);
+    return out;
+}
+
+fn slhHmsg128s(r: []const u8, pk_seed: []const u8, pk_root: []const u8, msg: []const u8) [slh_sha2_128s_digest_len]u8 {
+    var seed: std.ArrayList(u8) = .empty;
+    defer seed.deinit(std.heap.page_allocator);
+
+    seed.appendSlice(std.heap.page_allocator, r) catch @panic("OOM");
+    seed.appendSlice(std.heap.page_allocator, pk_seed) catch @panic("OOM");
+    seed.appendSlice(std.heap.page_allocator, pk_root) catch @panic("OOM");
+    seed.appendSlice(std.heap.page_allocator, msg) catch @panic("OOM");
+
+    const hash = slhSha256Hash(seed.items);
+    var block_input: [36]u8 = undefined;
+    @memcpy(block_input[0..32], &hash);
+    std.mem.writeInt(u32, block_input[32..36], 0, .big);
+
+    const block = slhSha256Hash(&block_input);
+    var out: [slh_sha2_128s_digest_len]u8 = undefined;
+    @memcpy(&out, block[0..slh_sha2_128s_digest_len]);
+    return out;
+}
+
+fn slhBase16Digits32(msg: []const u8) [32]u32 {
+    var digits = [_]u32{0} ** 32;
+    var index: usize = 0;
+    for (msg) |byte| {
+        if (index >= digits.len) break;
+        digits[index] = byte >> 4;
+        index += 1;
+        if (index >= digits.len) break;
+        digits[index] = byte & 0x0f;
+        index += 1;
+    }
+    return digits;
+}
+
+fn slhBase16Digits3(bytes: [2]u8) [3]u32 {
+    return .{
+        bytes[0] >> 4,
+        bytes[0] & 0x0f,
+        bytes[1] >> 4,
+    };
+}
+
+fn slhWotsChain128s(x: []const u8, start: u32, steps: u32, pk_seed: []const u8, adrs: *SlhAdrs) [slh_sha2_128s_n]u8 {
+    var tmp: [slh_sha2_128s_n]u8 = undefined;
+    @memcpy(&tmp, x[0..slh_sha2_128s_n]);
+
+    var j = start;
+    while (j < start + steps) : (j += 1) {
+        slhSetHashAddress(adrs, j);
+        tmp = slhT128s(pk_seed, adrs, &tmp);
+    }
+    return tmp;
+}
+
+fn slhWotsPkFromSig128s(sig: []const u8, msg: []const u8, pk_seed: []const u8, adrs: *const SlhAdrs) [slh_sha2_128s_n]u8 {
+    const msg_digits = slhBase16Digits32(msg);
+
+    var csum: u32 = 0;
+    for (msg_digits) |digit| csum += 15 - digit;
+    const shifted_csum = csum << 4;
+    const csum_bytes = [2]u8{
+        @truncate(shifted_csum >> 8),
+        @truncate(shifted_csum),
+    };
+    const csum_digits = slhBase16Digits3(csum_bytes);
+
+    var all_digits: [slh_sha2_128s_len]u32 = undefined;
+    @memcpy(all_digits[0..32], &msg_digits);
+    @memcpy(all_digits[32..35], &csum_digits);
+
+    const kp_addr = slhGetKeyPairAddress(adrs);
+    var tmp_adrs = adrs.*;
+    slhSetType(&tmp_adrs, slh_adrs_wots_hash);
+    slhSetKeyPairAddress(&tmp_adrs, kp_addr);
+
+    var parts: [slh_sha2_128s_wots_parts_len]u8 = undefined;
+    for (0..slh_sha2_128s_len) |i| {
+        slhSetChainAddress(&tmp_adrs, @intCast(i));
+        const sig_i = sig[i * slh_sha2_128s_n ..][0..slh_sha2_128s_n];
+        const endpoint = slhWotsChain128s(sig_i, all_digits[i], 15 - all_digits[i], pk_seed, &tmp_adrs);
+        @memcpy(parts[i * slh_sha2_128s_n ..][0..slh_sha2_128s_n], &endpoint);
+    }
+
+    var pk_adrs = adrs.*;
+    slhSetType(&pk_adrs, slh_adrs_wots_pk);
+    return slhT128s(pk_seed, &pk_adrs, &parts);
+}
+
+fn slhXmssPkFromSig128s(idx: u32, sig_xmss: []const u8, msg: []const u8, pk_seed: []const u8, adrs: *const SlhAdrs) [slh_sha2_128s_n]u8 {
+    const wots_sig = sig_xmss[0..slh_sha2_128s_wots_parts_len];
+    const auth = sig_xmss[slh_sha2_128s_wots_parts_len..];
+
+    var w_adrs = adrs.*;
+    slhSetType(&w_adrs, slh_adrs_wots_hash);
+    slhSetKeyPairAddress(&w_adrs, idx);
+    var node = slhWotsPkFromSig128s(wots_sig, msg, pk_seed, &w_adrs);
+
+    var tree_adrs = adrs.*;
+    slhSetType(&tree_adrs, slh_adrs_tree);
+    for (0..slh_sha2_128s_hp) |j| {
+        const auth_j = auth[j * slh_sha2_128s_n ..][0..slh_sha2_128s_n];
+        slhSetTreeHeight(&tree_adrs, @intCast(j + 1));
+        slhSetTreeIndex(&tree_adrs, idx >> @intCast(j + 1));
+
+        var combined: [2 * slh_sha2_128s_n]u8 = undefined;
+        if (((idx >> @intCast(j)) & 1) == 0) {
+            @memcpy(combined[0..slh_sha2_128s_n], &node);
+            @memcpy(combined[slh_sha2_128s_n .. 2 * slh_sha2_128s_n], auth_j);
+        } else {
+            @memcpy(combined[0..slh_sha2_128s_n], auth_j);
+            @memcpy(combined[slh_sha2_128s_n .. 2 * slh_sha2_128s_n], &node);
+        }
+        node = slhT128s(pk_seed, &tree_adrs, &combined);
+    }
+
+    return node;
+}
+
+fn slhExtractForsIdx(md: []const u8, tree_idx: usize, a: usize) u32 {
+    const bit_start = tree_idx * a;
+    const byte_start = bit_start / 8;
+    const bit_offset = bit_start % 8;
+
+    var value: u32 = 0;
+    var bits_read: usize = 0;
+    var i = byte_start;
+    while (bits_read < a) : (i += 1) {
+        const byte = if (i < md.len) md[i] else 0;
+        const available_bits = if (i == byte_start) 8 - bit_offset else 8;
+        const bits_to_take = @min(available_bits, a - bits_read);
+        const shift = if (i == byte_start) available_bits - bits_to_take else 8 - bits_to_take;
+        const mask = (@as(u32, 1) << @intCast(bits_to_take)) - 1;
+        value = (value << @intCast(bits_to_take)) | ((@as(u32, byte) >> @intCast(shift)) & mask);
+        bits_read += bits_to_take;
+    }
+
+    return value;
+}
+
+fn slhForsPkFromSig128s(fors_sig: []const u8, md: []const u8, pk_seed: []const u8, adrs: *const SlhAdrs) [slh_sha2_128s_n]u8 {
+    var roots: [slh_sha2_128s_fors_roots_len]u8 = undefined;
+    var offset: usize = 0;
+
+    for (0..slh_sha2_128s_k) |i| {
+        const idx = slhExtractForsIdx(md, i, slh_sha2_128s_a);
+        const sk = fors_sig[offset .. offset + slh_sha2_128s_n];
+        offset += slh_sha2_128s_n;
+
+        var leaf_adrs = adrs.*;
+        slhSetType(&leaf_adrs, slh_adrs_fors_tree);
+        slhSetKeyPairAddress(&leaf_adrs, slhGetKeyPairAddress(adrs));
+        slhSetTreeHeight(&leaf_adrs, 0);
+        const tree_span = @as(u32, 1) << slh_sha2_128s_a;
+        slhSetTreeIndex(&leaf_adrs, @intCast((@as(u32, @intCast(i)) * tree_span) + idx));
+        var node = slhT128s(pk_seed, &leaf_adrs, sk);
+
+        var auth_adrs = adrs.*;
+        slhSetType(&auth_adrs, slh_adrs_fors_tree);
+        slhSetKeyPairAddress(&auth_adrs, slhGetKeyPairAddress(adrs));
+
+        for (0..slh_sha2_128s_a) |j| {
+            const auth_j = fors_sig[offset .. offset + slh_sha2_128s_n];
+            offset += slh_sha2_128s_n;
+
+            slhSetTreeHeight(&auth_adrs, @intCast(j + 1));
+            const level_span = @as(u32, 1) << @intCast(slh_sha2_128s_a - j - 1);
+            slhSetTreeIndex(&auth_adrs, (@as(u32, @intCast(i)) * level_span) + (idx >> @intCast(j + 1)));
+
+            var combined: [2 * slh_sha2_128s_n]u8 = undefined;
+            if (((idx >> @intCast(j)) & 1) == 0) {
+                @memcpy(combined[0..slh_sha2_128s_n], &node);
+                @memcpy(combined[slh_sha2_128s_n .. 2 * slh_sha2_128s_n], auth_j);
+            } else {
+                @memcpy(combined[0..slh_sha2_128s_n], auth_j);
+                @memcpy(combined[slh_sha2_128s_n .. 2 * slh_sha2_128s_n], &node);
+            }
+            node = slhT128s(pk_seed, &auth_adrs, &combined);
+        }
+
+        @memcpy(roots[i * slh_sha2_128s_n ..][0..slh_sha2_128s_n], &node);
+    }
+
+    var fors_pk_adrs = adrs.*;
+    slhSetType(&fors_pk_adrs, slh_adrs_fors_roots);
+    slhSetKeyPairAddress(&fors_pk_adrs, slhGetKeyPairAddress(adrs));
+    return slhT128s(pk_seed, &fors_pk_adrs, &roots);
+}
+
 pub fn ecMakePoint(x: base.Bigint, y: base.Bigint) base.Point {
     var point = [_]u8{0} ** 64;
     std.mem.writeInt(u64, point[24..32], @bitCast(x), .big);
@@ -563,23 +898,24 @@ pub fn ecAdd(left: base.Point, right: base.Point) base.Point {
     return serializePoint(lp.add(rp));
 }
 
-pub fn ecMul(point: base.Point, scalar: base.Bigint) base.Point {
+pub fn ecMul(point: base.Point, scalar: anytype) base.Point {
     const p = parsePoint(point) catch @panic("ecMul: invalid point");
-    if (scalar == 0) return dupeBytes(&([_]u8{0} ** 64));
     if (isIdentityPoint(point)) return dupeBytes(&([_]u8{0} ** 64));
 
-    const abs_scalar = scalarBytesFromI64(scalar);
-    var result = p.mul(abs_scalar, .big) catch @panic("ecMul: invalid scalar");
-    if (scalar < 0) result = result.neg();
+    const reduced_scalar = reduceScalarForSecp256k1(scalar);
+    if (reduced_scalar.is_zero) return dupeBytes(&([_]u8{0} ** 64));
+
+    var result = p.mul(reduced_scalar.bytes, .big) catch @panic("ecMul: invalid scalar");
+    if (reduced_scalar.negative) result = result.neg();
     return serializePoint(result);
 }
 
-pub fn ecMulGen(scalar: base.Bigint) base.Point {
-    if (scalar == 0) return dupeBytes(&([_]u8{0} ** 64));
+pub fn ecMulGen(scalar: anytype) base.Point {
+    const reduced_scalar = reduceScalarForSecp256k1(scalar);
+    if (reduced_scalar.is_zero) return dupeBytes(&([_]u8{0} ** 64));
 
-    const abs_scalar = scalarBytesFromI64(scalar);
-    var result = std.crypto.ecc.Secp256k1.basePoint.mul(abs_scalar, .big) catch @panic("ecMulGen: invalid scalar");
-    if (scalar < 0) result = result.neg();
+    var result = std.crypto.ecc.Secp256k1.basePoint.mul(reduced_scalar.bytes, .big) catch @panic("ecMulGen: invalid scalar");
+    if (reduced_scalar.negative) result = result.neg();
     return serializePoint(result);
 }
 
@@ -871,6 +1207,12 @@ const BigUint = struct {
         return .{ .allocator = allocator, .limbs = limbs };
     }
 
+    fn fromU64(allocator: std.mem.Allocator, value: u64) !BigUint {
+        var limbs = try allocator.alloc(u64, 1);
+        limbs[0] = value;
+        return .{ .allocator = allocator, .limbs = limbs };
+    }
+
     fn fromLeBytes(allocator: std.mem.Allocator, bytes: []const u8) !BigUint {
         if (bytes.len == 0) return zero(allocator);
 
@@ -888,6 +1230,17 @@ const BigUint = struct {
             limbs[offset / 8] = limb;
         }
         return normalizeOwned(allocator, limbs);
+    }
+
+    fn fromBeBytes(allocator: std.mem.Allocator, bytes: []const u8) !BigUint {
+        if (bytes.len == 0) return zero(allocator);
+
+        const reversed = try allocator.alloc(u8, bytes.len);
+        defer allocator.free(reversed);
+        for (bytes, 0..) |byte, index| {
+            reversed[bytes.len - 1 - index] = byte;
+        }
+        return fromLeBytes(allocator, reversed);
     }
 
     fn deinit(self: *BigUint) void {
@@ -1039,6 +1392,111 @@ const BigUint = struct {
     }
 };
 
+pub const SignedBigint = struct {
+    negative: bool,
+    len: usize,
+    limbs: [4]u64,
+
+    fn zero() SignedBigint {
+        return .{
+            .negative = false,
+            .len = 1,
+            .limbs = .{ 0, 0, 0, 0 },
+        };
+    }
+
+    pub fn fromI64(value: i64) SignedBigint {
+        var out = zero();
+        out.negative = value < 0;
+        out.limbs[0] = unsignedAbs(value);
+        out.normalize();
+        return out;
+    }
+
+    pub fn from(value: anytype) SignedBigint {
+        const Value = @TypeOf(value);
+        if (Value == SignedBigint) return value;
+        return switch (@typeInfo(Value)) {
+            .int, .comptime_int => fromI64(std.math.cast(i64, value) orelse @panic("scalar out of range")),
+            else => @compileError("expected i64/comptime_int or SignedBigint"),
+        };
+    }
+
+    fn fromLeSignedMagnitude(bytes: []const u8) SignedBigint {
+        if (bytes.len == 0) return zero();
+        if (bytes.len > 32) @panic("bin2num: magnitude too large");
+
+        var out = zero();
+        const last_index = bytes.len - 1;
+        out.negative = (bytes[last_index] & 0x80) != 0;
+
+        for (bytes, 0..) |raw_byte, index| {
+            const byte: u8 = if (index == last_index) (raw_byte & 0x7f) else raw_byte;
+            const limb_index = index / 8;
+            const shift = (index % 8) * 8;
+            out.limbs[limb_index] |= @as(u64, byte) << @intCast(shift);
+        }
+        out.normalize();
+        if (out.isZero()) out.negative = false;
+        return out;
+    }
+
+    fn isZero(self: SignedBigint) bool {
+        return self.len == 1 and self.limbs[0] == 0;
+    }
+
+    fn normalize(self: *SignedBigint) void {
+        var new_len: usize = self.limbs.len;
+        while (new_len > 1 and self.limbs[new_len - 1] == 0) : (new_len -= 1) {}
+        self.len = new_len;
+    }
+
+    fn toI64Exact(self: SignedBigint) !i64 {
+        if (self.isZero()) return 0;
+        if (self.len > 1) return error.BigintTooLarge;
+
+        const magnitude = self.limbs[0];
+        if (!self.negative) {
+            if (magnitude > std.math.maxInt(i64)) return error.BigintTooLarge;
+            return @intCast(magnitude);
+        }
+
+        if (magnitude == (@as(u64, 1) << 63)) return std.math.minInt(i64);
+        if (magnitude > std.math.maxInt(i64)) return error.BigintTooLarge;
+        return -@as(i64, @intCast(magnitude));
+    }
+
+    fn toBigUint(self: SignedBigint) !BigUint {
+        const limbs = try std.heap.page_allocator.alloc(u64, self.len);
+        @memcpy(limbs[0..self.len], self.limbs[0..self.len]);
+        return .{
+            .allocator = std.heap.page_allocator,
+            .limbs = limbs,
+        };
+    }
+
+    fn toLeMagnitudeBytes(self: SignedBigint, buffer: *[32]u8) []const u8 {
+        if (self.isZero()) return &.{};
+
+        var used: usize = self.len * 8;
+        @memset(buffer, 0);
+        for (0..self.len) |limb_index| {
+            const limb = self.limbs[limb_index];
+            for (0..8) |byte_index| {
+                buffer[limb_index * 8 + byte_index] = @truncate(limb >> @intCast(byte_index * 8));
+            }
+        }
+        while (used > 1 and buffer[used - 1] == 0) : (used -= 1) {}
+        return buffer[0..used];
+    }
+};
+
+const ReducedScalar = struct {
+    negative: bool,
+    is_zero: bool,
+    bytes: [32]u8,
+};
+
 fn normalizeOwned(allocator: std.mem.Allocator, limbs: []u64) !BigUint {
     var len = limbs.len;
     while (len > 1 and limbs[len - 1] == 0) : (len -= 1) {}
@@ -1165,10 +1623,60 @@ fn serializePoint(point: std.crypto.ecc.Secp256k1) base.Point {
     return dupeBytes(sec1[1..65]);
 }
 
-fn scalarBytesFromI64(value: i64) [32]u8 {
+fn signedBigintFrom(value: anytype) SignedBigint {
+    return SignedBigint.from(value);
+}
+
+fn reduceScalarForSecp256k1(value: anytype) ReducedScalar {
+    const bigint = signedBigintFrom(value);
+    if (bigint.isZero()) {
+        return .{
+            .negative = false,
+            .is_zero = true,
+            .bytes = [_]u8{0} ** 32,
+        };
+    }
+
+    var order = BigUint.fromBeBytes(std.heap.page_allocator, &secp256k1_order_be) catch @panic("OOM");
+    defer order.deinit();
+    var magnitude = bigint.toBigUint() catch @panic("OOM");
+    defer magnitude.deinit();
+    var reduced = magnitude.rem(&order) catch @panic("failed to reduce scalar");
+    defer reduced.deinit();
+
+    if (reduced.isZero()) {
+        return .{
+            .negative = false,
+            .is_zero = true,
+            .bytes = [_]u8{0} ** 32,
+        };
+    }
+
+    return .{
+        .negative = bigint.negative,
+        .is_zero = false,
+        .bytes = bigUintToFixedBe32(&reduced),
+    };
+}
+
+fn bigUintToFixedBe32(value: *const BigUint) [32]u8 {
     var out = [_]u8{0} ** 32;
-    std.mem.writeInt(u64, out[24..32], unsignedAbs(value), .big);
+    for (value.limbs, 0..) |limb, limb_index| {
+        for (0..8) |byte_index| {
+            const absolute_index = limb_index * 8 + byte_index;
+            const byte: u8 = @truncate(limb >> @intCast(byte_index * 8));
+            if (absolute_index >= out.len) {
+                if (byte != 0) @panic("scalar exceeds 32 bytes");
+                continue;
+            }
+            out[out.len - 1 - absolute_index] = byte;
+        }
+    }
     return out;
+}
+
+fn expectBigintEqI64(expected: i64, actual: SignedBigint) !void {
+    try std.testing.expectEqual(expected, try actual.toI64Exact());
 }
 
 test "sign fixtures round trip through checkSig" {
@@ -1282,10 +1790,35 @@ test "num2bin and bin2num follow signed magnitude semantics" {
         const encoded = num2bin(case.value, case.size);
         defer freeIfOwned(encoded);
         try std.testing.expectEqualSlices(u8, case.expected, encoded);
-        try std.testing.expectEqual(case.value, bin2num(encoded));
+        try expectBigintEqI64(case.value, bin2num(encoded));
     }
 
-    try std.testing.expectEqual(@as(i64, 0), bin2num(&[_]u8{0x80}));
+    try expectBigintEqI64(0, bin2num(&[_]u8{0x80}));
+}
+
+test "wide signed-magnitude values flow through bin2num and secp256k1 scalar multiplication" {
+    const wide = [_]u8{
+        0x5b, 0x62, 0x19, 0x4d, 0xc4, 0xa8, 0x71, 0x3f,
+        0xe1, 0x94, 0x28, 0x67, 0x52, 0x11, 0xa9, 0x83,
+        0x77, 0xc0, 0x42, 0x10, 0x9a, 0xde, 0x55, 0x34,
+        0x98, 0x61, 0x44, 0x20, 0x17, 0xb2, 0x6c, 0x7f,
+    };
+
+    const scalar = bin2num(&wide);
+    const encoded = num2bin(scalar, 32);
+    defer freeIfOwned(encoded);
+    try std.testing.expectEqualSlices(u8, &wide, encoded);
+
+    const actual = ecMulGen(scalar);
+    defer freeIfOwned(actual);
+
+    const reduced = reduceScalarForSecp256k1(scalar);
+    var expected_point = std.crypto.ecc.Secp256k1.basePoint.mul(reduced.bytes, .big) catch @panic("invalid test scalar");
+    if (reduced.negative) expected_point = expected_point.neg();
+    const expected = serializePoint(expected_point);
+    defer freeIfOwned(expected);
+
+    try std.testing.expectEqualSlices(u8, expected, actual);
 }
 
 test "safemod keeps the dividend sign" {
@@ -1415,9 +1948,200 @@ test "verifyRabinSig accepts a trivial valid signature construction" {
     try std.testing.expect(!verifyRabinSig("wrong-message", &[_]u8{0x00}, padding, &modulus));
 }
 
+fn decodeHexAlloc(allocator: std.mem.Allocator, hex: []const u8) ![]u8 {
+    const out = try allocator.alloc(u8, hex.len / 2);
+    _ = try std.fmt.hexToBytes(out, hex);
+    return out;
+}
+
+test "verifySLHDSA_SHA2_128s accepts a real deterministic signature and rejects tampering" {
+    const pk_hex =
+        "00000000000000000000000000000000b618cb38f7f785488c9768f3a2972baf";
+
+    const sig_hex =
+        "d7faa49250ad65d5af4c1da328b47bd7c356054e85bb2fde8b95ce6c3cebdfea411008406d0d42d2b9ed6df787671eb7" ++
+        "9c1befd68890c356f7e939a29aeb8a4ef18b34b9af949c3266f0b0c8bd3da305751488daf7562f99455982dd1f1e6bc2" ++
+        "d7be83c459135c1ec9b0e2ff668e16fecce1d879801dd738f5c8719d2b7a3cb49f026783ea9fb2eb73df521665bc73c2" ++
+        "79121b902d7fdfaae687272f85cf337d56301e38c0f1e2731963214208a045067ecf7fe8c8326e6fe23d2b83cdb81a1a" ++
+        "a60f3edbc92eef1bdb24d45f78c3f3a93d6374e834fcee553091561c83012be4b037d04d9746e050680a9e573dacc383" ++
+        "350adb715932fb2288c6acc6ff1f0c3087eddcb719e33dfda67896076bb9200346db5634789b8a232111626ce321578c" ++
+        "88d09263b9bee284b49088b7c700b5db74c53ffad24b73ab68b5d60fe99e5a2827bd2101adf289bb45de3d9e4ed1673e" ++
+        "290ce71ee4e75ece8b5fd6d9887d1df8c7cc274b267cbc0a6cd745572d33ae3ba1b3f0fc6c0d385fd6e9c11d4ae7631d" ++
+        "9dd52f71a5a1b5413f1b2d354ccf96b796adde99bdf853d3d7890f1eceb70aae3f517ca031095e50e390040e9518b459" ++
+        "3b6d0b183f950a3b1c425bbeecee3e23eb3e21994eaea6ecc518e29b71b2a230ac7b910df33656467cf69bdf55ffdd8c" ++
+        "af7ca007dd50f2607a93d3b7e9c09e4da852814ed07fc71c4097d443e6ea88f9ab9b1d43756f0d143ba25c88e549397b" ++
+        "66f196a8779bea8abe6578170c0f4a6da7b184162856dd8dd2398e8134cec1b79e1f0b67bc213189022e5680ab081d02" ++
+        "6989733dc64c0eac6ac152acd7b82f20284c5456cb185d2fff284819860e3e7265c7c2f1c1b8e979d1e4220c5aa58c37" ++
+        "39a6cc9b241a6654849155a2e1dd98cdaa2622c799092a297843116ac59bd4ceadfbb4200da7e398b6dd0064555d90e1" ++
+        "63cf3ded06c56835a3ea9e12b4a4cea422da04de52000fec5487871c361c53111a13a0f2b6b68f0377b49e0d73311581" ++
+        "b20ed6c5ce4d6ba2d9321bb10994c58912cf4dac85000b9270d2a3031e120d6b5c573d018afdb68fe503217cf5c53781" ++
+        "d49d5be4cae1e1afc33e0e2cf8dec913eee51e42860181df35838face7c01383569248bd922159d144bd9b75c38fe613" ++
+        "b642de2c84b972ac1c6a15ddb194c4bcb1e7eaee0901545db271e39a19083284417b2aabce688474a7a94ef4e0e6880e" ++
+        "e360e088bd3b03050a6694b260fbea795f34ce1a55a45b90fae22ad469e81d157f329640e04f56203f9c5a062310adc3" ++
+        "275755f95f5ec46ad8bfdbed5ed5c19d7149fe9ef677bf2d33cfd839bcafd66e68ddf156cf85029829db18ae44ffb181" ++
+        "a689acccf7165ff899cbff070f72c45c3286fd5839666a4355eeeafab4219bd0e1f7ebdbcb9a2b97ca4866eef0040710" ++
+        "1132e152cea20fe43fb62f183df80890f6e071ca031d59a8e90360cbc32d087c08010545b34f7408048cfd919fac5cfb" ++
+        "10cab23146da9534a813a18aa7e663eb6f25a81393584e1e0ff8efa01971a0fb06da762b7386db3a2dad3e5475c83d43" ++
+        "798512d7d9b158350f97b772d20ae044bc8ca7155b352d0d93af629135c1cc1a73611c1b449115c3ba020601422d5c0a" ++
+        "bcc8cb07d42d45f5dd674378e36455bcbc536755f9637ba3226c9432013590965cf6441b9187ea564c714827783ddb7a" ++
+        "ff817ce909ae3848fc4ccaf820117531fca47efcc1eec8e3eeb8fc18b48463b9e73c582062048f957312b362dc1e8525" ++
+        "c93b7ee053f99f37a9dcdbf212c248c5ca25549d663a832b12de02e6e0d9913cb7e56c5874df5eb393bfc831f4a92078" ++
+        "4a13de82908acbd5d4fbd538bb7fd7f6d3c80b7e48a78e8045ba1064e55f4a3a8b90f8a1a07fd0fd37828c936d8440da" ++
+        "941d7bb2da85862f91e78cb96223334839becd87c6cd66287e22439db8f3de2aec7fb6ffa3f8d9263b9baf50709ee3cd" ++
+        "1250b46e173135569f4061d75323eef5bf1ff75debc4aa5545981a7515cb979ed5083e96c7c20e88a7ba6b665029e291" ++
+        "ca6cd4bc7054b935acb2baea9e205556e9e270f893b74409d120f1d3263d2633f5d1792ceb47aa5840872528b7403790" ++
+        "4a50bef79fe46643dc2d5bc06583d3e629335faf4423cb42ee784b473b8201244a8e2d5f7ccb21308cf348eb86cfa740" ++
+        "086ca7853d0b8aa476a423a82edc4f0886501c6145efbde6f0295f8d7af14a8ad872520f73796a7ca833bc3ea662f5ce" ++
+        "3dd11a863b88e3065f1d1bd3af0dfa668b0dd11d4bb4e34e4eadead07ab1164e35c1994ee549250253741ade0dcb5437" ++
+        "ef546dd40d3180941b6a35f8554676a4d00c7bb7433a7cedff80cfe93202aa1bb41c28c588824b6bdfb158b89b252116" ++
+        "74ca44932a816df14c4477b2c18fc6c4bac959f07459e4c23ce8b1faeedc79db3acd31e71c79b95d9a04304b40228acc" ++
+        "3a3fa7faf02cf59ad227236cb279bc210a0fee00c174c48b6ed828fab53ab9c3b5444d55db5aa6270b8473ed30cb1d12" ++
+        "1fcf10aa74097963792c3d39cbaaf7a747749e36175247fdc6eb29af5ccbdae81829ecb521d92dde8fcda01f8ad16da7" ++
+        "b2a4df25d66ce861d23b88d3ee0ba8d82d8082ab708d3a3707dbb477a64e5b9fdf0e25f512a64abb84f79ac727b77a50" ++
+        "c86f540b5397e552d2371a43e706ca0c53d44ce638f7bd84b201b2188ac21487d8102ee28667b64e13dfa08e666bc035" ++
+        "e40e0b9861e8b4857f89d723405a61c9150f009aeaf22bf68005b733382f6a51a431dc7c8981f3024ca9b0fe821a2a50" ++
+        "1fc637f2552672fc1d479d82126a0d57dd40d3f7048dfd01cd3ff590b565fa5cd513ae5706695651ab3921e85523737b" ++
+        "09dcacb419b80577306c5632fddab2d8867490f9bdba5d018583fb22f03d1178d77ade7b88428bee83a2f6a664f38170" ++
+        "c3a3c764a6ea9735f9482e02d9db8a737b021684a08a3f4b4ed68f723e08efde08123c6607eae0a14b2438c9d3edd81e" ++
+        "283e441bc524ff332f7f3bd8b178a4b84c80c370ef7ea36c8bba602a5905fe06db74618581d26c3b58474e93a91bd5be" ++
+        "cdc94c1822bc6426efdcbcf995e7bf4b9a034b2edf69bb19b4f20f5ea27f785e633885a54aa83d377d3a3f1b964b3f5f" ++
+        "0bda722a4c289152f9a51a76e13b151d40e12fabd3d7a70b03b783670ab90ae10c3081469d92c51e8f05380dd6a367b7" ++
+        "c1f2d733e4fb49e18ab1f681ec6805fe81a6428fd22775e37e34fe781071928e4e9b46b12ff2a8d466af93d430f24275" ++
+        "77d9979c9f7c4b9f0140e9d996ec59afc49529bbe29b5a208bfcc72e1992626158f306f25c99b6a3557b061a92953926" ++
+        "d933a39c981739d8240e9cf81daad4ef18f0516ed4d4ec60f2548f56a4239a9712bbe06942d779ac0149639eb65c37a0" ++
+        "ca8d3e9785a596a46b8bdc011b1c166b9ce09baf94d769d95a8c0b5ed626b19316ca1bfb839cb136dad929272adf30ce" ++
+        "776d6ebee93a5f1096b8b62c248fe25895adce72450bf996ec2fe2c369f3e66f5c88d429b237a935c61f2d38a8cad5f8" ++
+        "3bc5ab6e5c942665f564725e1279e8d40086327494373688bec13304078923a8be359b14aa8f68105ea1e4069773a418" ++
+        "9de168651e52299622d315dcf0fd66743a0bfa7c36462edbcffa538176743046350af260b3d14f1e773a9f2e8f7e398c" ++
+        "42456454a44e1ac48f6489470803c211f6a766bb2ee9177f8ea238ced5e48f80a9a79671877ee27edf1f8a77d23aa8e2" ++
+        "10706e2ea21e202620bdf095b5a359eea80d35794a58a6f355708b73b753217cc3bc86c6459542bd8f57f810fa2f927a" ++
+        "308bf497db90b9214a058f14b2559df867b8d18777125f17fba7eb8f2bc64e5c16d7c593c0852ee306851326a43666da" ++
+        "ae15fd98f5d552f23c1212ac7df8ca6562ae4372171352ceb0b6558d9e521c03ac33190304ce9b3009d6a6c1b7783c6b" ++
+        "4b8491731ab8d181679fe11b401253610827f7ae9ae0b39549f0c8fb8e36fd67754e1726d057ab0977db36149b026890" ++
+        "77905d71c1580abc99c3ee6809147e62f6361c8e7c422e1764cf5a63697fd5ade947a0e1d316a34f665e05359b67623d" ++
+        "4d09f5a865294fcd7132fbe923dee68f0105f111282fb63373747fffe96cbf3072563ad85a7fecddd8f0c6b0f1df93bb" ++
+        "9e8bb001c56fee6ec96b0ae129224b13daa44637da6426aaf7eb044924497b0fa1503c532a575bd0c8fc11c36611ea60" ++
+        "37f313debc46e1f7d3dda3e22b453f7b97a17ede755eb0902f8b14b8dfb5431fdca94f9f3c624927f74f7f5b2f883660" ++
+        "865d2937b67f0234a51d83b05fdb87fc55ddf4a85797c7370812cea1066dc76a702f00353f0c3caabe0884e77694de95" ++
+        "26c777256269feb8fc18c47a4ca687038c12c2362ac562b6436f7730db463e841efc6b9c980f7d8b7d10eb423b5653f8" ++
+        "9e14cd5b37d9b1ad1ec3c32ccfd6b08f80802f4d0cc5f0368103a5d624b7172828727edf2ebf4f6b97e1508d564a0f3e" ++
+        "776b16225b9a33f65c5b670a275bfe93f484e8231e8d8b95acda88635721250d84bd87d8741191b956378c753059b8c5" ++
+        "806fe52168c1642f88b968f7c5ca8e702c27cc435d0b7c53713ae5b3c4008dc3aa28ea47f784dc7b08b4c723910be505" ++
+        "aed9efa251216e4d576f0336bc08eddd56c06ab855cf2757e61ab4cde338499e758131547244ee8d1dbc6d6961b24708" ++
+        "cf65d4766baeb4cb1f9003617d42d61f632feabafbc8ac93b7414f78d38bc8d13eb7e1d562aa7993c85f1d1a5ead5b91" ++
+        "d158b62ce7e226801bab9cf6b9410bc3a583b1b59e6f37399299959c58943696054eb9c1cb29cbe0e275fdd9db3f3fce" ++
+        "a9431f41c80124272b1725d857d531e9b6fa1e214ae9b355958fcffc34d15a635a7611d3f68db557ea6f15625f03f491" ++
+        "0d3ab8714b5805ebfca125e14a6fdedde37584393e22d0f51e02c079dec0f301b11eb7d26560c4e95533c7785dc20802" ++
+        "f66971dd7b5a85c55d7143c9608fe14a9b6934992858b5793b71c59d5fc6ba87a4ff517fe195a805d865ab35832482f0" ++
+        "ff13166603d85e20b7ff22fd62d83d2a30d995a8ff0b8155a3ad062e0016a2013a7f558581522c78a1f6a044175dbe52" ++
+        "c4786717e91f70010cd67b26529c6d5f216f2ce4ed662f1b231b848df9dab8023eb76e60ee30113e4f232a069bbfe469" ++
+        "ae891624a468b29545e6b73c061c529dec9d77322f7a09390ded92e3029a9d21c93caaf31a2245573b030167152cfb3f" ++
+        "d964258c2a54ba32584c899603c24b8761b4e419a36b95651b34cd73911d82039119f86c38323bb336ec3bb44920fb11" ++
+        "ab1f9dfa837792605a64bbc734164364d472d45eea7157cf0f2b567935515be3960bdb197aefd932f73bc255e1f3fb6f" ++
+        "340ad17776e137e42db60b7ebcf3e3dff4b4982e372fc1c34822d6e56f5c7a23f9522942f3cefe3953a99a6c48d4e9e8" ++
+        "b827d28f50563ce7ce55b95592145a7a4916fd9ec1cf7dcda329082628d57b47417fc0c35bd25e91f29ed11670320414" ++
+        "7ea01d7f2f54e10139b2d3b03b88821f18d8afa295156fb68c6e83668e959d9620bac9440f82def80da1972f4d245aa8" ++
+        "f967e1ccdfc0a4c7cd59c658d0a423c120083cb3674d7e2a1bd8b0f2e19b62caaf59af3ba38966571ab364dbf4962901" ++
+        "2f0feff42ccd2951bb2cef9869874d8b0dddd945bac511bc6cee40995c429756f65016f69985e293b9362a1224aaa077" ++
+        "867b60f1b143932929c354e80c8fbe8abdef839cbc4ecbae82cecbf0ea7bd6db858f8711cd7b59d14ec0089b8338e9c5" ++
+        "a820a2e5eadd3bf109d479643b8b8d34c6a1a7bc323dba63c23ec292e4e5cca5f10a445c097348bde4190841870407d6" ++
+        "a0a6247869348d7bc4cd1619ca304e0fadd0b67100c090ac213292448ba5952621657be74f85da145396858f0efb9e5d" ++
+        "56adc54c3a9f6a87e349a9551ac95c03cd7d1771586444b4f9d6ca966f896c2808c2cf76a969a57c17fbd4131a22d2a4" ++
+        "df6f04602f783194e1daca18b18276052fb07a4294ca42f60b31ba5811a98cb8c554136b1306655c5b7d779834c9f7c5" ++
+        "9a0579c4f56edab06630ad54f6e60e245404b4d45963111804e17e116f8443e5806d9e271443616168d083f5bfbcf8ec" ++
+        "ba31828f3c344c547b2f4640d721ffb5471902675611d0a3632af5c13ec87532fdd45757213cca5d89278d07c0c3bcf2" ++
+        "f6fe8f39ac35fc34c9d0891771a81d4085cbc2e5425f29e62367d30efc378fead146ecc6c840ad2e6cc36face2d24889" ++
+        "9cfac93749ddd96a5e7272784301b13f3b2588d72d4a709d979f4104dc6122c3dd9707079485ef490745383e3dea4a9a" ++
+        "33146a9105ddbf194c2923c68ae09e6572598d400b47eb06faaf048df0d38fb2bc6d4030ad4dc4db7ed1fd9278365447" ++
+        "7d913cc42a4fd54ea32ad4840212296f696af3225c9e531afab0bf9c942e891058845453eb109fc2ffe8802f912dae0c" ++
+        "4c763778c1956487af01f4001ea27509778ca3d8268c08a455ae093c6e779f949407e2465c8425f74af08322b44e031e" ++
+        "141c4b35f76c92f975350326f5b68a2dc292c460063419694c0409e7fba32ddf970c670e2a895550ceb2f74954da638f" ++
+        "2967730f0b64d42eb9b505c7df1585bfcd817c32de777f53f394380974c9a1dd4662e89542ffef5e0372b49dd02c7d38" ++
+        "24de4612f74286f740683f7cc69f2e98c3b7c0362414967a6eda7bbb5f8fd719a46558c3db5bf4b12edcd39c5930c0e3" ++
+        "316f9c549404a65ba2a590a50520b4a5924f352bdbe3478ea8d7ea1061e64ed66777fbe6d1695cb3c0244d0d1f1893ed" ++
+        "a8a666e5a9fecb57eb48671790a6aacab0f137dac3ebe8ef9565f92842b845c07d53898922e1f39bdba5bb88968c019e" ++
+        "26d11b8f3872e236b402dcfe878bbdcdb3d1041dfbdd7517d0f411842f18e467ed86fcaa771bb593e84e2352214ea299" ++
+        "fb8a547138413bd3425d5e49ef5ac3a71e458b932465a8f5fe7e149f42e8a3c4df8eca18257f20f951f0678befd6f4df" ++
+        "599ffbfe34c68cd761e8467cc7ba5c1319a8d0b13386780edde0e706e84f86bb2e080d44aeba0dcffe2d72d0d3bde5dc" ++
+        "b305b8660e8371b315be4a54bff8c7b7f18b0cbe77bf3df58422a22767b8752c4baff693f0005b601359101882891313" ++
+        "ed82acf431b16d84d4ee9441cad153df2b6f33f033400c703321c27257d06d897668751fb39b049a3cec25abf29a1e86" ++
+        "6a1f7a344a284d3b1b3de9d0c75abe2dd9de9e2d18c309fd2aff12c6604aaf1d9259917728e3bd5617ddedb787647b8d" ++
+        "1b96c101caf902007310055496703fd80a2512ef33ce510f90ba489d80d8b7299d4bcf855aec4493ca8867393e9c5ff9" ++
+        "42b5ea29427e8cb4cf6d3bb79f4588d690e707e3f38d948c4b06b0bc19b434dc880afe9ff193ec4a24113eaa347640a2" ++
+        "c96ef91b311906b7bccfc7a82edccf1c739c479167b3e282d677e0fffac7b04e879a73a1e577ac9bf6289259ff5a6203" ++
+        "b65c99602b49f62579586ea86e765e07904096217c06bd95b1cb8c5a3d4c54359411d0b88e577fbf4baf1b6c1cf02e3e" ++
+        "452a36a449badefd17e56fe8dc01e758e9011c1b0978a5871c185bbd0e37f89c8a9491c23588bb8f8b8057dd149f93d6" ++
+        "ef1b907dfa3f8fb9f9338401a0460883d294e52832cfb08b414f99d6cd5f8a6825ff565967d07c8119fde22cedb58d45" ++
+        "0bd4c3865c578621f37c32e900e6b26311cacb4a50b51f9cb60be4ec5caddfbe644af6e9d0c7fc2927a906dadc1665ba" ++
+        "ebd1bcd09b8ad6212fef328b58062be51776deee45ed210ad621f94dcb8a593e0c51a33b4ec05c5e6a83d57614084e6a" ++
+        "597961217a9726eb2f7f90afbab359f9479b28f2e2fd20f4f579c9c89e5e5e4e1f66f8865d70f65af183d619751ace8f" ++
+        "4b7661ab1c9814d4fe701dd9cd0f083f162ec7b07ac809d9bbcedace9832ed048cc075d4ca16a0bef2390bfb16b1456e" ++
+        "3a20ba68731d73a0b671ed4307c1a8db70c6eca3626e68b74110ee2351ea30e0d665bc193a5797832c7ab24acc6d9e60" ++
+        "c8cf3651689fa4c326b76b64cd936ecfb5dd1d0c8fe87b6fdfc7c08d935116ea0361f17ea6470cf797dd05a7b270aa21" ++
+        "4116a984d1cd2b1c6ca4cabfdf7143f7fcfcd5ea9089bfc3d467d19556cb219c52910cdd48fe16a64692dd3061e57529" ++
+        "3730cbdfc50edd8cc70126dd4574a9a23b4522e74c2d74953ef30768a02d68a5570fee53b76ab5d1e4f0b0866345c0bc" ++
+        "42432d5cb7ee46916b515a83b158f8c6976a7398913358f36f4653c9099f47e954794ca7c1f68126940d02d33a3736cf" ++
+        "1dd80eea92c5bdb16b87cdd524d30d10b08195535b961789f2b3ead454aeb5a83700050b18ed5c9109efe755c7aa6574" ++
+        "252e3fdcfd08b8367f08e1054d83fc0d6e93a6556d004fb2ac8fb8dc61f35b9ddaa44f3d3dfa013c4ae54c8a32beb831" ++
+        "138e2567d64dffc784ca796a67e62dcb8213ecd32246aa92612f1b11ce8ea1e7ea0dc100b0517e0489da336b32d0dda6" ++
+        "a59a9798d45295920bcf512b0a5a8f6b233bf3a0a4d2f6c6246d27bb8b747882ef2cd7504d45f885d732b3c507d6a354" ++
+        "fc855116f54d5141310f55b10d672a72e1372a59ef98316419944a38413b94437ad6c6d83c9dc8f7564304c03bb01738" ++
+        "225f2dc5c14c8656185acc0def3e9273c4ec3eb71d01bea53ea987568cfdbe6c05745dea501c63174908a2b98d446fdd" ++
+        "302cdeb8f389c215ed9a73e170d5950f25de61bda45e063a61a438f679fa9d67e76066f48deb1d710a641d9f52b70cea" ++
+        "fe88444a0dfb9abd839b57f7ce0169036e6a7090e52683dbe8a847054107643523de767223060fc4d3df3b108a6cda11" ++
+        "ff000902a364906b69ffc9f355fd64c6c7d2bd90143437176e0d3c9073d0050ad55c180893b47387f7a19ea3fa92a664" ++
+        "888a3c76d9b031dc6b6d7c87fb6a957e9191531a29184180af676819995540a16d5f427574447d7bee0dd4c5e7ba9177" ++
+        "f08e36c73f151d2e0fa195e6cae6fc738cf4ae4bce77c0de48cddc740cd3bc1e470493a4096b043969d448002d1fac47" ++
+        "8f88542ca828b95c87b963c83d3ca761f89a3e0ae3890865f5ac7280d59edc555d890de993fea4e9c7a23b494644a965" ++
+        "cd008fae9d78e86e427529f1b7ae0b344e4bf3ff1be3984a8738d438796030d36f23d619f8989f03fb300985aa25e293" ++
+        "5131c2f0750b5c89019cbe2c3f78f5d1c6bb84bbf0f02e0f2c0e607c75bec7a294932456f9ad3989f9b1b78f39b34398" ++
+        "adef627f52468cae52bcdf1cfeafc22d6b2e724f06f08c9b70f3fffb1ed6d766e9e26d1d47006ef69ca69448017b3eec" ++
+        "ec72f4af76de10e3756f528fbb6063827fac46bff86b4bdbc5af34f4da8950e30b0b1f07a38faa2e54b665f3a16e0444" ++
+        "01148536b16fd1433467a64a0e139a10f0bb4f947933188cefb5939ce3bba1c848ca72377ebbf56f14819ba3eb8b80e9" ++
+        "66cee692a9b1a084562ae1be974b3eeaa5f849290e679469de99aa3c09f45d2248ba633f8ae249c58d44c46406c74d1d" ++
+        "d740d1fe7729c907019f31a9ecb507cc56e440632fac71ea0d82a84a04c1d6011d9a93281569b55a82d15e501df1c50b" ++
+        "8586be887d0eda0ece2417abe209ad7556b672f1345968108c70fd92cc00a22258012d68abc7c9f8144b9e313d1258e4" ++
+        "103bc8c7245703069fd3024ebea3b4ac56bf4aed6f84f7d31fd1b0fc78c43551761872498310390a52dc9a1a1ad40324" ++
+        "d93d2ed43007078498aad44fd8bc0d48961e04842bc765653911f1deaea0140c675361c08f4143931376ce88919772f8" ++
+        "6432de577034bf9764585608f0116002930cb6c943bea6f6effcbb3d29708db8ea72bcfb0c74f7e7e5259c7e30972c9f" ++
+        "b25cd643a25cb20902add8fa9a58e42722c16cba83538bbfc3cdba390c22cd90c8636bd620c4c81a4c4086d3ccbe1848" ++
+        "fe652522b839f272db4e3aa6b5cbfd200793e2d0af2611d64e8379805b8d9bbb46cd92f53260d84827dce11b5783f114" ++
+        "3f1217fc8dddde62c368bbf5aa8da5d29f393ba969aff24db6eb04a011c619a7f75457a8b510f47f93daf66df1d2ce20" ++
+        "620dc20f95384bcc90f239523a00d1ad100e4a1348c6f50f28ddd56c2e28b5ec3bbeeda4c3b706c4f5d8eda413635eac" ++
+        "b37e4fe5442b5446c6a72898182edc5abec21caee11d33312c8b6765f6335566f30a5c90199c597cd9d0f27015560606" ++
+        "9b5987e8b2d4e17876d114bdb66a61a321499bb3342df24fe886764f67da207d357f2b06f20fa2460c27483217f6eef7" ++
+        "eade13d94be85c80ac250024c42b8373e53b22549d866bc9ed9bcbe05d6332dfe36a731bd0bfcdb1bf51701ef252370f" ++
+        "91985452c749da78077bc84f187ea541a2db3205a328f3aa558464bd3c787da67faa883e65bd9a39085ed60ea083644c" ++
+        "d86608812d4b96d9da9e5b29b0c782458495415531d1fc7ec336357ede190b9467f9e0e048b9066b98e797cdafdea76e" ++
+        "fd4604a5bdd1b6be135d49adc4ccdf4f9ebb47a642feacd6741a53067b6765e4c75193a3139f6a43ac6f832ea46d771e" ++
+        "5d7bd5a964998829006d54d4b32915cb7757b63b2f97d42136dc81239ca33b439e75c9f8bb851826cc1a499a144c5ad9" ++
+        "06f98c212648bbb772f2ffca19e811c3f424e8e0798f9198ee2ae4746c73553cab374c0d34544066bb734af42a5f3dae" ++
+        "6dfe23daa2b8089c777d1d96fa74ff9fa6405c840946e4f6cb6dbea7f246f9c3262a8a661fce7a91810ff67fad9ff149" ++
+        "f678215889f542d8cd4c154459f8a51d80e4147978a68b1ff868e019ab49b4efb58bcf89959dfd3b8a707bec7e26fb85" ++
+        "8c42b8b4a3e66b8ef58286cf7b3b1ff082cff5e22ab553ddccbcd546ce241fc65f320ff72f35a8554e04345dc6be0dda" ++
+        "2769a6e61a583610679927ef004d7fccd4b55039ed863545fa311194dafe2ed268e55a71572322e8a06663e36975447f" ++
+        "7ab8110d35780b332c0cd4fd99541bf5d2453bf9b91a2ac6a37edf913a1add96ee814ea7fc300b2188cd435733f0ead2" ++
+        "0a42c4b6e328d78a1bc2a849cd9a4b91eee05c9b14d1867b1ce16086ea49917744029d9596be4f1a97ec2cf407c9851a" ++
+        "177d08f2f21f0a6e63300c9611be8c2b52d4919a4325cddf0864b0046b976349";
+
+    const pk = try decodeHexAlloc(std.testing.allocator, pk_hex);
+    defer std.testing.allocator.free(pk);
+
+    const sig = try decodeHexAlloc(std.testing.allocator, sig_hex);
+    defer std.testing.allocator.free(sig);
+
+    try std.testing.expect(verifySLHDSA_SHA2_128s("hello SLH-DSA", sig, pk));
+    try std.testing.expect(!verifySLHDSA_SHA2_128s("wrong message", sig, pk));
+
+    var bad_sig = try std.testing.allocator.dupe(u8, sig);
+    defer std.testing.allocator.free(bad_sig);
+    bad_sig[17] ^= 0xff;
+    try std.testing.expect(!verifySLHDSA_SHA2_128s("hello SLH-DSA", bad_sig, pk));
+}
+
 test "unsupported SLHDSA variants still fail closed" {
     try std.testing.expect(!verifyRabinSig("msg", "sig", "pad", ""));
     try std.testing.expect(!verifyWOTS("msg", "sig", "pub"));
-    try std.testing.expect(!verifySLHDSA_SHA2_128s("msg", "sig", "pub"));
+    try std.testing.expect(!verifySLHDSA_SHA2_128f("msg", "sig", "pub"));
     try std.testing.expect(!verifySLHDSA_SHA2_256f("msg", "sig", "pub"));
 }

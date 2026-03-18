@@ -43,3 +43,11 @@ test "CovenantVault spend accepts the expected output hash and signature" {
 
     vault.spend(runar.signTestMessage(runar.ALICE), preimage);
 }
+
+test "CovenantVault spend rejects the wrong output hash" {
+    try root.expectAssertFailure("covenant-vault-wrong-output");
+}
+
+test "CovenantVault spend rejects the wrong signature" {
+    try root.expectAssertFailure("covenant-vault-wrong-sig");
+}

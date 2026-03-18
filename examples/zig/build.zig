@@ -26,9 +26,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     assert_probe.root_module.addImport("runar", runar_module);
-
-    const build_options = b.addOptions();
-    build_options.addOptionPath("assert_probe_path", assert_probe.getEmittedBin());
+    b.installArtifact(assert_probe);
 
     const tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -38,10 +36,9 @@ pub fn build(b: *std.Build) void {
         }),
     });
     tests.root_module.addImport("runar", runar_module);
-    tests.root_module.addImport("build_options", build_options.createModule());
 
     const run_tests = b.addRunArtifact(tests);
-    run_tests.step.dependOn(&assert_probe.step);
+    run_tests.step.dependOn(b.getInstallStep());
     const test_step = b.step("test", "Run Zig example tests");
     test_step.dependOn(&run_tests.step);
 }
