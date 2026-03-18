@@ -148,3 +148,67 @@ describe('parseZigSource bigint surface', () => {
     }
   });
 });
+
+describe('parseZigSource @builtin expressions', () => {
+  it('parses @divTrunc as binary division', () => {
+    const source = `
+      const runar = @import("runar");
+
+      pub const Arithmetic = struct {
+        pub const Contract = runar.SmartContract;
+
+        target: i64,
+
+        pub fn init(target: i64) Arithmetic {
+          return .{ .target = target };
+        }
+
+        pub fn verify(self: *const Arithmetic, a: i64, b: i64) void {
+          const quot = @divTrunc(a, b);
+          runar.assert(quot == self.target);
+        }
+      };
+    `;
+
+    const { direct, dispatch } = parseContract(source);
+
+    for (const contract of [direct, dispatch]) {
+      const verify = contract.methods.find(method => method.name === 'verify');
+      expect(verify).toBeDefined();
+      // First statement should be variable_decl with a binary_expr (division)
+      const quotDecl = verify!.body.find(s => s.kind === 'variable_decl' && s.name === 'quot');
+      expect(quotDecl).toBeDefined();
+      expect(quotDecl!.init).toMatchObject({ kind: 'binary_expr', op: '/' });
+    }
+  });
+
+  it('parses @mod as binary modulo', () => {
+    const source = `
+      const runar = @import("runar");
+
+      pub const Modulo = struct {
+        pub const Contract = runar.SmartContract;
+
+        target: i64,
+
+        pub fn init(target: i64) Modulo {
+          return .{ .target = target };
+        }
+
+        pub fn verify(self: *const Modulo, a: i64, b: i64) void {
+          const rem = @mod(a, b);
+          runar.assert(rem == self.target);
+        }
+      };
+    `;
+
+    const { direct, dispatch } = parseContract(source);
+
+    for (const contract of [direct, dispatch]) {
+      const verify = contract.methods.find(method => method.name === 'verify');
+      const remDecl = verify!.body.find(s => s.kind === 'variable_decl' && s.name === 'rem');
+      expect(remDecl).toBeDefined();
+      expect(remDecl!.init).toMatchObject({ kind: 'binary_expr', op: '%' });
+    }
+  });
+});

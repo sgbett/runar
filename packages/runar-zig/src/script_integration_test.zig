@@ -229,6 +229,193 @@ test "compile P2PKH, verify with real ECDSA in bsvz engine" {
     try std.testing.expect(success);
 }
 
+test "compile boolean-logic, verify in bsvz engine" {
+    const allocator = std.testing.allocator;
+
+    const source =
+        \\const runar = @import("runar");
+        \\
+        \\pub const BooleanLogic = struct {
+        \\    pub const Contract = runar.SmartContract;
+        \\
+        \\    threshold: i64,
+        \\
+        \\    pub fn init(threshold: i64) BooleanLogic {
+        \\        return .{ .threshold = threshold };
+        \\    }
+        \\
+        \\    pub fn verify(self: *const BooleanLogic, a: i64, b: i64, flag: bool) void {
+        \\        const aAbove = a > self.threshold;
+        \\        const bAbove = b > self.threshold;
+        \\        const bothAbove = aAbove and bAbove;
+        \\        const eitherAbove = aAbove or bAbove;
+        \\        const notFlag = !flag;
+        \\        runar.assert(bothAbove or (eitherAbove and notFlag));
+        \\    }
+        \\};
+    ;
+
+    const script_hex = try frontend.compileSourceToHex(allocator, source, "BooleanLogic.runar.zig");
+    defer allocator.free(script_hex);
+
+    const locking_bytes = try hexToBytes(allocator, script_hex);
+    defer allocator.free(locking_bytes);
+    const locking_script = Script.init(locking_bytes);
+
+    // a=5 > threshold=2, b=3 > threshold=2, flag=false → bothAbove=true → pass
+    var unlock_buf: std.ArrayListUnmanaged(u8) = .empty;
+    defer unlock_buf.deinit(allocator);
+    try appendScriptNumberPush(&unlock_buf, allocator, 5);
+    try appendScriptNumberPush(&unlock_buf, allocator, 3);
+    try unlock_buf.append(allocator, 0x00); // false
+    const unlocking_script = Script.init(unlock_buf.items);
+
+    const success = try bsvz.script.engine.verifyScripts(.{
+        .allocator = allocator,
+    }, unlocking_script, locking_script);
+    try std.testing.expect(success);
+}
+
+test "compile if-else, verify in bsvz engine" {
+    const allocator = std.testing.allocator;
+
+    const source =
+        \\const runar = @import("runar");
+        \\
+        \\pub const IfElse = struct {
+        \\    pub const Contract = runar.SmartContract;
+        \\
+        \\    limit: i64,
+        \\
+        \\    pub fn init(limit: i64) IfElse {
+        \\        return .{ .limit = limit };
+        \\    }
+        \\
+        \\    pub fn check(self: *const IfElse, value: i64, mode: bool) void {
+        \\        var result: i64 = 0;
+        \\        if (mode) {
+        \\            result = value + self.limit;
+        \\        } else {
+        \\            result = value - self.limit;
+        \\        }
+        \\        runar.assert(result > 0);
+        \\    }
+        \\};
+    ;
+
+    const script_hex = try frontend.compileSourceToHex(allocator, source, "IfElse.runar.zig");
+    defer allocator.free(script_hex);
+
+    const locking_bytes = try hexToBytes(allocator, script_hex);
+    defer allocator.free(locking_bytes);
+    const locking_script = Script.init(locking_bytes);
+
+    // mode=true, value=15, limit=10 → result=25 > 0 → pass
+    var unlock_buf: std.ArrayListUnmanaged(u8) = .empty;
+    defer unlock_buf.deinit(allocator);
+    try appendScriptNumberPush(&unlock_buf, allocator, 15);
+    try unlock_buf.append(allocator, 0x51); // true
+    const unlocking_script = Script.init(unlock_buf.items);
+
+    const success = try bsvz.script.engine.verifyScripts(.{
+        .allocator = allocator,
+    }, unlocking_script, locking_script);
+    try std.testing.expect(success);
+}
+
+test "compile if-else, false branch verified in bsvz engine" {
+    const allocator = std.testing.allocator;
+
+    const source =
+        \\const runar = @import("runar");
+        \\
+        \\pub const IfElse = struct {
+        \\    pub const Contract = runar.SmartContract;
+        \\
+        \\    limit: i64,
+        \\
+        \\    pub fn init(limit: i64) IfElse {
+        \\        return .{ .limit = limit };
+        \\    }
+        \\
+        \\    pub fn check(self: *const IfElse, value: i64, mode: bool) void {
+        \\        var result: i64 = 0;
+        \\        if (mode) {
+        \\            result = value + self.limit;
+        \\        } else {
+        \\            result = value - self.limit;
+        \\        }
+        \\        runar.assert(result > 0);
+        \\    }
+        \\};
+    ;
+
+    const script_hex = try frontend.compileSourceToHex(allocator, source, "IfElse.runar.zig");
+    defer allocator.free(script_hex);
+
+    const locking_bytes = try hexToBytes(allocator, script_hex);
+    defer allocator.free(locking_bytes);
+    const locking_script = Script.init(locking_bytes);
+
+    // mode=false, value=5, limit=10 → result=-5, NOT > 0 → fail
+    var unlock_buf: std.ArrayListUnmanaged(u8) = .empty;
+    defer unlock_buf.deinit(allocator);
+    try appendScriptNumberPush(&unlock_buf, allocator, 5);
+    try unlock_buf.append(allocator, 0x00); // false
+    const unlocking_script = Script.init(unlock_buf.items);
+
+    const success = try bsvz.script.engine.verifyScripts(.{
+        .allocator = allocator,
+    }, unlocking_script, locking_script);
+    try std.testing.expect(!success);
+}
+
+test "compile bounded-loop, verify in bsvz engine" {
+    const allocator = std.testing.allocator;
+
+    const source =
+        \\const runar = @import("runar");
+        \\
+        \\pub const BoundedLoop = struct {
+        \\    pub const Contract = runar.SmartContract;
+        \\
+        \\    expectedSum: i64,
+        \\
+        \\    pub fn init(expectedSum: i64) BoundedLoop {
+        \\        return .{ .expectedSum = expectedSum };
+        \\    }
+        \\
+        \\    pub fn verify(self: *const BoundedLoop, start: i64) void {
+        \\        var sum: i64 = 0;
+        \\        var i: i64 = 0;
+        \\        while (i < 5) : (i += 1) {
+        \\            sum = sum + start + i;
+        \\        }
+        \\        runar.assert(sum == self.expectedSum);
+        \\    }
+        \\};
+    ;
+
+    const script_hex = try frontend.compileSourceToHex(allocator, source, "BoundedLoop.runar.zig");
+    defer allocator.free(script_hex);
+
+    const locking_bytes = try hexToBytes(allocator, script_hex);
+    defer allocator.free(locking_bytes);
+    const locking_script = Script.init(locking_bytes);
+
+    // start=3 → sum = (3+0)+(3+1)+(3+2)+(3+3)+(3+4) = 3+4+5+6+7 = 25
+    // expectedSum baked into locking script = 25
+    var unlock_buf: std.ArrayListUnmanaged(u8) = .empty;
+    defer unlock_buf.deinit(allocator);
+    try appendScriptNumberPush(&unlock_buf, allocator, 3);
+    const unlocking_script = Script.init(unlock_buf.items);
+
+    const success = try bsvz.script.engine.verifyScripts(.{
+        .allocator = allocator,
+    }, unlocking_script, locking_script);
+    try std.testing.expect(success);
+}
+
 test "compile P2PKH, wrong key rejected by bsvz engine" {
     const allocator = std.testing.allocator;
 
