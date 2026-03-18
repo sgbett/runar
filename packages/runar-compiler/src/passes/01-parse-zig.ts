@@ -988,6 +988,65 @@ class ZigParser extends ParserCore<ZigToken> {
       return { kind: 'array_literal', elements };
     }
 
+    // Zig @builtins: @divTrunc(a, b), @mod(a, b), @intCast(expr), @truncate(expr)
+    if (token.type === '@') {
+      this.advance();
+      const builtinName = this.expect('ident').value;
+
+      if (builtinName === 'divTrunc' || builtinName === 'mod') {
+        this.expect('(');
+        const left = this.parseExpression();
+        this.expect(',');
+        const right = this.parseExpression();
+        this.expect(')');
+        const op: BinaryOp = builtinName === 'divTrunc' ? '/' : '%';
+        return { kind: 'binary_expr', op, left, right };
+      }
+
+      // @intCast, @truncate, @as — parse and return the inner expression
+      if (builtinName === 'intCast' || builtinName === 'truncate' || builtinName === 'as') {
+        this.expect('(');
+        // @as has a type argument first: @as(i64, expr)
+        if (builtinName === 'as') {
+          this.parseType(); // skip type
+          this.expect(',');
+        }
+        const inner = this.parseExpression();
+        this.expect(')');
+        return inner;
+      }
+
+      // @import — skip (already handled at top-level)
+      if (builtinName === 'import') {
+        this.expect('(');
+        this.parseExpression();
+        this.expect(')');
+        return { kind: 'identifier', name: '__import' };
+      }
+
+      // @embedFile — treat as a string literal placeholder
+      if (builtinName === 'embedFile') {
+        this.expect('(');
+        const arg = this.parseExpression();
+        this.expect(')');
+        return arg;
+      }
+
+      // Unknown @builtin — return as identifier
+      if (this.current().type === '(') {
+        this.advance();
+        const arg = this.parseExpression();
+        while (this.current().type === ',') {
+          this.advance();
+          this.parseExpression();
+        }
+        this.expect(')');
+        return arg;
+      }
+
+      return { kind: 'identifier', name: builtinName };
+    }
+
     if (token.type === 'ident') {
       this.advance();
 
