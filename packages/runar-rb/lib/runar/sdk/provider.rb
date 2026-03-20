@@ -46,7 +46,7 @@ module Runar
         raise NotImplementedError, "#{self.class}#get_network is not implemented"
       end
 
-      # Return the current fee rate in satoshis per byte.
+      # Return the current fee rate in satoshis per kilobyte.
       def get_fee_rate
         raise NotImplementedError, "#{self.class}#get_fee_rate is not implemented"
       end
@@ -61,7 +61,7 @@ module Runar
     #   provider.add_utxo('myAddress', Runar::SDK::Utxo.new(txid: 'abc...', ...))
     #   provider.get_utxos('myAddress') # => [<Utxo>]
     class MockProvider < Provider
-      DEFAULT_FEE_RATE = 1
+      DEFAULT_FEE_RATE = 100
 
       def initialize(network: 'testnet')
         @transactions     = {}
@@ -92,7 +92,7 @@ module Runar
         @contract_utxos[script_hash] = utxo
       end
 
-      # Override the fee rate (default: 1 sat/byte).
+      # Override the fee rate (default: 100 sat/KB).
       def set_fee_rate(rate)
         @fee_rate = rate
       end

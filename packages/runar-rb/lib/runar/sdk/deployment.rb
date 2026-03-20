@@ -21,10 +21,10 @@ module Runar
     # @param satoshis [Integer] value to lock in the contract output
     # @param change_address [String] Base58Check address or 40-char hex pubkey hash for change
     # @param change_script [String] pre-built change script hex (overrides change_address when present)
-    # @param fee_rate [Integer] satoshis per byte (minimum 1)
+    # @param fee_rate [Integer] satoshis per kilobyte (minimum 1)
     # @return [Array(String, Integer)] [tx_hex, input_count]
     def build_deploy_transaction(locking_script, utxos, satoshis, change_address,
-                                 change_script = '', fee_rate: 1)
+                                 change_script = '', fee_rate: 100)
       raise ArgumentError, 'build_deploy_transaction: no UTXOs provided' if utxos.empty?
 
       total_input = utxos.sum(&:satoshis)
@@ -84,9 +84,9 @@ module Runar
     # @param utxos [Array<Utxo>] available UTXOs
     # @param target_satoshis [Integer] amount to place in the contract output
     # @param locking_script_byte_len [Integer] byte length of the locking script
-    # @param fee_rate [Integer] satoshis per byte
+    # @param fee_rate [Integer] satoshis per kilobyte
     # @return [Array<Utxo>]
-    def select_utxos(utxos, target_satoshis, locking_script_byte_len, fee_rate: 1)
+    def select_utxos(utxos, target_satoshis, locking_script_byte_len, fee_rate: 100)
       sorted   = utxos.sort_by { |u| -u.satoshis }
       selected = []
       total    = 0
@@ -110,14 +110,15 @@ module Runar
     #
     # @param num_inputs [Integer] number of inputs
     # @param locking_script_byte_len [Integer] byte length of the locking script
-    # @param fee_rate [Integer] satoshis per byte (minimum 1)
+    # @param fee_rate [Integer] satoshis per kilobyte (minimum 1)
     # @return [Integer] estimated fee in satoshis
-    def estimate_deploy_fee(num_inputs, locking_script_byte_len, fee_rate = 1)
+    def estimate_deploy_fee(num_inputs, locking_script_byte_len, fee_rate = 100)
       rate               = [1, fee_rate].max
       inputs_size        = num_inputs * P2PKH_INPUT_SIZE
       contract_out_size  = 8 + varint_byte_size(locking_script_byte_len) + locking_script_byte_len
       change_output_size = P2PKH_OUTPUT_SIZE
-      (TX_OVERHEAD + inputs_size + contract_out_size + change_output_size) * rate
+      tx_size            = TX_OVERHEAD + inputs_size + contract_out_size + change_output_size
+      (tx_size * rate + 999) / 1000
     end
 
     # Build a standard P2PKH locking script.
