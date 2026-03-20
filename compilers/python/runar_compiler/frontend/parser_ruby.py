@@ -228,7 +228,13 @@ def _snake_to_camel(name: str) -> str:
     Only capitalizes lowercase letters and digits after underscores, matching
     the TS reference: ``name.replace(/_([a-z0-9])/g, ...)``.  This means
     ``EC_P`` passes through unchanged (uppercase P is not matched).
+
+    Leading underscores are stripped so that ``_require_owner`` becomes
+    ``requireOwner`` (not ``RequireOwner``).
     """
+    leading = len(name) - len(name.lstrip("_"))
+    if leading > 0:
+        return re.sub(r"_([a-z0-9])", lambda m: m.group(1).upper(), name[leading:])
     return re.sub(r"_([a-z0-9])", lambda m: m.group(1).upper(), name)
 
 

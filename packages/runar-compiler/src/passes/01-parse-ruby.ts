@@ -341,6 +341,13 @@ function tokenize(source: string): Token[] {
 
 /** Convert snake_case to camelCase. Single words pass through unchanged. */
 function snakeToCamel(name: string): string {
+  // Strip leading underscores, convert, then restore them.
+  // Without this, `_require_owner` would become `RequireOwner` instead of `requireOwner`.
+  const match = name.match(/^(_+)(.*)/);
+  if (match) {
+    const converted = match[2]!.replace(/_([a-z0-9])/g, (_, ch: string) => ch.toUpperCase());
+    return converted;
+  }
   return name.replace(/_([a-z0-9])/g, (_, ch: string) => ch.toUpperCase());
 }
 
@@ -744,6 +751,23 @@ class RbParser {
     const methodNames = new Set(methods.map(m => m.name));
     for (const method of methods) {
       rewriteBareMethodCalls(method.body, methodNames);
+    }
+
+    // Convert implicit returns in private methods: in Ruby, the last
+    // expression in a method body is its return value.  The Runar AST
+    // requires explicit return_statement nodes for this.
+    for (const method of methods) {
+      if (method.visibility === 'private' && method.body.length > 0) {
+        const last = method.body[method.body.length - 1]!;
+        if (last.kind === 'expression_statement') {
+          const exprStmt = last as { kind: string; expression: Expression; sourceLocation?: SourceLocation };
+          method.body[method.body.length - 1] = {
+            kind: 'return_statement',
+            value: exprStmt.expression,
+            sourceLocation: exprStmt.sourceLocation,
+          } as Statement;
+        }
+      }
     }
 
     return {
