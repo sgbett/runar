@@ -29,7 +29,7 @@ module Runar
     # @param change_address [String] Base58Check address or 40-char hex pubkey hash for change
     # @param change_script [String] pre-built change script hex (overrides +change_address+)
     # @param additional_utxos [Array<Utxo>, nil] P2PKH UTXOs used to fund fees
-    # @param fee_rate [Integer] satoshis per byte (minimum 1)
+    # @param fee_rate [Integer] satoshis per kilobyte (minimum 1)
     # @param options [Hash, nil] optional extensions:
     #   - +:contract_outputs+ [Array<Hash>] each +{script:, satoshis:}+ for multi-output
     #   - +:additional_contract_inputs+ [Array<Hash>] each +{utxo:, unlocking_script:}+
@@ -42,7 +42,7 @@ module Runar
       change_address,
       change_script = '',
       additional_utxos = nil,
-      fee_rate: 1,
+      fee_rate: 100,
       options: nil
     )
       opts                   = options || {}
@@ -91,7 +91,8 @@ module Runar
       outputs_size += P2PKH_OUTPUT_SIZE if has_change_recipient
 
       estimated_size = TX_OVERHEAD + inputs_size + outputs_size
-      fee            = estimated_size * [1, fee_rate].max
+      rate           = [1, fee_rate].max
+      fee            = (estimated_size * rate + 999) / 1000
       change         = total_input - contract_output_sats - fee
 
       # Build raw transaction bytes as a hex string.

@@ -52,8 +52,8 @@ RSpec.describe 'Runar::SDK::Provider' do
         expect(p.get_network).to eq('mainnet')
       end
 
-      it 'defaults fee rate to 1 sat/byte' do
-        expect(provider.get_fee_rate).to eq(1)
+      it 'defaults fee rate to 100 sat/KB' do
+        expect(provider.get_fee_rate).to eq(100)
       end
 
       it 'starts with no broadcasted transactions' do

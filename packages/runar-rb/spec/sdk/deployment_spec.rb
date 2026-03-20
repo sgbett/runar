@@ -64,17 +64,16 @@ RSpec.describe 'Runar::SDK deployment helpers' do
       expect(fee).to be > 0
     end
 
-    it 'scales linearly with the number of inputs' do
+    it 'increases with the number of inputs' do
       fee1 = Runar::SDK.estimate_deploy_fee(1, LOCKING_BYTE_LEN)
       fee2 = Runar::SDK.estimate_deploy_fee(2, LOCKING_BYTE_LEN)
-      # Each extra input adds _P2PKH_INPUT_SIZE (148) bytes at fee_rate=1.
-      expect(fee2 - fee1).to eq(148)
+      expect(fee2).to be > fee1
     end
 
     it 'scales with fee_rate' do
-      fee1 = Runar::SDK.estimate_deploy_fee(1, LOCKING_BYTE_LEN, 1)
-      fee5 = Runar::SDK.estimate_deploy_fee(1, LOCKING_BYTE_LEN, 5)
-      expect(fee5).to eq(fee1 * 5)
+      fee_low  = Runar::SDK.estimate_deploy_fee(1, LOCKING_BYTE_LEN, 100)
+      fee_high = Runar::SDK.estimate_deploy_fee(1, LOCKING_BYTE_LEN, 1000)
+      expect(fee_high).to be > fee_low
     end
 
     it 'clamps fee_rate to a minimum of 1' do
@@ -83,9 +82,10 @@ RSpec.describe 'Runar::SDK deployment helpers' do
       expect(fee_zero).to eq(fee_one)
     end
 
-    it 'returns the known fee for 1 P2PKH-sized input' do
-      # overhead(10) + 1 input(148) + contract out(8+1+25=34) + change out(34) = 226
-      expect(Runar::SDK.estimate_deploy_fee(1, 25)).to eq(226)
+    it 'uses ceiling division for sat/KB calculation' do
+      # tx_size = overhead(10) + 1 input(148) + contract out(8+1+25=34) + change out(34) = 226
+      # fee = ceil(226 * 100 / 1000) = ceil(22.6) = 23
+      expect(Runar::SDK.estimate_deploy_fee(1, 25)).to eq(23)
     end
   end
 
@@ -117,7 +117,7 @@ RSpec.describe 'Runar::SDK deployment helpers' do
 
       # Each UTXO is tiny; we need all three plus fee coverage.
       # Target = 1 sat, but fee will dwarf it. All three together = 600 sats;
-      # that should be enough for a small target (fee ~226 sat at rate 1).
+      # that should be enough for a small target (fee ~52 sat at default rate).
       selected = Runar::SDK.select_utxos([utxo1, utxo2, utxo3], 1, LOCKING_BYTE_LEN)
       expect(selected.length).to be >= 1
     end
@@ -172,11 +172,10 @@ RSpec.describe 'Runar::SDK deployment helpers' do
 
     it 'produces a change output when excess funds are available' do
       tx_hex, = result
-      # Output count appears after version(8) + varint(2) + 1 input(~148*2 hex).
-      # Verify output count byte is 2 (change present).
-      # We check indirectly: the tx should be longer than without change.
+      # fee at default rate (100 sat/KB) for 1 input, 25-byte script = 23 sats
+      fee = Runar::SDK.estimate_deploy_fee(1, LOCKING_BYTE_LEN)
       tx_no_change, = Runar::SDK.build_deploy_transaction(
-        LOCKING_SCRIPT, [funding_utxo], 999_774, change_addr # fee ≈226, so change=0
+        LOCKING_SCRIPT, [funding_utxo], funding_utxo.satoshis - fee, change_addr
       )
       expect(tx_hex.length).to be > tx_no_change.length
     end

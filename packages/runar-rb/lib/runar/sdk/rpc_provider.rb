@@ -115,9 +115,9 @@ module Runar
         @network
       end
 
-      # Return fee rate in satoshis per byte.
+      # Return fee rate in satoshis per kilobyte.
       #
-      # Returns 1 sat/byte unconditionally — appropriate for regtest. For
+      # Returns 1 sat/KB unconditionally — appropriate for regtest. For
       # production networks, consider wrapping estimatesmartfee.
       #
       # @return [Integer]
