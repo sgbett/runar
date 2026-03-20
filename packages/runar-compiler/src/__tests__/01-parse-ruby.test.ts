@@ -1042,6 +1042,157 @@ end
   });
 
   // ---------------------------------------------------------------------------
+  // B2: leading underscore name conversion
+  // ---------------------------------------------------------------------------
+
+  describe('leading underscore name conversion', () => {
+    const PRIVATE_METHODS_RB = `
+require 'runar'
+
+class Foo < Runar::StatefulSmartContract
+  prop :balance, Bigint
+
+  def initialize(balance)
+    super(balance)
+    @balance = balance
+  end
+
+  runar_public sig: Sig
+  def deposit(sig)
+    _require_owner(sig)
+    @balance += 1
+  end
+
+  private
+
+  params sig: Sig
+  def _require_owner(sig)
+    assert check_sig(sig, @balance)
+  end
+end
+`;
+
+    it('strips leading underscore from private method names', () => {
+      const result = parseRubySource(PRIVATE_METHODS_RB, 'Foo.runar.rb');
+      const priv = result.contract!.methods.find(m => m.visibility === 'private');
+      expect(priv).toBeDefined();
+      expect(priv!.name).toBe('requireOwner');
+    });
+
+    it('strips leading underscore from method call sites', () => {
+      const result = parseRubySource(PRIVATE_METHODS_RB, 'Foo.runar.rb');
+      const deposit = result.contract!.methods.find(m => m.name === 'deposit')!;
+      const callStmt = deposit.body[0] as ExpressionStatement;
+      const call = callStmt.expression as CallExpr;
+      // Bare method calls are rewritten to this.methodName() (property_access)
+      expect((call.callee as PropertyAccessExpr).property).toBe('requireOwner');
+    });
+
+    it('converts _snake_case to camelCase without leading capital', () => {
+      const rb = `
+class Foo < Runar::StatefulSmartContract
+  prop :val, Bigint
+  def initialize(val)
+    super(val)
+    @val = val
+  end
+  runar_public
+  def go
+    @val = _compute_fee_amount(1)
+  end
+  private
+  params x: Bigint
+  def _compute_fee_amount(x)
+    x + 1
+  end
+end
+`;
+      const result = parseRubySource(rb, 'Foo.runar.rb');
+      const priv = result.contract!.methods.find(m => m.visibility === 'private');
+      expect(priv!.name).toBe('computeFeeAmount');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // B1: implicit returns in private methods
+  // ---------------------------------------------------------------------------
+
+  describe('implicit returns in private methods', () => {
+    it('converts last expression to return statement', () => {
+      const rb = `
+class Foo < Runar::StatefulSmartContract
+  prop :val, Bigint
+  def initialize(val)
+    super(val)
+    @val = val
+  end
+  runar_public
+  def go
+    @val = _helper(1)
+  end
+  private
+  params x: Bigint
+  def _helper(x)
+    x + 1
+  end
+end
+`;
+      const result = parseRubySource(rb, 'Foo.runar.rb');
+      const helper = result.contract!.methods.find(m => m.name === 'helper')!;
+      const last = helper.body[helper.body.length - 1] as ReturnStatement;
+      expect(last.kind).toBe('return_statement');
+      expect(last.value).toBeDefined();
+    });
+
+    it('converts assert expression statements to returns in private methods', () => {
+      const rb = `
+class Foo < Runar::SmartContract
+  prop :x, Bigint
+  def initialize(x)
+    super(x)
+    @x = x
+  end
+  runar_public
+  def go
+    _check(@x)
+  end
+  private
+  params v: Bigint
+  def _check(v)
+    assert v > 0
+  end
+end
+`;
+      const result = parseRubySource(rb, 'Foo.runar.rb');
+      const check = result.contract!.methods.find(m => m.name === 'check')!;
+      const last = check.body[check.body.length - 1]!;
+      // assert is an expression_statement wrapping a call — it should be converted
+      // to a return since it's the last expression in a private method
+      expect(last.kind).toBe('return_statement');
+    });
+
+    it('does not affect public methods', () => {
+      const rb = `
+class Foo < Runar::SmartContract
+  prop :x, Bigint
+  def initialize(x)
+    super(x)
+    @x = x
+  end
+  runar_public
+  def go
+    assert @x > 0
+  end
+end
+`;
+      const result = parseRubySource(rb, 'Foo.runar.rb');
+      const go = result.contract!.methods.find(m => m.name === 'go')!;
+      const last = go.body[go.body.length - 1]!;
+      expect(last.kind).toBe('expression_statement');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // Integration: full parse via dispatcher
   // ---------------------------------------------------------------------------
 

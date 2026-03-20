@@ -566,10 +566,16 @@ func rbConvertName(name string) string {
 		return name
 	}
 
-	// General snake_case to camelCase conversion
-	parts := strings.Split(name, "_")
-	if len(parts) <= 1 {
+	// Strip leading underscores so `_require_owner` becomes `requireOwner` not `RequireOwner`.
+	stripped := strings.TrimLeft(name, "_")
+	if stripped == "" {
 		return name
+	}
+
+	// General snake_case to camelCase conversion
+	parts := strings.Split(stripped, "_")
+	if len(parts) <= 1 {
+		return stripped
 	}
 
 	var b strings.Builder
@@ -840,6 +846,20 @@ func (p *rbParser) parseContract() (*ContractNode, error) {
 	}
 	for i := range methods {
 		rewriteBareMethodCallsGo(methods[i].Body, methodNames)
+	}
+
+	// Convert implicit returns in private methods: in Ruby, the last
+	// expression in a method body is its return value.
+	for i := range methods {
+		if methods[i].Visibility == "private" && len(methods[i].Body) > 0 {
+			last := methods[i].Body[len(methods[i].Body)-1]
+			if es, ok := last.(ExpressionStmt); ok {
+				methods[i].Body[len(methods[i].Body)-1] = ReturnStmt{
+					Value:          es.Expr,
+					SourceLocation: es.SourceLocation,
+				}
+			}
+		}
 	}
 
 	return &ContractNode{

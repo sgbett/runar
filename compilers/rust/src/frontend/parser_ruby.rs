@@ -70,10 +70,15 @@ pub fn parse_ruby(source: &str, file_name: Option<&str>) -> ParseResult {
 
 /// Convert snake_case to camelCase. Single words pass through unchanged.
 fn snake_to_camel(name: &str) -> String {
+    // Strip leading underscores so `_require_owner` becomes `requireOwner` not `RequireOwner`.
+    let stripped = name.trim_start_matches('_');
+    if stripped.is_empty() {
+        return name.to_string();
+    }
     let mut result = String::new();
     let mut capitalize_next = false;
 
-    for ch in name.chars() {
+    for ch in stripped.chars() {
         if ch == '_' {
             capitalize_next = true;
         } else if capitalize_next {
@@ -913,6 +918,21 @@ impl<'a> RbParser<'a> {
             methods.iter().map(|m| m.name.clone()).collect();
         for method in &mut methods {
             rewrite_bare_method_calls(&mut method.body, &method_names);
+        }
+
+        // Convert implicit returns in private methods: in Ruby, the last
+        // expression in a method body is its return value.
+        for method in &mut methods {
+            if method.visibility == Visibility::Private && !method.body.is_empty() {
+                let last_idx = method.body.len() - 1;
+                if let Statement::ExpressionStatement { expression, source_location } = &method.body[last_idx] {
+                    let ret = Statement::ReturnStatement {
+                        value: Some(expression.clone()),
+                        source_location: source_location.clone(),
+                    };
+                    method.body[last_idx] = ret;
+                }
+            }
         }
 
         Some(ContractNode {
