@@ -13,11 +13,12 @@ for all constructs it implements. Ruby has the broadest conformance test coverag
 any non-TypeScript format (21 of 27 tests), and all tests pass across all four
 compilers.
 
-Three categories of divergence exist, all correctable:
+All four divergences identified during the analysis have been resolved:
 
-1. **Parser gap** — trailing-underscore builtins missing from 3 of 4 compilers (critical)
-2. **Documentation overpromises** — two syntax forms documented but not implemented
-3. **Missing type alias** — `Int` referenced in docs but unmapped
+1. **D1 [RESOLVED]** — trailing-underscore builtins added to TS/Go/Rust parsers
+2. **D2 [RESOLVED]** — loop documentation corrected to show supported syntax only
+3. **D3 [RESOLVED]** — byte literal documentation corrected
+4. **D4 [RESOLVED]** — `Int` type alias added to all four parsers
 
 ---
 
@@ -101,7 +102,7 @@ Three categories of divergence exist, all correctable:
 
 ## Divergences
 
-### D1 — Trailing-underscore builtins missing from TS/Go/Rust Ruby parsers [CRITICAL]
+### D1 — Trailing-underscore builtins missing from TS/Go/Rust Ruby parsers [RESOLVED]
 
 **Affected names:** `sign_`, `pow_`, `sqrt_`, `gcd_`, `log2_`
 
@@ -129,7 +130,7 @@ gcd_  → gcd
 log2_ → log2
 ```
 
-### D2 — `n.times do |i|` and `(a..b).each do |i|` documented but not implemented [DOCUMENTATION]
+### D2 — `n.times do |i|` and `(a..b).each do |i|` documented but not implemented [RESOLVED]
 
 **Where:** `docs/formats/ruby.md` lines 180-187
 
@@ -141,7 +142,7 @@ log2_ → log2
 that `for i in 0...n` covers the same semantics with simpler parsing, removing from
 docs is the lower-cost option.
 
-### D3 — `['deadbeef'].pack('H*')` byte literal documented but not implemented [DOCUMENTATION]
+### D3 — `['deadbeef'].pack('H*')` byte literal documented but not implemented [RESOLVED]
 
 **Where:** `docs/formats/ruby.md` line 194
 
@@ -152,7 +153,7 @@ and example contracts use plain single-quoted string literals (`'deadbeef'`).
 **Fix required:** Update docs to show `'deadbeef'` (single-quoted hex string) as
 the correct syntax.
 
-### D4 — `Int` type alias referenced in docs but not mapped [MINOR]
+### D4 — `Int` type alias referenced in docs but not mapped [RESOLVED]
 
 **Where:** `docs/formats/ruby.md` line 131 lists `Bigint / Int`
 
@@ -190,20 +191,18 @@ All four compilers implement the Ruby parser:
 
 | Compiler   | File | Lines | Status |
 |------------|------|-------|--------|
-| TypeScript | `01-parse-ruby.ts` | 1,739 | Complete (missing D1, D4) |
-| Go         | `parser_ruby.go` | ~1,881 | Complete (missing D1, D4) |
-| Rust       | `parser_ruby.rs` | ~2,575 | Complete (missing D1, D4) |
-| Python     | `parser_ruby.py` | ~1,680 | Complete (missing D4 only) |
+| TypeScript | `01-parse-ruby.ts` | 1,739 | Complete |
+| Go         | `parser_ruby.go` | ~1,881 | Complete |
+| Rust       | `parser_ruby.rs` | ~2,575 | Complete |
+| Python     | `parser_ruby.py` | ~1,680 | Complete |
 
-The Python compiler's Ruby parser is the most complete, having all trailing-underscore
-mappings that the other three lack.
+All four parsers now have identical builtin name mappings and type aliases.
 
 ---
 
 ## Conclusion
 
 The Ruby format is well-implemented and produces correct, identical Bitcoin Script
-output for all constructs it implements. The three divergences found are all
-correctable with small, targeted fixes. Once D1 (trailing-underscore builtins) is
-resolved across all compilers, and D2-D4 (documentation) are corrected, the Ruby
-format will have zero known divergences from the specification.
+output for all constructs it implements. All four divergences identified during
+the parity analysis have been resolved. The Ruby format now has zero known
+divergences from the specification.
