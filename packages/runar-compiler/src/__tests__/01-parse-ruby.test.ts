@@ -1280,17 +1280,8 @@ class Foo < Runar::SmartContract
   end
 end
 `;
-      let threw = false;
-      let result: ReturnType<typeof parseRubySource> | null = null;
-      try {
-        result = parseRubySource(rb, 'Test.runar.rb');
-      } catch {
-        threw = true;
-      }
-      expect(threw).toBe(false);
-      // The block syntax is not valid Runar Ruby.  The main guarantee is
-      // that the parser did not throw (verified above).  Whether errors are
-      // emitted depends on how the tokenizer handles '{', '}', and '|'.
+      // Must not throw — that's the only guarantee for unsupported syntax.
+      expect(() => parseRubySource(rb, 'Test.runar.rb')).not.toThrow();
     });
 
     it('does not throw on lambda syntax (-> { ... })', () => {
