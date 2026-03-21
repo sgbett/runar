@@ -3994,6 +3994,24 @@ impl LoweringContext {
 /// Private methods are inlined at call sites rather than compiled separately.
 /// The constructor is skipped since it's not emitted to Bitcoin Script.
 pub fn lower_to_stack(program: &ANFProgram) -> Result<Vec<StackMethod>, String> {
+    // Wrap the inner implementation with catch_unwind to convert any panics
+    // (from stack underflow, unknown operators, type mismatches, etc.) into
+    // proper error returns instead of crashing the process.
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        lower_to_stack_inner(program)
+    }))
+    .unwrap_or_else(|e| {
+        if let Some(s) = e.downcast_ref::<String>() {
+            Err(format!("stack lowering: {}", s))
+        } else if let Some(s) = e.downcast_ref::<&str>() {
+            Err(format!("stack lowering: {}", s))
+        } else {
+            Err("stack lowering: internal error".to_string())
+        }
+    })
+}
+
+fn lower_to_stack_inner(program: &ANFProgram) -> Result<Vec<StackMethod>, String> {
     // Build map of private methods for inlining
     let mut private_methods: HashMap<String, ANFMethod> = HashMap::new();
     for method in &program.methods {

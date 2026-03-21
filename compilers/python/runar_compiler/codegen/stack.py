@@ -3389,7 +3389,24 @@ def lower_to_stack(program: ANFProgram) -> list[StackMethod]:
 
     Private methods are inlined at call sites rather than compiled separately.
     The constructor is skipped since it's not emitted to Bitcoin Script.
+
+    Catches any internal errors (stack underflow, unknown operators, type
+    mismatches, etc.) and converts them to RuntimeError with a descriptive
+    message instead of letting raw exceptions propagate.
     """
+    try:
+        return _lower_to_stack_inner(program)
+    except RuntimeError:
+        # RuntimeError messages are already descriptive (e.g. "stack underflow",
+        # "unknown binary operator: ...", "value 'x' not found on stack").
+        # Re-raise as-is so callers get a clear error.
+        raise
+    except Exception as e:
+        raise RuntimeError(f"stack lowering: {e}") from e
+
+
+def _lower_to_stack_inner(program: ANFProgram) -> list[StackMethod]:
+    """Inner implementation of lower_to_stack (unwrapped)."""
     # Build map of private methods for inlining
     private_methods: dict[str, ANFMethod] = {}
     for m in program.methods:
