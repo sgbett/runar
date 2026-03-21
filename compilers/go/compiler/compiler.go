@@ -215,7 +215,7 @@ func CompileFromSource(sourcePath string, opts ...CompileOptions) (*Artifact, er
 	// Pass 1: Parse
 	parseResult := frontend.ParseSource(source, sourcePath)
 	if len(parseResult.Errors) > 0 {
-		return nil, fmt.Errorf("parse errors:\n  %s", strings.Join(parseResult.Errors, "\n  "))
+		return nil, fmt.Errorf("parse errors:\n  %s", strings.Join(parseResult.ErrorStrings(), "\n  "))
 	}
 	if parseResult.Contract == nil {
 		return nil, fmt.Errorf("no contract found in %s", sourcePath)
@@ -224,13 +224,13 @@ func CompileFromSource(sourcePath string, opts ...CompileOptions) (*Artifact, er
 	// Pass 2: Validate
 	validResult := frontend.Validate(parseResult.Contract)
 	if len(validResult.Errors) > 0 {
-		return nil, fmt.Errorf("validation errors:\n  %s", strings.Join(validResult.Errors, "\n  "))
+		return nil, fmt.Errorf("validation errors:\n  %s", strings.Join(validResult.ErrorStrings(), "\n  "))
 	}
 
 	// Pass 3: Type check
 	tcResult := frontend.TypeCheck(parseResult.Contract)
 	if len(tcResult.Errors) > 0 {
-		return nil, fmt.Errorf("type check errors:\n  %s", strings.Join(tcResult.Errors, "\n  "))
+		return nil, fmt.Errorf("type check errors:\n  %s", strings.Join(tcResult.ErrorStrings(), "\n  "))
 	}
 
 	// Pass 4: ANF lowering
@@ -249,7 +249,7 @@ func CompileSourceToIR(sourcePath string, opts ...CompileOptions) (*ir.ANFProgra
 
 	parseResult := frontend.ParseSource(source, sourcePath)
 	if len(parseResult.Errors) > 0 {
-		return nil, fmt.Errorf("parse errors:\n  %s", strings.Join(parseResult.Errors, "\n  "))
+		return nil, fmt.Errorf("parse errors:\n  %s", strings.Join(parseResult.ErrorStrings(), "\n  "))
 	}
 	if parseResult.Contract == nil {
 		return nil, fmt.Errorf("no contract found in %s", sourcePath)
@@ -257,12 +257,12 @@ func CompileSourceToIR(sourcePath string, opts ...CompileOptions) (*ir.ANFProgra
 
 	validResult := frontend.Validate(parseResult.Contract)
 	if len(validResult.Errors) > 0 {
-		return nil, fmt.Errorf("validation errors:\n  %s", strings.Join(validResult.Errors, "\n  "))
+		return nil, fmt.Errorf("validation errors:\n  %s", strings.Join(validResult.ErrorStrings(), "\n  "))
 	}
 
 	tcResult := frontend.TypeCheck(parseResult.Contract)
 	if len(tcResult.Errors) > 0 {
-		return nil, fmt.Errorf("type check errors:\n  %s", strings.Join(tcResult.Errors, "\n  "))
+		return nil, fmt.Errorf("type check errors:\n  %s", strings.Join(tcResult.ErrorStrings(), "\n  "))
 	}
 
 	program := frontend.LowerToANF(parseResult.Contract)
@@ -275,6 +275,316 @@ func CompileSourceToIR(sourcePath string, opts ...CompileOptions) (*ir.ANFProgra
 
 	program = frontend.OptimizeEC(program)
 	return program, nil
+}
+
+// ---------------------------------------------------------------------------
+// CompileResult — rich compilation output (mirrors TypeScript CompileResult)
+// ---------------------------------------------------------------------------
+
+// CompileResult holds the full result of a compilation pipeline run.
+// Unlike CompileFromSource (which returns (*Artifact, error) and stops at first
+// error), CompileResult collects ALL diagnostics from ALL passes and returns
+// partial results (contract AST, ANF IR) as they become available.
+type CompileResult struct {
+	// Contract is the parsed AST (available after pass 1 — parse).
+	Contract *frontend.ContractNode
+
+	// ANF is the A-Normal Form IR (available after pass 4 — ANF lowering).
+	ANF *ir.ANFProgram
+
+	// Diagnostics contains ALL diagnostics from ALL passes (errors + warnings).
+	Diagnostics []frontend.Diagnostic
+
+	// Success is true only if there are no error-severity diagnostics.
+	Success bool
+
+	// Artifact is the final compiled output (available if compilation succeeds).
+	Artifact *Artifact
+
+	// ScriptHex is the hex-encoded Bitcoin Script (available if compilation succeeds).
+	ScriptHex string
+
+	// ScriptAsm is the human-readable ASM (available if compilation succeeds).
+	ScriptAsm string
+}
+
+// hasErrors returns true if any diagnostic has error severity.
+func hasErrors(diagnostics []frontend.Diagnostic) bool {
+	for _, d := range diagnostics {
+		if d.Severity == frontend.SeverityError {
+			return true
+		}
+	}
+	return false
+}
+
+// CompileFromSourceWithResult compiles a source file through all passes,
+// collecting ALL diagnostics from ALL passes and returning partial results.
+// Unlike CompileFromSource, this function never returns an error — all errors
+// are captured in the returned CompileResult.Diagnostics slice.
+func CompileFromSourceWithResult(sourcePath string, opts ...CompileOptions) *CompileResult {
+	result := &CompileResult{}
+	o := mergeOptions(opts)
+
+	// Read source file
+	source, err := os.ReadFile(sourcePath)
+	if err != nil {
+		result.Diagnostics = append(result.Diagnostics, frontend.MakeDiagnostic(
+			fmt.Sprintf("reading source file: %s", err),
+			frontend.SeverityError,
+			nil,
+		))
+		return result
+	}
+
+	// Pass 1: Parse
+	parseResult := frontend.ParseSource(source, sourcePath)
+	result.Diagnostics = append(result.Diagnostics, parseResult.Errors...)
+	result.Contract = parseResult.Contract
+
+	if hasErrors(result.Diagnostics) || result.Contract == nil {
+		if result.Contract == nil && !hasErrors(result.Diagnostics) {
+			result.Diagnostics = append(result.Diagnostics, frontend.MakeDiagnostic(
+				fmt.Sprintf("no contract found in %s", sourcePath),
+				frontend.SeverityError,
+				nil,
+			))
+		}
+		return result
+	}
+
+	if o.ParseOnly {
+		result.Success = !hasErrors(result.Diagnostics)
+		return result
+	}
+
+	// Pass 2: Validate
+	validResult := frontend.Validate(result.Contract)
+	result.Diagnostics = append(result.Diagnostics, validResult.Errors...)
+	result.Diagnostics = append(result.Diagnostics, validResult.Warnings...)
+
+	if hasErrors(result.Diagnostics) {
+		return result
+	}
+
+	if o.ValidateOnly {
+		result.Success = !hasErrors(result.Diagnostics)
+		return result
+	}
+
+	// Pass 3: Type check
+	tcResult := frontend.TypeCheck(result.Contract)
+	result.Diagnostics = append(result.Diagnostics, tcResult.Errors...)
+
+	if hasErrors(result.Diagnostics) {
+		return result
+	}
+
+	if o.TypecheckOnly {
+		result.Success = !hasErrors(result.Diagnostics)
+		return result
+	}
+
+	// Pass 4: ANF lowering
+	result.ANF = frontend.LowerToANF(result.Contract)
+
+	// Pass 4.25: Constant folding (on by default)
+	if !o.DisableConstantFolding {
+		result.ANF = frontend.FoldConstants(result.ANF)
+	}
+
+	// Pass 4.5: EC optimization
+	result.ANF = frontend.OptimizeEC(result.ANF)
+
+	// Pass 5: Stack lowering (recover from panics)
+	var stackMethods []codegen.StackMethod
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				result.Diagnostics = append(result.Diagnostics, frontend.MakeDiagnostic(
+					fmt.Sprintf("stack lowering panic: %v", r),
+					frontend.SeverityError,
+					nil,
+				))
+			}
+		}()
+		var stackErr error
+		stackMethods, stackErr = codegen.LowerToStack(result.ANF)
+		if stackErr != nil {
+			result.Diagnostics = append(result.Diagnostics, frontend.MakeDiagnostic(
+				fmt.Sprintf("stack lowering: %s", stackErr),
+				frontend.SeverityError,
+				nil,
+			))
+		}
+	}()
+
+	if hasErrors(result.Diagnostics) {
+		return result
+	}
+
+	// Peephole optimization
+	for i := range stackMethods {
+		stackMethods[i].Ops = codegen.OptimizeStackOps(stackMethods[i].Ops)
+	}
+
+	// Pass 6: Emit (recover from panics)
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				result.Diagnostics = append(result.Diagnostics, frontend.MakeDiagnostic(
+					fmt.Sprintf("emit panic: %v", r),
+					frontend.SeverityError,
+					nil,
+				))
+			}
+		}()
+		emitResult, emitErr := codegen.Emit(stackMethods)
+		if emitErr != nil {
+			result.Diagnostics = append(result.Diagnostics, frontend.MakeDiagnostic(
+				fmt.Sprintf("emit: %s", emitErr),
+				frontend.SeverityError,
+				nil,
+			))
+			return
+		}
+
+		artifact := assembleArtifact(result.ANF, emitResult.ScriptHex, emitResult.ScriptAsm, emitResult.ConstructorSlots)
+		result.Artifact = artifact
+		result.ScriptHex = emitResult.ScriptHex
+		result.ScriptAsm = emitResult.ScriptAsm
+	}()
+
+	result.Success = !hasErrors(result.Diagnostics)
+	return result
+}
+
+// CompileFromSourceStrWithResult compiles a source string through all passes,
+// collecting ALL diagnostics. The fileName parameter determines which parser to use.
+func CompileFromSourceStrWithResult(source string, fileName string, opts ...CompileOptions) *CompileResult {
+	result := &CompileResult{}
+	o := mergeOptions(opts)
+
+	// Pass 1: Parse
+	parseResult := frontend.ParseSource([]byte(source), fileName)
+	result.Diagnostics = append(result.Diagnostics, parseResult.Errors...)
+	result.Contract = parseResult.Contract
+
+	if hasErrors(result.Diagnostics) || result.Contract == nil {
+		if result.Contract == nil && !hasErrors(result.Diagnostics) {
+			result.Diagnostics = append(result.Diagnostics, frontend.MakeDiagnostic(
+				fmt.Sprintf("no contract found in %s", fileName),
+				frontend.SeverityError,
+				nil,
+			))
+		}
+		return result
+	}
+
+	if o.ParseOnly {
+		result.Success = !hasErrors(result.Diagnostics)
+		return result
+	}
+
+	// Pass 2: Validate
+	validResult := frontend.Validate(result.Contract)
+	result.Diagnostics = append(result.Diagnostics, validResult.Errors...)
+	result.Diagnostics = append(result.Diagnostics, validResult.Warnings...)
+
+	if hasErrors(result.Diagnostics) {
+		return result
+	}
+
+	if o.ValidateOnly {
+		result.Success = !hasErrors(result.Diagnostics)
+		return result
+	}
+
+	// Pass 3: Type check
+	tcResult := frontend.TypeCheck(result.Contract)
+	result.Diagnostics = append(result.Diagnostics, tcResult.Errors...)
+
+	if hasErrors(result.Diagnostics) {
+		return result
+	}
+
+	if o.TypecheckOnly {
+		result.Success = !hasErrors(result.Diagnostics)
+		return result
+	}
+
+	// Pass 4: ANF lowering
+	result.ANF = frontend.LowerToANF(result.Contract)
+
+	// Pass 4.25: Constant folding (on by default)
+	if !o.DisableConstantFolding {
+		result.ANF = frontend.FoldConstants(result.ANF)
+	}
+
+	// Pass 4.5: EC optimization
+	result.ANF = frontend.OptimizeEC(result.ANF)
+
+	// Pass 5: Stack lowering (recover from panics)
+	var stackMethods []codegen.StackMethod
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				result.Diagnostics = append(result.Diagnostics, frontend.MakeDiagnostic(
+					fmt.Sprintf("stack lowering panic: %v", r),
+					frontend.SeverityError,
+					nil,
+				))
+			}
+		}()
+		var stackErr error
+		stackMethods, stackErr = codegen.LowerToStack(result.ANF)
+		if stackErr != nil {
+			result.Diagnostics = append(result.Diagnostics, frontend.MakeDiagnostic(
+				fmt.Sprintf("stack lowering: %s", stackErr),
+				frontend.SeverityError,
+				nil,
+			))
+		}
+	}()
+
+	if hasErrors(result.Diagnostics) {
+		return result
+	}
+
+	// Peephole optimization
+	for i := range stackMethods {
+		stackMethods[i].Ops = codegen.OptimizeStackOps(stackMethods[i].Ops)
+	}
+
+	// Pass 6: Emit (recover from panics)
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				result.Diagnostics = append(result.Diagnostics, frontend.MakeDiagnostic(
+					fmt.Sprintf("emit panic: %v", r),
+					frontend.SeverityError,
+					nil,
+				))
+			}
+		}()
+		emitResult, emitErr := codegen.Emit(stackMethods)
+		if emitErr != nil {
+			result.Diagnostics = append(result.Diagnostics, frontend.MakeDiagnostic(
+				fmt.Sprintf("emit: %s", emitErr),
+				frontend.SeverityError,
+				nil,
+			))
+			return
+		}
+
+		artifact := assembleArtifact(result.ANF, emitResult.ScriptHex, emitResult.ScriptAsm, emitResult.ConstructorSlots)
+		result.Artifact = artifact
+		result.ScriptHex = emitResult.ScriptHex
+		result.ScriptAsm = emitResult.ScriptAsm
+	}()
+
+	result.Success = !hasErrors(result.Diagnostics)
+	return result
 }
 
 // ArtifactToJSON serialises an artifact to pretty-printed JSON.
