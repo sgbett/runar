@@ -7,6 +7,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::ast::*;
+use super::diagnostic::Diagnostic;
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -14,12 +15,19 @@ use super::ast::*;
 
 /// Result of type checking.
 pub struct TypeCheckResult {
-    pub errors: Vec<String>,
+    pub errors: Vec<Diagnostic>,
+}
+
+impl TypeCheckResult {
+    /// Get error messages as plain strings (for backward compatibility).
+    pub fn error_strings(&self) -> Vec<String> {
+        self.errors.iter().map(|d| d.format_message()).collect()
+    }
 }
 
 /// Type-check a Rúnar AST. Returns any type errors found.
 pub fn typecheck(contract: &ContractNode) -> TypeCheckResult {
-    let mut errors = Vec::new();
+    let mut errors: Vec<Diagnostic> = Vec::new();
     let mut checker = TypeChecker::new(contract, &mut errors);
 
     checker.check_constructor();
@@ -256,15 +264,16 @@ fn consuming_param_indices(func_name: &str) -> Option<&'static [usize]> {
 
 struct TypeChecker<'a> {
     contract: &'a ContractNode,
-    errors: &'a mut Vec<String>,
+    errors: &'a mut Vec<Diagnostic>,
     prop_types: HashMap<String, TType>,
     method_sigs: HashMap<String, (Vec<TType>, TType)>,
     builtins: HashMap<&'static str, FuncSig>,
     consumed_values: HashSet<String>,
+    current_method_loc: Option<SourceLocation>,
 }
 
 impl<'a> TypeChecker<'a> {
-    fn new(contract: &'a ContractNode, errors: &'a mut Vec<String>) -> Self {
+    fn new(contract: &'a ContractNode, errors: &'a mut Vec<Diagnostic>) -> Self {
         let mut prop_types = HashMap::new();
         for prop in &contract.properties {
             prop_types.insert(prop.name.clone(), type_node_to_ttype(&prop.prop_type));
@@ -297,12 +306,21 @@ impl<'a> TypeChecker<'a> {
             method_sigs,
             builtins: builtin_functions(),
             consumed_values: HashSet::new(),
+            current_method_loc: None,
         }
+    }
+
+    /// Push a type-check error using the current method's source location.
+    fn add_error(&mut self, msg: impl Into<String>) {
+        self.errors.push(Diagnostic::error(msg, self.current_method_loc.clone()));
     }
 
     fn check_constructor(&mut self) {
         let ctor = &self.contract.constructor;
         let mut env = TypeEnv::new();
+
+        // Set current method location for diagnostics
+        self.current_method_loc = Some(ctor.source_location.clone());
 
         // Reset affine tracking for this scope
         self.consumed_values.clear();
@@ -322,6 +340,9 @@ impl<'a> TypeChecker<'a> {
 
     fn check_method(&mut self, method: &MethodNode) {
         let mut env = TypeEnv::new();
+
+        // Set current method location for diagnostics
+        self.current_method_loc = Some(method.source_location.clone());
 
         // Reset affine tracking for this method
         self.consumed_values.clear();
@@ -352,7 +373,7 @@ impl<'a> TypeChecker<'a> {
                 if let Some(declared) = var_type {
                     let declared_type = type_node_to_ttype(declared);
                     if !is_subtype(&init_type, &declared_type) {
-                        self.errors.push(format!(
+                        self.add_error(format!(
                             "Type '{}' is not assignable to type '{}'",
                             init_type, declared_type
                         ));
@@ -367,7 +388,7 @@ impl<'a> TypeChecker<'a> {
                 let target_type = self.infer_expr_type(target, env);
                 let value_type = self.infer_expr_type(value, env);
                 if !is_subtype(&value_type, &target_type) {
-                    self.errors.push(format!(
+                    self.add_error(format!(
                         "Type '{}' is not assignable to type '{}'",
                         value_type, target_type
                     ));
@@ -382,7 +403,7 @@ impl<'a> TypeChecker<'a> {
             } => {
                 let cond_type = self.infer_expr_type(condition, env);
                 if cond_type != BOOLEAN {
-                    self.errors.push(format!(
+                    self.add_error(format!(
                         "If condition must be boolean, got '{}'",
                         cond_type
                     ));
@@ -407,7 +428,7 @@ impl<'a> TypeChecker<'a> {
                 self.check_statement(init, env);
                 let cond_type = self.infer_expr_type(condition, env);
                 if cond_type != BOOLEAN {
-                    self.errors.push(format!(
+                    self.add_error(format!(
                         "For loop condition must be boolean, got '{}'",
                         cond_type
                     ));
@@ -465,7 +486,7 @@ impl<'a> TypeChecker<'a> {
                     return t.clone();
                 }
 
-                self.errors.push(format!(
+                self.add_error(format!(
                     "Property '{}' does not exist on the contract",
                     property
                 ));
@@ -489,7 +510,7 @@ impl<'a> TypeChecker<'a> {
                         return "<method>".to_string();
                     }
 
-                    self.errors.push(format!(
+                    self.add_error(format!(
                         "Property or method '{}' does not exist on the contract",
                         property
                     ));
@@ -521,7 +542,7 @@ impl<'a> TypeChecker<'a> {
             } => {
                 let cond_type = self.infer_expr_type(condition, env);
                 if cond_type != BOOLEAN {
-                    self.errors.push(format!(
+                    self.add_error(format!(
                         "Ternary condition must be boolean, got '{}'",
                         cond_type
                     ));
@@ -536,7 +557,7 @@ impl<'a> TypeChecker<'a> {
                     if is_subtype(&cons_type, &alt_type) {
                         return alt_type;
                     }
-                    self.errors.push(format!(
+                    self.add_error(format!(
                         "Ternary branches have incompatible types: '{}' and '{}'",
                         cons_type, alt_type
                     ));
@@ -549,7 +570,7 @@ impl<'a> TypeChecker<'a> {
                 let index_type = self.infer_expr_type(index, env);
 
                 if !is_bigint_family(&index_type) {
-                    self.errors.push(format!(
+                    self.add_error(format!(
                         "Array index must be bigint, got '{}'",
                         index_type
                     ));
@@ -571,7 +592,7 @@ impl<'a> TypeChecker<'a> {
                     } else {
                         "--"
                     };
-                    self.errors.push(format!(
+                    self.add_error(format!(
                         "{} operator requires bigint, got '{}'",
                         op_str, operand_type
                     ));
@@ -598,14 +619,14 @@ impl<'a> TypeChecker<'a> {
                     return BYTESTRING.to_string();
                 }
                 if !is_bigint_family(&left_type) {
-                    self.errors.push(format!(
+                    self.add_error(format!(
                         "Left operand of '{}' must be bigint or ByteString, got '{}'",
                         op.as_str(),
                         left_type
                     ));
                 }
                 if !is_bigint_family(&right_type) {
-                    self.errors.push(format!(
+                    self.add_error(format!(
                         "Right operand of '{}' must be bigint or ByteString, got '{}'",
                         op.as_str(),
                         right_type
@@ -617,14 +638,14 @@ impl<'a> TypeChecker<'a> {
             // Arithmetic: bigint x bigint -> bigint
             BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
                 if !is_bigint_family(&left_type) {
-                    self.errors.push(format!(
+                    self.add_error(format!(
                         "Left operand of '{}' must be bigint, got '{}'",
                         op.as_str(),
                         left_type
                     ));
                 }
                 if !is_bigint_family(&right_type) {
-                    self.errors.push(format!(
+                    self.add_error(format!(
                         "Right operand of '{}' must be bigint, got '{}'",
                         op.as_str(),
                         right_type
@@ -636,14 +657,14 @@ impl<'a> TypeChecker<'a> {
             // Comparison: bigint x bigint -> boolean
             BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
                 if !is_bigint_family(&left_type) {
-                    self.errors.push(format!(
+                    self.add_error(format!(
                         "Left operand of '{}' must be bigint, got '{}'",
                         op.as_str(),
                         left_type
                     ));
                 }
                 if !is_bigint_family(&right_type) {
-                    self.errors.push(format!(
+                    self.add_error(format!(
                         "Right operand of '{}' must be bigint, got '{}'",
                         op.as_str(),
                         right_type
@@ -658,7 +679,7 @@ impl<'a> TypeChecker<'a> {
                     && !is_subtype(&right_type, &left_type)
                 {
                     if left_type != "<unknown>" && right_type != "<unknown>" {
-                        self.errors.push(format!(
+                        self.add_error(format!(
                             "Cannot compare '{}' and '{}' with '{}'",
                             left_type,
                             right_type,
@@ -672,14 +693,14 @@ impl<'a> TypeChecker<'a> {
             // Logical: boolean x boolean -> boolean
             BinaryOp::And | BinaryOp::Or => {
                 if left_type != BOOLEAN && left_type != "<unknown>" {
-                    self.errors.push(format!(
+                    self.add_error(format!(
                         "Left operand of '{}' must be boolean, got '{}'",
                         op.as_str(),
                         left_type
                     ));
                 }
                 if right_type != BOOLEAN && right_type != "<unknown>" {
-                    self.errors.push(format!(
+                    self.add_error(format!(
                         "Right operand of '{}' must be boolean, got '{}'",
                         op.as_str(),
                         right_type
@@ -694,14 +715,14 @@ impl<'a> TypeChecker<'a> {
                     return BYTESTRING.to_string();
                 }
                 if !is_bigint_family(&left_type) {
-                    self.errors.push(format!(
+                    self.add_error(format!(
                         "Left operand of '{}' must be bigint or ByteString, got '{}'",
                         op.as_str(),
                         left_type
                     ));
                 }
                 if !is_bigint_family(&right_type) {
-                    self.errors.push(format!(
+                    self.add_error(format!(
                         "Right operand of '{}' must be bigint or ByteString, got '{}'",
                         op.as_str(),
                         right_type
@@ -713,14 +734,14 @@ impl<'a> TypeChecker<'a> {
             // Shift: bigint x bigint -> bigint
             BinaryOp::Shl | BinaryOp::Shr => {
                 if !is_bigint_family(&left_type) {
-                    self.errors.push(format!(
+                    self.add_error(format!(
                         "Left operand of '{}' must be bigint, got '{}'",
                         op.as_str(),
                         left_type
                     ));
                 }
                 if !is_bigint_family(&right_type) {
-                    self.errors.push(format!(
+                    self.add_error(format!(
                         "Right operand of '{}' must be bigint, got '{}'",
                         op.as_str(),
                         right_type
@@ -742,7 +763,7 @@ impl<'a> TypeChecker<'a> {
         match op {
             UnaryOp::Not => {
                 if operand_type != BOOLEAN && operand_type != "<unknown>" {
-                    self.errors.push(format!(
+                    self.add_error(format!(
                         "Operand of '!' must be boolean, got '{}'",
                         operand_type
                     ));
@@ -751,7 +772,7 @@ impl<'a> TypeChecker<'a> {
             }
             UnaryOp::Neg => {
                 if !is_bigint_family(&operand_type) {
-                    self.errors.push(format!(
+                    self.add_error(format!(
                         "Operand of unary '-' must be bigint, got '{}'",
                         operand_type
                     ));
@@ -763,7 +784,7 @@ impl<'a> TypeChecker<'a> {
                     return BYTESTRING.to_string();
                 }
                 if !is_bigint_family(&operand_type) {
-                    self.errors.push(format!(
+                    self.add_error(format!(
                         "Operand of '~' must be bigint or ByteString, got '{}'",
                         operand_type
                     ));
@@ -811,7 +832,7 @@ impl<'a> TypeChecker<'a> {
                 return "<unknown>".to_string();
             }
 
-            self.errors.push(format!(
+            self.add_error(format!(
                 "unknown function '{}' — only Rúnar built-in functions and contract methods are allowed",
                 name
             ));
@@ -825,8 +846,7 @@ impl<'a> TypeChecker<'a> {
         if let Expression::PropertyAccess { property } = callee {
             if property == "getStateScript" {
                 if !args.is_empty() {
-                    self.errors
-                        .push("getStateScript() takes no arguments".to_string());
+                    self.add_error("getStateScript() takes no arguments");
                 }
                 return BYTESTRING.to_string();
             }
@@ -844,7 +864,7 @@ impl<'a> TypeChecker<'a> {
                 return self.check_call_args(property, &param_strs, &return_type, args, env);
             }
 
-            self.errors.push(format!(
+            self.add_error(format!(
                 "unknown method 'self.{}' — only Rúnar built-in methods and contract methods are allowed",
                 property
             ));
@@ -887,7 +907,7 @@ impl<'a> TypeChecker<'a> {
                 Expression::Identifier { name } => name.clone(),
                 _ => "<expr>".to_string(),
             };
-            self.errors.push(format!(
+            self.add_error(format!(
                 "unknown function '{}.{}' — only Rúnar built-in functions and contract methods are allowed",
                 obj_name, property
             ));
@@ -898,8 +918,8 @@ impl<'a> TypeChecker<'a> {
         }
 
         // Fallback — unknown callee shape
-        self.errors.push(
-            "unsupported function call expression — only Rúnar built-in functions and contract methods are allowed".to_string()
+        self.add_error(
+            "unsupported function call expression — only Rúnar built-in functions and contract methods are allowed"
         );
         self.infer_expr_type(callee, env);
         for arg in args {
@@ -919,7 +939,7 @@ impl<'a> TypeChecker<'a> {
         // Special case: assert can take 1 or 2 args
         if func_name == "assert" {
             if args.is_empty() || args.len() > 2 {
-                self.errors.push(format!(
+                self.add_error(format!(
                     "assert() expects 1 or 2 arguments, got {}",
                     args.len()
                 ));
@@ -927,7 +947,7 @@ impl<'a> TypeChecker<'a> {
             if !args.is_empty() {
                 let cond_type = self.infer_expr_type(&args[0], env);
                 if cond_type != BOOLEAN && cond_type != "<unknown>" {
-                    self.errors.push(format!(
+                    self.add_error(format!(
                         "assert() condition must be boolean, got '{}'",
                         cond_type
                     ));
@@ -944,7 +964,7 @@ impl<'a> TypeChecker<'a> {
         // arg1 must be PubKey (not just any ByteString subtype)
         if func_name == "checkSig" {
             if args.len() != 2 {
-                self.errors.push(format!(
+                self.add_error(format!(
                     "checkSig() expects 2 argument(s), got {}",
                     args.len()
                 ));
@@ -953,7 +973,7 @@ impl<'a> TypeChecker<'a> {
                 let arg0_type = self.infer_expr_type(&args[0], env);
                 // arg0 must be Sig specifically (or a subtype of Sig — currently Sig has no subtypes)
                 if arg0_type != "Sig" && arg0_type != "<unknown>" {
-                    self.errors.push(format!(
+                    self.add_error(format!(
                         "Argument 1 of checkSig(): expected 'Sig', got '{}'",
                         arg0_type
                     ));
@@ -963,7 +983,7 @@ impl<'a> TypeChecker<'a> {
                 let arg1_type = self.infer_expr_type(&args[1], env);
                 // arg1 must be PubKey specifically (or a subtype of PubKey)
                 if arg1_type != "PubKey" && arg1_type != "<unknown>" {
-                    self.errors.push(format!(
+                    self.add_error(format!(
                         "Argument 2 of checkSig(): expected 'PubKey', got '{}'",
                         arg1_type
                     ));
@@ -980,7 +1000,7 @@ impl<'a> TypeChecker<'a> {
         // Special case: checkMultiSig
         if func_name == "checkMultiSig" {
             if args.len() != 2 {
-                self.errors.push(format!(
+                self.add_error(format!(
                     "checkMultiSig() expects 2 arguments, got {}",
                     args.len()
                 ));
@@ -994,7 +1014,7 @@ impl<'a> TypeChecker<'a> {
 
         // Standard argument count check
         if args.len() != sig_params.len() {
-            self.errors.push(format!(
+            self.add_error(format!(
                 "{}() expects {} argument(s), got {}",
                 func_name,
                 sig_params.len(),
@@ -1008,7 +1028,7 @@ impl<'a> TypeChecker<'a> {
             let expected = sig_params[i];
 
             if !is_subtype(&arg_type, expected) && arg_type != "<unknown>" {
-                self.errors.push(format!(
+                self.add_error(format!(
                     "Argument {} of {}(): expected '{}', got '{}'",
                     i + 1,
                     func_name,
@@ -1056,7 +1076,7 @@ impl<'a> TypeChecker<'a> {
                     }
 
                     if self.consumed_values.contains(name) {
-                        self.errors.push(format!(
+                        self.add_error(format!(
                             "affine value '{}' has already been consumed",
                             name
                         ));
@@ -1300,7 +1320,7 @@ class Bad extends SmartContract {
         let has_unknown_error = result
             .errors
             .iter()
-            .any(|e| e.to_lowercase().contains("unknown"));
+            .any(|e| e.message.to_lowercase().contains("unknown"));
         assert!(
             has_unknown_error,
             "expected error about unknown function, got: {:?}",
@@ -1335,7 +1355,7 @@ class Bad extends SmartContract {
         let has_arg_count_error = result
             .errors
             .iter()
-            .any(|e| e.contains("expects") && e.contains("argument"));
+            .any(|e| e.message.contains("expects") && e.message.contains("argument"));
         assert!(
             has_arg_count_error,
             "expected error about wrong argument count, got: {:?}",
@@ -1371,7 +1391,7 @@ class Bad extends SmartContract {
         let has_type_error = result
             .errors
             .iter()
-            .any(|e| e.contains("bigint") || e.contains("boolean"));
+            .any(|e| e.message.contains("bigint") || e.message.contains("boolean"));
         assert!(
             has_type_error,
             "expected type mismatch error, got: {:?}",
@@ -1509,7 +1529,7 @@ class HashCheck extends SmartContract {
                 // PubKey should be assignable to ByteString (sha256's parameter type)
                 // so there should be no error about PubKey argument type mismatch
                 let pubkey_arg_error = tc_result.errors.iter().any(|e| {
-                    e.contains("argument") && e.contains("PubKey")
+                    e.message.contains("argument") && e.message.contains("PubKey")
                 });
                 assert!(
                     !pubkey_arg_error,
@@ -1551,8 +1571,8 @@ class Bad extends SmartContract {
                     "expected typecheck errors for unknown function console.log"
                 );
                 let has_unknown_error = tc_result.errors.iter().any(|e| {
-                    e.to_lowercase().contains("unknown")
-                        || e.to_lowercase().contains("console")
+                    e.message.to_lowercase().contains("unknown")
+                        || e.message.to_lowercase().contains("console")
                 });
                 assert!(
                     has_unknown_error,

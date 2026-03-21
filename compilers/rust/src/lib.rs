@@ -22,13 +22,66 @@ use std::path::Path;
 pub struct CompileOptions {
     /// When true, skip the constant-folding optimisation pass.
     pub disable_constant_folding: bool,
+    /// Stop compilation after the parse pass (pass 1).
+    pub parse_only: bool,
+    /// Stop compilation after the validate pass (pass 2).
+    pub validate_only: bool,
+    /// Stop compilation after the type-check pass (pass 3).
+    pub typecheck_only: bool,
 }
 
 impl Default for CompileOptions {
     fn default() -> Self {
         Self {
             disable_constant_folding: false,
+            parse_only: false,
+            validate_only: false,
+            typecheck_only: false,
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CompileResult — rich compilation output (mirrors TypeScript CompileResult)
+// ---------------------------------------------------------------------------
+
+/// Rich compilation result that collects ALL diagnostics from ALL passes
+/// and returns partial results as they become available.
+///
+/// Unlike the `Result<RunarArtifact, String>` API, `CompileResult` never
+/// returns an error — all errors are captured in the `diagnostics` vector.
+pub struct CompileResult {
+    /// The parsed AST (available after pass 1 — parse).
+    pub contract: Option<frontend::ast::ContractNode>,
+    /// The A-Normal Form IR (available after pass 4 — ANF lowering).
+    pub anf: Option<ir::ANFProgram>,
+    /// ALL diagnostics from ALL passes (errors + warnings).
+    pub diagnostics: Vec<frontend::diagnostic::Diagnostic>,
+    /// True only if there are no error-severity diagnostics.
+    pub success: bool,
+    /// The final compiled artifact (available if compilation succeeds).
+    pub artifact: Option<RunarArtifact>,
+    /// The hex-encoded Bitcoin Script (available if compilation succeeds).
+    pub script_hex: Option<String>,
+    /// The human-readable ASM (available if compilation succeeds).
+    pub script_asm: Option<String>,
+}
+
+impl CompileResult {
+    fn new() -> Self {
+        Self {
+            contract: None,
+            anf: None,
+            diagnostics: Vec::new(),
+            success: false,
+            artifact: None,
+            script_hex: None,
+            script_asm: None,
+        }
+    }
+
+    fn has_errors(&self) -> bool {
+        self.diagnostics.iter().any(|d| d.severity == frontend::diagnostic::Severity::Error)
     }
 }
 
@@ -100,7 +153,7 @@ pub fn compile_from_source_str_with_options(
     if !validation.errors.is_empty() {
         return Err(format!(
             "Validation errors:\n  {}",
-            validation.errors.join("\n  ")
+            validation.error_strings().join("\n  ")
         ));
     }
     for w in &validation.warnings {
@@ -112,7 +165,7 @@ pub fn compile_from_source_str_with_options(
     if !tc_result.errors.is_empty() {
         return Err(format!(
             "Type-check errors:\n  {}",
-            tc_result.errors.join("\n  ")
+            tc_result.error_strings().join("\n  ")
         ));
     }
 
@@ -129,7 +182,7 @@ pub fn compile_from_source_str_with_options(
 
     // Passes 5-6: Backend (stack lowering + emit)
     // Constant folding already ran above; skip it in compile_from_program.
-    let backend_opts = CompileOptions { disable_constant_folding: true };
+    let backend_opts = CompileOptions { disable_constant_folding: true, ..Default::default() };
     compile_from_program_with_options(&anf_program, &backend_opts)
 }
 
@@ -177,7 +230,7 @@ pub fn compile_source_str_to_ir_with_options(
     if !validation.errors.is_empty() {
         return Err(format!(
             "Validation errors:\n  {}",
-            validation.errors.join("\n  ")
+            validation.error_strings().join("\n  ")
         ));
     }
 
@@ -185,7 +238,7 @@ pub fn compile_source_str_to_ir_with_options(
     if !tc_result.errors.is_empty() {
         return Err(format!(
             "Type-check errors:\n  {}",
-            tc_result.errors.join("\n  ")
+            tc_result.error_strings().join("\n  ")
         ));
     }
 
@@ -204,14 +257,14 @@ pub fn compile_source_str_to_ir_with_options(
 pub fn frontend_validate(source: &str, file_name: Option<&str>) -> (Vec<String>, Vec<String>) {
     let parse_result = frontend::parser::parse_source(source, file_name);
     if !parse_result.errors.is_empty() {
-        return (parse_result.errors, vec![]);
+        return (parse_result.error_strings(), vec![]);
     }
     let contract = match parse_result.contract {
         Some(c) => c,
         None => return (vec!["No contract found".to_string()], vec![]),
     };
     let result = frontend::validator::validate(&contract);
-    (result.errors, result.warnings)
+    (result.error_strings(), result.warning_strings())
 }
 
 /// Compile a parsed ANF program to a Rúnar artifact.
@@ -251,4 +304,182 @@ pub fn compile_from_program_with_options(program: &ir::ANFProgram, opts: &Compil
         true, // include ANF IR for SDK state auto-computation
     );
     Ok(artifact)
+}
+
+// ---------------------------------------------------------------------------
+// CompileResult API — collect all diagnostics, return partial results
+// ---------------------------------------------------------------------------
+
+/// Compile from a source string, collecting ALL diagnostics from ALL passes
+/// and returning partial results as they become available.
+///
+/// Unlike `compile_from_source_str_with_options`, this function never returns
+/// an error — all errors are captured in `CompileResult.diagnostics`.
+pub fn compile_from_source_str_with_result(
+    source: &str,
+    file_name: Option<&str>,
+    opts: &CompileOptions,
+) -> CompileResult {
+    use frontend::diagnostic::Diagnostic;
+
+    let mut result = CompileResult::new();
+
+    // Pass 1: Parse (auto-selects parser based on file extension)
+    let parse_result = frontend::parser::parse_source(source, file_name);
+    result.diagnostics.extend(parse_result.errors);
+    result.contract = parse_result.contract;
+
+    if result.has_errors() || result.contract.is_none() {
+        if result.contract.is_none() && !result.has_errors() {
+            result.diagnostics.push(Diagnostic::error(
+                "No contract found in source file",
+                None,
+            ));
+        }
+        return result;
+    }
+
+    if opts.parse_only {
+        result.success = !result.has_errors();
+        return result;
+    }
+
+    // Pass 2: Validate
+    let contract = result.contract.as_ref().unwrap();
+    let validation = frontend::validator::validate(contract);
+    result.diagnostics.extend(validation.errors);
+    result.diagnostics.extend(validation.warnings);
+
+    if result.has_errors() {
+        return result;
+    }
+
+    if opts.validate_only {
+        result.success = !result.has_errors();
+        return result;
+    }
+
+    // Pass 3: Type-check
+    let tc_result = frontend::typecheck::typecheck(contract);
+    result.diagnostics.extend(tc_result.errors);
+
+    if result.has_errors() {
+        return result;
+    }
+
+    if opts.typecheck_only {
+        result.success = !result.has_errors();
+        return result;
+    }
+
+    // Pass 4: ANF lowering
+    let mut anf_program = frontend::anf_lower::lower_to_anf(contract);
+
+    // Pass 4.25: Constant folding (optional)
+    if !opts.disable_constant_folding {
+        anf_program = frontend::constant_fold::fold_constants(&anf_program);
+    }
+
+    // Pass 4.5: EC optimization
+    anf_program = frontend::anf_optimize::optimize_ec(anf_program);
+    result.anf = Some(anf_program.clone());
+
+    // Pass 5: Stack lowering (catch panics)
+    let stack_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        lower_to_stack(&anf_program)
+    }));
+
+    let mut stack_methods = match stack_result {
+        Ok(Ok(methods)) => methods,
+        Ok(Err(e)) => {
+            result.diagnostics.push(Diagnostic::error(
+                format!("stack lowering: {}", e),
+                None,
+            ));
+            return result;
+        }
+        Err(panic_val) => {
+            let msg = if let Some(s) = panic_val.downcast_ref::<&str>() {
+                format!("stack lowering panic: {}", s)
+            } else if let Some(s) = panic_val.downcast_ref::<String>() {
+                format!("stack lowering panic: {}", s)
+            } else {
+                "stack lowering panic: unknown error".to_string()
+            };
+            result.diagnostics.push(Diagnostic::error(msg, None));
+            return result;
+        }
+    };
+
+    // Peephole optimization
+    for method in &mut stack_methods {
+        method.ops = optimize_stack_ops(&method.ops);
+    }
+
+    // Pass 6: Emit (catch panics)
+    let emit_result_outer = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        emit(&stack_methods)
+    }));
+
+    match emit_result_outer {
+        Ok(Ok(emit_result)) => {
+            let anf_ref = result.anf.as_ref().unwrap();
+            let artifact = assemble_artifact(
+                anf_ref,
+                &emit_result.script_hex,
+                &emit_result.script_asm,
+                emit_result.constructor_slots,
+                emit_result.code_separator_index,
+                emit_result.code_separator_indices,
+                true,
+            );
+            result.script_hex = Some(emit_result.script_hex);
+            result.script_asm = Some(emit_result.script_asm);
+            result.artifact = Some(artifact);
+        }
+        Ok(Err(e)) => {
+            result.diagnostics.push(Diagnostic::error(
+                format!("emit: {}", e),
+                None,
+            ));
+        }
+        Err(panic_val) => {
+            let msg = if let Some(s) = panic_val.downcast_ref::<&str>() {
+                format!("emit panic: {}", s)
+            } else if let Some(s) = panic_val.downcast_ref::<String>() {
+                format!("emit panic: {}", s)
+            } else {
+                "emit panic: unknown error".to_string()
+            };
+            result.diagnostics.push(Diagnostic::error(msg, None));
+        }
+    }
+
+    result.success = !result.has_errors();
+    result
+}
+
+/// Compile from a source file on disk, collecting ALL diagnostics.
+pub fn compile_from_source_with_result(
+    path: &Path,
+    opts: &CompileOptions,
+) -> CompileResult {
+    use frontend::diagnostic::Diagnostic;
+
+    let source = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => {
+            let mut result = CompileResult::new();
+            result.diagnostics.push(Diagnostic::error(
+                format!("reading source file: {}", e),
+                None,
+            ));
+            return result;
+        }
+    };
+    let file_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "contract.ts".to_string());
+    compile_from_source_str_with_result(&source, Some(&file_name), opts)
 }

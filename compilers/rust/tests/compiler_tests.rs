@@ -510,7 +510,7 @@ fn test_all_conformance_tests() {
         "token-nft",
     ];
 
-    let no_fold = CompileOptions { disable_constant_folding: true };
+    let no_fold = CompileOptions { disable_constant_folding: true, ..Default::default() };
 
     for dir in &test_dirs {
         let ir_json = load_conformance_ir(dir);
@@ -951,7 +951,7 @@ fn test_source_compile_all_conformance() {
         "token-nft",
     ];
 
-    let no_fold = CompileOptions { disable_constant_folding: true };
+    let no_fold = CompileOptions { disable_constant_folding: true, ..Default::default() };
 
     for dir in &test_dirs {
         let source = conformance_source(dir);
@@ -1048,7 +1048,7 @@ fn test_source_vs_ir_both_produce_output() {
 // ---------------------------------------------------------------------------
 
 fn conformance_golden_test(test_name: &str) {
-    let no_fold = CompileOptions { disable_constant_folding: true };
+    let no_fold = CompileOptions { disable_constant_folding: true, ..Default::default() };
     let source = conformance_source(test_name);
     let artifact = compile_from_source_str_with_options(&source, Some(&format!("{}.runar.ts", test_name)), &no_fold)
         .unwrap_or_else(|e| panic!("[{}] source compilation failed: {}", test_name, e));

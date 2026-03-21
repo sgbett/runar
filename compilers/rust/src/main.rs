@@ -47,6 +47,7 @@ fn main() {
 
     let opts = runar_compiler_rust::CompileOptions {
         disable_constant_folding: args.disable_constant_folding,
+        ..Default::default()
     };
 
     if args.ir.is_none() && args.source.is_none() {

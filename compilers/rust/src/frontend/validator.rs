@@ -6,6 +6,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::ast::*;
+use super::diagnostic::Diagnostic;
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -13,14 +14,25 @@ use super::ast::*;
 
 /// Result of validation.
 pub struct ValidationResult {
-    pub errors: Vec<String>,
-    pub warnings: Vec<String>,
+    pub errors: Vec<Diagnostic>,
+    pub warnings: Vec<Diagnostic>,
+}
+
+impl ValidationResult {
+    /// Get error messages as plain strings (for backward compatibility).
+    pub fn error_strings(&self) -> Vec<String> {
+        self.errors.iter().map(|d| d.format_message()).collect()
+    }
+    /// Get warning messages as plain strings (for backward compatibility).
+    pub fn warning_strings(&self) -> Vec<String> {
+        self.warnings.iter().map(|d| d.format_message()).collect()
+    }
 }
 
 /// Validate a parsed Rúnar AST against the language subset constraints.
 pub fn validate(contract: &ContractNode) -> ValidationResult {
-    let mut errors = Vec::new();
-    let mut warnings = Vec::new();
+    let mut errors: Vec<Diagnostic> = Vec::new();
+    let mut warnings: Vec<Diagnostic> = Vec::new();
 
     validate_properties(contract, &mut errors, &mut warnings);
     validate_constructor(contract, &mut errors);
@@ -56,15 +68,15 @@ fn is_valid_property_primitive(name: &PrimitiveTypeName) -> bool {
 // Property validation
 // ---------------------------------------------------------------------------
 
-fn validate_properties(contract: &ContractNode, errors: &mut Vec<String>, warnings: &mut Vec<String>) {
+fn validate_properties(contract: &ContractNode, errors: &mut Vec<Diagnostic>, warnings: &mut Vec<Diagnostic>) {
     for prop in &contract.properties {
-        validate_property_type(&prop.prop_type, errors);
+        validate_property_type(&prop.prop_type, &prop.source_location, errors);
 
         // V27: Error when any property is named `txPreimage`
         if prop.name == "txPreimage" {
-            errors.push(
-                "'txPreimage' is a reserved implicit parameter name and must not be used as a property name".to_string()
-            );
+            errors.push(Diagnostic::error(
+                "'txPreimage' is a reserved implicit parameter name and must not be used as a property name", Some(prop.source_location.clone())
+            ));
         }
     }
 
@@ -72,10 +84,10 @@ fn validate_properties(contract: &ContractNode, errors: &mut Vec<String>, warnin
     if contract.parent_class == "SmartContract" {
         for prop in &contract.properties {
             if !prop.readonly {
-                errors.push(format!(
+                errors.push(Diagnostic::error(format!(
                     "property '{}' in SmartContract must be readonly. Use StatefulSmartContract for mutable state.",
                     prop.name
-                ));
+                ), Some(prop.source_location.clone())));
             }
         }
     }
@@ -84,31 +96,31 @@ fn validate_properties(contract: &ContractNode, errors: &mut Vec<String>, warnin
     if contract.parent_class == "StatefulSmartContract" {
         let has_mutable = contract.properties.iter().any(|p| !p.readonly);
         if !has_mutable {
-            warnings.push(
-                "StatefulSmartContract has no mutable properties; consider using SmartContract instead".to_string()
-            );
+            warnings.push(Diagnostic::warning(
+                "StatefulSmartContract has no mutable properties; consider using SmartContract instead", Some(contract.constructor.source_location.clone())
+            ));
         }
     }
 }
 
-fn validate_property_type(type_node: &TypeNode, errors: &mut Vec<String>) {
+fn validate_property_type(type_node: &TypeNode, loc: &SourceLocation, errors: &mut Vec<Diagnostic>) {
     match type_node {
         TypeNode::Primitive(name) => {
             if !is_valid_property_primitive(name) {
-                errors.push(format!("Property type '{}' is not valid", name.as_str()));
+                errors.push(Diagnostic::error(format!("Property type '{}' is not valid", name.as_str()), Some(loc.clone())));
             }
         }
         TypeNode::FixedArray { element, length } => {
             if *length == 0 {
-                errors.push("FixedArray length must be a positive integer".to_string());
+                errors.push(Diagnostic::error("FixedArray length must be a positive integer", Some(loc.clone())));
             }
-            validate_property_type(element, errors);
+            validate_property_type(element, loc, errors);
         }
         TypeNode::Custom(name) => {
-            errors.push(format!(
+            errors.push(Diagnostic::error(format!(
                 "Unsupported type '{}' in property declaration. Use one of: bigint, boolean, ByteString, PubKey, Sig, Sha256, Ripemd160, Addr, SigHashPreimage, RabinSig, RabinPubKey, or FixedArray<T, N>",
                 name
-            ));
+            ), Some(loc.clone())));
         }
     }
 }
@@ -117,18 +129,18 @@ fn validate_property_type(type_node: &TypeNode, errors: &mut Vec<String>) {
 // Constructor validation
 // ---------------------------------------------------------------------------
 
-fn validate_constructor(contract: &ContractNode, errors: &mut Vec<String>) {
+fn validate_constructor(contract: &ContractNode, errors: &mut Vec<Diagnostic>) {
     let ctor = &contract.constructor;
     let prop_names: HashSet<String> = contract.properties.iter().map(|p| p.name.clone()).collect();
 
     // Check that constructor has a super() call as first statement
     if ctor.body.is_empty() {
-        errors.push("Constructor must call super() as its first statement".to_string());
+        errors.push(Diagnostic::error("Constructor must call super() as its first statement", Some(ctor.source_location.clone())));
         return;
     }
 
     if !is_super_call(&ctor.body[0]) {
-        errors.push("Constructor must call super() as its first statement".to_string());
+        errors.push(Diagnostic::error("Constructor must call super() as its first statement", Some(ctor.source_location.clone())));
     }
 
     // Check that all properties are assigned in constructor
@@ -151,10 +163,10 @@ fn validate_constructor(contract: &ContractNode, errors: &mut Vec<String>) {
 
     for prop_name in &prop_names {
         if !assigned_props.contains(prop_name) && !props_with_init.contains(prop_name) {
-            errors.push(format!(
+            errors.push(Diagnostic::error(format!(
                 "Property '{}' must be assigned in the constructor",
                 prop_name
-            ));
+            ), Some(ctor.source_location.clone())));
         }
     }
 
@@ -162,10 +174,10 @@ fn validate_constructor(contract: &ContractNode, errors: &mut Vec<String>) {
     for param in &ctor.params {
         if let TypeNode::Custom(ref name) = param.param_type {
             if name == "unknown" {
-                errors.push(format!(
+                errors.push(Diagnostic::error(format!(
                     "Constructor parameter '{}' must have a type annotation",
                     param.name
-                ));
+                ), Some(ctor.source_location.clone())));
             }
         }
     }
@@ -191,7 +203,7 @@ fn is_super_call(stmt: &Statement) -> bool {
 // Method validation
 // ---------------------------------------------------------------------------
 
-fn validate_methods(contract: &ContractNode, errors: &mut Vec<String>, warnings: &mut Vec<String>) {
+fn validate_methods(contract: &ContractNode, errors: &mut Vec<Diagnostic>, warnings: &mut Vec<Diagnostic>) {
     for method in &contract.methods {
         validate_method(method, contract, errors);
 
@@ -202,15 +214,15 @@ fn validate_methods(contract: &ContractNode, errors: &mut Vec<String>, warnings:
     }
 }
 
-fn validate_method(method: &MethodNode, contract: &ContractNode, errors: &mut Vec<String>) {
+fn validate_method(method: &MethodNode, contract: &ContractNode, errors: &mut Vec<Diagnostic>) {
     // All params must have type annotations
     for param in &method.params {
         if let TypeNode::Custom(ref name) = param.param_type {
             if name == "unknown" {
-                errors.push(format!(
+                errors.push(Diagnostic::error(format!(
                     "Parameter '{}' in method '{}' must have a type annotation",
                     param.name, method.name
-                ));
+                ), Some(method.source_location.clone())));
             }
         }
     }
@@ -219,10 +231,10 @@ fn validate_method(method: &MethodNode, contract: &ContractNode, errors: &mut Ve
     // where the compiler auto-injects the final assert)
     if method.visibility == Visibility::Public && contract.parent_class == "SmartContract" {
         if !ends_with_assert(&method.body) {
-            errors.push(format!(
+            errors.push(Diagnostic::error(format!(
                 "Public method '{}' must end with an assert() call",
                 method.name
-            ));
+            ), Some(method.source_location.clone())));
         }
     }
 
@@ -276,7 +288,7 @@ fn is_assert_call(expr: &Expression) -> bool {
 // Statement validation
 // ---------------------------------------------------------------------------
 
-fn validate_statement(stmt: &Statement, errors: &mut Vec<String>) {
+fn validate_statement(stmt: &Statement, errors: &mut Vec<Diagnostic>) {
     match stmt {
         Statement::VariableDecl { init, .. } => {
             validate_expression(init, errors);
@@ -312,10 +324,10 @@ fn validate_statement(stmt: &Statement, errors: &mut Vec<String>) {
             // Check that the loop bound is a compile-time constant
             if let Expression::BinaryExpr { right, .. } = condition {
                 if !is_compile_time_constant(right) {
-                    errors.push(
-                        "For loop bound must be a compile-time constant (literal or const variable)"
-                            .to_string(),
-                    );
+                    errors.push(Diagnostic::error(
+                        "For loop bound must be a compile-time constant (literal or const variable)",
+                        None,
+                    ));
                 }
             }
 
@@ -356,7 +368,7 @@ fn is_compile_time_constant(expr: &Expression) -> bool {
 // Expression validation
 // ---------------------------------------------------------------------------
 
-fn validate_expression(expr: &Expression, errors: &mut Vec<String>) {
+fn validate_expression(expr: &Expression, errors: &mut Vec<Diagnostic>) {
     match expr {
         Expression::BinaryExpr { left, right, .. } => {
             validate_expression(left, errors);
@@ -367,7 +379,12 @@ fn validate_expression(expr: &Expression, errors: &mut Vec<String>) {
         }
         Expression::CallExpr { callee, args, .. } => {
             validate_expression(callee, errors);
-            for arg in args {
+            // assert() message (2nd arg) is a human-readable string, not hex — skip validation
+            let is_assert = matches!(callee.as_ref(), Expression::Identifier { name } if name == "assert");
+            for (i, arg) in args.iter().enumerate() {
+                if is_assert && i >= 1 {
+                    continue;
+                }
                 validate_expression(arg, errors);
             }
         }
@@ -390,12 +407,28 @@ fn validate_expression(expr: &Expression, errors: &mut Vec<String>) {
         Expression::IncrementExpr { operand, .. } | Expression::DecrementExpr { operand, .. } => {
             validate_expression(operand, errors);
         }
-        // Leaf nodes -- nothing to validate
+        // Leaf nodes -- nothing to validate (except ByteStringLiteral)
         Expression::Identifier { .. }
         | Expression::BigIntLiteral { .. }
         | Expression::BoolLiteral { .. }
-        | Expression::ByteStringLiteral { .. }
         | Expression::PropertyAccess { .. } => {}
+
+        Expression::ByteStringLiteral { value } => {
+            if !value.is_empty() {
+                if value.len() % 2 != 0 {
+                    errors.push(Diagnostic::error(format!(
+                        "ByteString literal '{}' has odd length ({}) \u{2014} hex strings must have an even number of characters",
+                        value,
+                        value.len()
+                    ), None));
+                } else if !value.chars().all(|c| c.is_ascii_hexdigit()) {
+                    errors.push(Diagnostic::error(format!(
+                        "ByteString literal '{}' contains non-hex characters \u{2014} only 0-9, a-f, A-F are allowed",
+                        value
+                    ), None));
+                }
+            }
+        }
     }
 }
 
@@ -403,7 +436,7 @@ fn validate_expression(expr: &Expression, errors: &mut Vec<String>) {
 // Recursion detection
 // ---------------------------------------------------------------------------
 
-fn check_no_recursion(contract: &ContractNode, errors: &mut Vec<String>) {
+fn check_no_recursion(contract: &ContractNode, errors: &mut Vec<Diagnostic>) {
     // Build call graph: method name -> set of methods it calls
     let mut call_graph: HashMap<String, HashSet<String>> = HashMap::new();
     let mut method_names: HashSet<String> = HashSet::new();
@@ -434,10 +467,10 @@ fn check_no_recursion(contract: &ContractNode, errors: &mut Vec<String>) {
             &mut visited,
             &mut stack,
         ) {
-            errors.push(format!(
+            errors.push(Diagnostic::error(format!(
                 "Recursion detected: method '{}' calls itself directly or indirectly. Recursion is not allowed in Rúnar contracts.",
                 method.name
-            ));
+            ), Some(method.source_location.clone())));
         }
     }
 }
@@ -573,25 +606,26 @@ fn has_cycle(
 // StatefulSmartContract public methods.
 // ---------------------------------------------------------------------------
 
-fn warn_manual_preimage_usage(method: &MethodNode, warnings: &mut Vec<String>) {
+fn warn_manual_preimage_usage(method: &MethodNode, warnings: &mut Vec<Diagnostic>) {
+    let method_loc = method.source_location.clone();
     walk_expressions_in_body(&method.body, &mut |expr| {
         // V24: Detect manual checkPreimage(...)
         if let Expression::CallExpr { callee, .. } = expr {
             if let Expression::Identifier { name } = callee.as_ref() {
                 if name == "checkPreimage" {
-                    warnings.push(format!(
+                    warnings.push(Diagnostic::warning(format!(
                         "StatefulSmartContract auto-injects checkPreimage(); calling it manually in '{}' will cause a duplicate verification",
                         method.name
-                    ));
+                    ), Some(method_loc.clone())));
                 }
             }
             // V25: Detect manual this.getStateScript()
             if let Expression::PropertyAccess { property } = callee.as_ref() {
                 if property == "getStateScript" {
-                    warnings.push(format!(
+                    warnings.push(Diagnostic::warning(format!(
                         "StatefulSmartContract auto-injects state continuation; calling getStateScript() manually in '{}' is redundant",
                         method.name
-                    ));
+                    ), Some(method_loc.clone())));
                 }
             }
         }
@@ -755,7 +789,7 @@ class Bad extends SmartContract {
         let has_super_error = result
             .errors
             .iter()
-            .any(|e| e.to_lowercase().contains("super"));
+            .any(|e| e.message.to_lowercase().contains("super"));
         assert!(
             has_super_error,
             "expected error about super(), got: {:?}",
@@ -790,7 +824,7 @@ class NoAssert extends SmartContract {
         let has_assert_error = result
             .errors
             .iter()
-            .any(|e| e.to_lowercase().contains("assert"));
+            .any(|e| e.message.to_lowercase().contains("assert"));
         assert!(
             has_assert_error,
             "expected error about missing assert(), got: {:?}",
@@ -826,7 +860,7 @@ class Recursive extends SmartContract {
         let has_recursion_error = result
             .errors
             .iter()
-            .any(|e| e.to_lowercase().contains("recursion") || e.to_lowercase().contains("recursive"));
+            .any(|e| e.message.to_lowercase().contains("recursion") || e.message.to_lowercase().contains("recursive"));
         assert!(
             has_recursion_error,
             "expected error about recursion, got: {:?}",
@@ -889,7 +923,7 @@ class P2PKH extends SmartContract {
             "expected validation errors for missing super()"
         );
         assert!(
-            result.errors.iter().any(|e| e.to_lowercase().contains("super")),
+            result.errors.iter().any(|e| e.message.to_lowercase().contains("super")),
             "expected error about super(), got: {:?}",
             result.errors
         );
@@ -919,7 +953,7 @@ class P2PKH extends SmartContract {
             "expected validation errors for missing assert at end of public method"
         );
         assert!(
-            result.errors.iter().any(|e| e.to_lowercase().contains("assert")),
+            result.errors.iter().any(|e| e.message.to_lowercase().contains("assert")),
             "expected error about missing assert(), got: {:?}",
             result.errors
         );
@@ -955,7 +989,7 @@ class Rec extends SmartContract {
             result
                 .errors
                 .iter()
-                .any(|e| e.to_lowercase().contains("recursion") || e.to_lowercase().contains("recursive")),
+                .any(|e| e.message.to_lowercase().contains("recursion") || e.message.to_lowercase().contains("recursive")),
             "expected error about recursion, got: {:?}",
             result.errors
         );
