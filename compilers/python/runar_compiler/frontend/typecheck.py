@@ -31,6 +31,7 @@ from runar_compiler.frontend.ast_nodes import (
     PrimitiveType,
     PropertyAccessExpr,
     ReturnStmt,
+    SourceLocation,
     Statement,
     TernaryExpr,
     TypeNode,
@@ -255,6 +256,7 @@ class _TypeChecker:
         self.prop_types: dict[str, str] = {}
         self.method_sigs: dict[str, FuncSig] = {}
         self.consumed_values: dict[str, bool] = {}
+        self._current_method_loc: SourceLocation | None = None
 
         for prop in contract.properties:
             self.prop_types[prop.name] = _type_node_to_string(prop.type)
@@ -271,11 +273,14 @@ class _TypeChecker:
             self.method_sigs[method.name] = FuncSig(params=params, return_type=ret_type)
 
     def _add_error(self, msg: str) -> None:
-        self.errors.append(Diagnostic(message=msg, severity=Severity.ERROR))
+        self.errors.append(Diagnostic(message=msg, severity=Severity.ERROR, loc=self._current_method_loc))
 
     def check_constructor(self) -> None:
         ctor = self.contract.constructor
         env = _TypeEnv()
+
+        # Set current method location for diagnostics
+        self._current_method_loc = ctor.source_location
 
         # Reset affine tracking
         self.consumed_values = {}
@@ -289,6 +294,9 @@ class _TypeChecker:
 
     def check_method(self, method: MethodNode) -> None:
         env = _TypeEnv()
+
+        # Set current method location for diagnostics
+        self._current_method_loc = method.source_location
 
         # Reset affine tracking
         self.consumed_values = {}

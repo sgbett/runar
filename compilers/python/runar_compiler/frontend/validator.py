@@ -107,8 +107,8 @@ class _ValidationContext:
     errors: list[Diagnostic] = field(default_factory=list)
     warnings: list[Diagnostic] = field(default_factory=list)
 
-    def _add_error(self, msg: str) -> None:
-        self.errors.append(Diagnostic(message=msg, severity=Severity.ERROR))
+    def _add_error(self, msg: str, loc: SourceLocation | None = None) -> None:
+        self.errors.append(Diagnostic(message=msg, severity=Severity.ERROR, loc=loc))
 
     # -------------------------------------------------------------------
     # Property validation
@@ -122,7 +122,8 @@ class _ValidationContext:
             if self.contract.parent_class == "StatefulSmartContract" and prop.name == "txPreimage":
                 self._add_error(
                     "'txPreimage' is an implicit property of StatefulSmartContract "
-                    "and must not be declared"
+                    "and must not be declared",
+                    loc=prop.source_location,
                 )
 
         # SmartContract requires all properties to be readonly
@@ -130,7 +131,8 @@ class _ValidationContext:
             for prop in self.contract.properties:
                 if not prop.readonly:
                     self._add_error(
-                        f"Property '{prop.name}' in SmartContract must be declared readonly"
+                        f"Property '{prop.name}' in SmartContract must be declared readonly",
+                        loc=prop.source_location,
                     )
 
         # V26: Warn if StatefulSmartContract has no mutable properties
@@ -141,6 +143,7 @@ class _ValidationContext:
                     message="StatefulSmartContract has no mutable properties; "
                     "consider using SmartContract instead",
                     severity=Severity.WARNING,
+                    loc=self.contract.constructor.source_location,
                 ))
 
     def _validate_property_type(self, t: TypeNode | None, loc: SourceLocation) -> None:
@@ -150,17 +153,20 @@ class _ValidationContext:
             if t.name not in _VALID_PROP_TYPES:
                 if t.name == "void":
                     self._add_error(
-                        f"property type 'void' is not valid at {loc.file}:{loc.line}"
+                        f"property type 'void' is not valid at {loc.file}:{loc.line}",
+                        loc=loc,
                     )
         elif isinstance(t, FixedArrayType):
             if t.length <= 0:
                 self._add_error(
-                    f"FixedArray length must be a positive integer at {loc.file}:{loc.line}"
+                    f"FixedArray length must be a positive integer at {loc.file}:{loc.line}",
+                    loc=loc,
                 )
             self._validate_property_type(t.element, loc)
         elif isinstance(t, CustomType):
             self._add_error(
-                f"unsupported type '{t.name}' in property declaration at {loc.file}:{loc.line}"
+                f"unsupported type '{t.name}' in property declaration at {loc.file}:{loc.line}",
+                loc=loc,
             )
 
     # -------------------------------------------------------------------
@@ -173,11 +179,11 @@ class _ValidationContext:
 
         # Check super() as first statement
         if len(ctor.body) == 0:
-            self._add_error("constructor must call super() as its first statement")
+            self._add_error("constructor must call super() as its first statement", loc=ctor.source_location)
             return
 
         if not _is_super_call(ctor.body[0]):
-            self._add_error("constructor must call super() as its first statement")
+            self._add_error("constructor must call super() as its first statement", loc=ctor.source_location)
 
         # Check all properties are assigned
         assigned_props: set[str] = set()
@@ -194,7 +200,8 @@ class _ValidationContext:
         for name in prop_names:
             if name not in assigned_props and name not in props_with_init:
                 self._add_error(
-                    f"property '{name}' must be assigned in the constructor"
+                    f"property '{name}' must be assigned in the constructor",
+                    loc=ctor.source_location,
                 )
 
         # Validate constructor body
@@ -218,7 +225,8 @@ class _ValidationContext:
         ):
             if not _ends_with_assert(method.body):
                 self._add_error(
-                    f"public method '{method.name}' must end with an assert() call"
+                    f"public method '{method.name}' must end with an assert() call",
+                    loc=method.source_location,
                 )
 
         # V24/V25: Warn on manual preimage/state-script boilerplate in StatefulSmartContract
@@ -333,7 +341,8 @@ class _ValidationContext:
             if _has_cycle(method.name, call_graph, method_names, visited, stack):
                 self._add_error(
                     f"recursion detected: method '{method.name}' calls itself "
-                    f"directly or indirectly"
+                    f"directly or indirectly",
+                    loc=method.source_location,
                 )
 
 
@@ -400,6 +409,7 @@ def _is_compile_time_constant(expr: Expression | None) -> bool:
 
 def _warn_manual_preimage_usage(method, warnings: list[Diagnostic]) -> None:
     """Walk method body and warn on checkPreimage() or this.getStateScript() calls."""
+    method_loc = method.source_location
 
     def visitor(expr: Expression) -> None:
         if isinstance(expr, CallExpr):
@@ -409,6 +419,7 @@ def _warn_manual_preimage_usage(method, warnings: list[Diagnostic]) -> None:
                     message=f"StatefulSmartContract auto-injects checkPreimage(); calling it manually "
                     f"in '{method.name}' will cause a duplicate verification",
                     severity=Severity.WARNING,
+                    loc=method_loc,
                 ))
             # V24: this.checkPreimage(...) call via PropertyAccessExpr or MemberExpr
             callee_prop = _callee_property(expr.callee)
@@ -417,6 +428,7 @@ def _warn_manual_preimage_usage(method, warnings: list[Diagnostic]) -> None:
                     message=f"StatefulSmartContract auto-injects checkPreimage(); calling it manually "
                     f"in '{method.name}' will cause a duplicate verification",
                     severity=Severity.WARNING,
+                    loc=method_loc,
                 ))
             # V25: this.getStateScript() call
             if callee_prop == "getStateScript":
@@ -424,6 +436,7 @@ def _warn_manual_preimage_usage(method, warnings: list[Diagnostic]) -> None:
                     message=f"StatefulSmartContract auto-injects state continuation; calling "
                     f"getStateScript() manually in '{method.name}' is redundant",
                     severity=Severity.WARNING,
+                    loc=method_loc,
                 ))
 
     _walk_expressions_in_body(method.body, visitor)
