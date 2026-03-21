@@ -528,3 +528,236 @@ def _read_file(path: str) -> str:
     """Read a file as text."""
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
+
+
+# ---------------------------------------------------------------------------
+# CompileResult — rich compilation output (mirrors TypeScript CompileResult)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class CompileResult:
+    """Rich compilation result that collects ALL diagnostics from ALL passes
+    and returns partial results as they become available.
+
+    Unlike ``compile_from_source`` (which raises ``CompilationError`` on first
+    error batch), ``CompileResult`` captures all diagnostics and returns
+    partial results (contract AST, ANF IR) as they become available.
+    """
+
+    contract: Any = None  # ContractNode or None (available after parse)
+    anf: ANFProgram | None = None  # Available after ANF lowering
+    diagnostics: list = field(default_factory=list)  # list[Diagnostic]
+    success: bool = False  # True if no error-severity diagnostics
+    artifact: Artifact | None = None  # Available if compilation succeeds
+    script_hex: str | None = None  # Available if compilation succeeds
+    script_asm: str | None = None  # Available if compilation succeeds
+
+    def has_errors(self) -> bool:
+        """Return True if any diagnostic has error severity."""
+        from runar_compiler.frontend.diagnostic import Severity
+        return any(d.severity == Severity.ERROR for d in self.diagnostics)
+
+
+def compile_from_source_with_result(
+    source_path: str,
+    disable_constant_folding: bool = False,
+    parse_only: bool = False,
+    validate_only: bool = False,
+    typecheck_only: bool = False,
+) -> CompileResult:
+    """Compile a source file through all passes, collecting ALL diagnostics.
+
+    Unlike ``compile_from_source``, this function never raises — all errors
+    are captured in ``CompileResult.diagnostics``.
+
+    Supports .runar.ts, .runar.sol, .runar.move, .runar.go, .runar.rs,
+    and .runar.py extensions (dispatched by file extension).
+    """
+    from runar_compiler.frontend.diagnostic import Diagnostic, Severity
+
+    result = CompileResult()
+
+    # Read source file
+    try:
+        source = _read_file(source_path)
+    except Exception as e:
+        result.diagnostics.append(
+            Diagnostic(message=f"reading source file: {e}", severity=Severity.ERROR)
+        )
+        return result
+
+    return _compile_from_source_str_with_result(
+        source,
+        source_path,
+        disable_constant_folding=disable_constant_folding,
+        parse_only=parse_only,
+        validate_only=validate_only,
+        typecheck_only=typecheck_only,
+    )
+
+
+def compile_from_source_str_with_result(
+    source: str,
+    file_name: str,
+    disable_constant_folding: bool = False,
+    parse_only: bool = False,
+    validate_only: bool = False,
+    typecheck_only: bool = False,
+) -> CompileResult:
+    """Compile a source string through all passes, collecting ALL diagnostics.
+
+    The ``file_name`` parameter determines which parser to use.
+    Unlike ``compile_from_source``, this function never raises — all errors
+    are captured in ``CompileResult.diagnostics``.
+    """
+    return _compile_from_source_str_with_result(
+        source,
+        file_name,
+        disable_constant_folding=disable_constant_folding,
+        parse_only=parse_only,
+        validate_only=validate_only,
+        typecheck_only=typecheck_only,
+    )
+
+
+def _compile_from_source_str_with_result(
+    source: str,
+    file_name: str,
+    disable_constant_folding: bool = False,
+    parse_only: bool = False,
+    validate_only: bool = False,
+    typecheck_only: bool = False,
+) -> CompileResult:
+    """Internal implementation: compile source string, collect all diagnostics."""
+    from runar_compiler.frontend.diagnostic import Diagnostic, Severity
+
+    result = CompileResult()
+
+    # Pass 1: Parse
+    try:
+        parse_result = _parse_source(source, file_name)
+        result.diagnostics.extend(parse_result.errors)
+        result.contract = parse_result.contract
+    except Exception as e:
+        result.diagnostics.append(
+            Diagnostic(message=f"parse error: {e}", severity=Severity.ERROR)
+        )
+        return result
+
+    if result.has_errors() or result.contract is None:
+        if result.contract is None and not result.has_errors():
+            result.diagnostics.append(
+                Diagnostic(
+                    message=f"no contract found in {file_name}",
+                    severity=Severity.ERROR,
+                )
+            )
+        return result
+
+    if parse_only:
+        result.success = not result.has_errors()
+        return result
+
+    # Pass 2: Validate
+    try:
+        valid_result = _validate(result.contract)
+        result.diagnostics.extend(valid_result.errors)
+        result.diagnostics.extend(valid_result.warnings)
+    except Exception as e:
+        result.diagnostics.append(
+            Diagnostic(message=f"validation error: {e}", severity=Severity.ERROR)
+        )
+        return result
+
+    if result.has_errors():
+        return result
+
+    if validate_only:
+        result.success = not result.has_errors()
+        return result
+
+    # Pass 3: Type check
+    try:
+        tc_result = _type_check(result.contract)
+        result.diagnostics.extend(tc_result.errors)
+    except Exception as e:
+        result.diagnostics.append(
+            Diagnostic(message=f"type check error: {e}", severity=Severity.ERROR)
+        )
+        return result
+
+    if result.has_errors():
+        return result
+
+    if typecheck_only:
+        result.success = not result.has_errors()
+        return result
+
+    # Pass 4: ANF lowering
+    try:
+        result.anf = _lower_to_anf(result.contract)
+    except Exception as e:
+        result.diagnostics.append(
+            Diagnostic(message=f"ANF lowering error: {e}", severity=Severity.ERROR)
+        )
+        return result
+
+    # Pass 4.25: Constant folding (on by default)
+    if not disable_constant_folding:
+        try:
+            result.anf = _fold_constants(result.anf)
+        except Exception as e:
+            result.diagnostics.append(
+                Diagnostic(
+                    message=f"constant folding error: {e}", severity=Severity.ERROR
+                )
+            )
+            return result
+
+    # Pass 4.5: EC optimization
+    try:
+        result.anf = _optimize_ec(result.anf)
+    except Exception as e:
+        result.diagnostics.append(
+            Diagnostic(message=f"EC optimization error: {e}", severity=Severity.ERROR)
+        )
+        return result
+
+    # Pass 5: Stack lowering
+    try:
+        stack_methods = _lower_to_stack(result.anf)
+    except Exception as e:
+        result.diagnostics.append(
+            Diagnostic(message=f"stack lowering: {e}", severity=Severity.ERROR)
+        )
+        return result
+
+    if result.has_errors():
+        return result
+
+    # Peephole optimization
+    for sm in stack_methods:
+        sm.ops = _optimize_stack_ops(sm.ops)
+
+    # Pass 6: Emit
+    try:
+        emit_result = _emit(stack_methods)
+    except Exception as e:
+        result.diagnostics.append(
+            Diagnostic(message=f"emit: {e}", severity=Severity.ERROR)
+        )
+        return result
+
+    artifact = _assemble_artifact(
+        result.anf,
+        emit_result.script_hex,
+        emit_result.script_asm,
+        emit_result.constructor_slots,
+        emit_result.code_separator_index,
+        emit_result.code_separator_indices,
+    )
+    result.artifact = artifact
+    result.script_hex = emit_result.script_hex
+    result.script_asm = emit_result.script_asm
+    result.success = not result.has_errors()
+    return result
