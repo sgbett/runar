@@ -848,7 +848,7 @@ function parseExpression(
       return parseElementAccessExpression(node, file, errors);
 
     case SyntaxKind.Identifier:
-      return { kind: 'identifier', name: node.getText() };
+      return { kind: 'identifier', name: node.getText(), sourceLocation: locFromNode(node, file) };
 
     case SyntaxKind.BigIntLiteral: {
       const text = node.getText();
@@ -1075,12 +1075,12 @@ function parsePropertyAccessExpression(
 
   // `this.x` -> PropertyAccessExpr
   if (objExpr.isKind(SyntaxKind.ThisKeyword)) {
-    return { kind: 'property_access', property: propName };
+    return { kind: 'property_access', property: propName, sourceLocation: locFromNode(node, file) };
   }
 
   // General member access: obj.method
   const object = parseExpression(objExpr, file, errors);
-  return { kind: 'member_expr', object, property: propName };
+  return { kind: 'member_expr', object, property: propName, sourceLocation: locFromNode(node, file) };
 }
 
 function parseElementAccessExpression(
