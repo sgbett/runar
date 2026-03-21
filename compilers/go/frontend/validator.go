@@ -8,8 +8,26 @@ import "fmt"
 
 // ValidationResult holds the output of the validation pass.
 type ValidationResult struct {
-	Errors   []string
-	Warnings []string
+	Errors   []Diagnostic
+	Warnings []Diagnostic
+}
+
+// ErrorStrings returns error messages as strings (for backward compatibility).
+func (r *ValidationResult) ErrorStrings() []string {
+	result := make([]string, len(r.Errors))
+	for i, d := range r.Errors {
+		result[i] = d.FormatMessage()
+	}
+	return result
+}
+
+// WarningStrings returns warning messages as strings (for backward compatibility).
+func (r *ValidationResult) WarningStrings() []string {
+	result := make([]string, len(r.Warnings))
+	for i, d := range r.Warnings {
+		result[i] = d.FormatMessage()
+	}
+	return result
 }
 
 // Validate checks the Rúnar AST against language subset constraints.
@@ -35,7 +53,11 @@ func Validate(contract *ContractNode) *ValidationResult {
 }
 
 func (ctx *validationContext) addWarning(msg string) {
-	ctx.warnings = append(ctx.warnings, msg)
+	ctx.warnings = append(ctx.warnings, Diagnostic{Message: msg, Severity: SeverityWarning})
+}
+
+func (ctx *validationContext) addWarningWithLoc(msg string, loc *SourceLocation) {
+	ctx.warnings = append(ctx.warnings, Diagnostic{Message: msg, Severity: SeverityWarning, Loc: loc})
 }
 
 // ---------------------------------------------------------------------------
@@ -43,13 +65,17 @@ func (ctx *validationContext) addWarning(msg string) {
 // ---------------------------------------------------------------------------
 
 type validationContext struct {
-	errors   []string
-	warnings []string
+	errors   []Diagnostic
+	warnings []Diagnostic
 	contract *ContractNode
 }
 
 func (ctx *validationContext) addError(msg string) {
-	ctx.errors = append(ctx.errors, msg)
+	ctx.errors = append(ctx.errors, Diagnostic{Message: msg, Severity: SeverityError})
+}
+
+func (ctx *validationContext) addErrorWithLoc(msg string, loc *SourceLocation) {
+	ctx.errors = append(ctx.errors, Diagnostic{Message: msg, Severity: SeverityError, Loc: loc})
 }
 
 // ---------------------------------------------------------------------------
@@ -77,7 +103,7 @@ func (ctx *validationContext) validateProperties() {
 
 		// txPreimage is an implicit property of StatefulSmartContract and must not be declared explicitly
 		if ctx.contract.ParentClass == "StatefulSmartContract" && prop.Name == "txPreimage" {
-			ctx.addError("'txPreimage' is an implicit property of StatefulSmartContract and must not be declared")
+			ctx.addErrorWithLoc("'txPreimage' is an implicit property of StatefulSmartContract and must not be declared", &prop.SourceLocation)
 		}
 	}
 
@@ -85,7 +111,7 @@ func (ctx *validationContext) validateProperties() {
 	if ctx.contract.ParentClass == "SmartContract" {
 		for _, prop := range ctx.contract.Properties {
 			if !prop.Readonly {
-				ctx.addError(fmt.Sprintf("property '%s' in SmartContract must be readonly. Use StatefulSmartContract for mutable state.", prop.Name))
+				ctx.addErrorWithLoc(fmt.Sprintf("property '%s' in SmartContract must be readonly. Use StatefulSmartContract for mutable state.", prop.Name), &prop.SourceLocation)
 			}
 		}
 	}
@@ -100,7 +126,7 @@ func (ctx *validationContext) validateProperties() {
 			}
 		}
 		if !hasMutable {
-			ctx.addWarning("StatefulSmartContract has no mutable properties; consider using SmartContract instead")
+			ctx.addWarningWithLoc("StatefulSmartContract has no mutable properties; consider using SmartContract instead", &ctx.contract.Constructor.SourceLocation)
 		}
 	}
 }
@@ -110,16 +136,16 @@ func (ctx *validationContext) validatePropertyType(t TypeNode, loc SourceLocatio
 	case PrimitiveType:
 		if !validPropTypes[t.Name] {
 			if t.Name == "void" {
-				ctx.addError(fmt.Sprintf("property type 'void' is not valid at %s:%d", loc.File, loc.Line))
+				ctx.addErrorWithLoc(fmt.Sprintf("property type 'void' is not valid at %s:%d", loc.File, loc.Line), &loc)
 			}
 		}
 	case FixedArrayType:
 		if t.Length <= 0 {
-			ctx.addError(fmt.Sprintf("FixedArray length must be a positive integer at %s:%d", loc.File, loc.Line))
+			ctx.addErrorWithLoc(fmt.Sprintf("FixedArray length must be a positive integer at %s:%d", loc.File, loc.Line), &loc)
 		}
 		ctx.validatePropertyType(t.Element, loc)
 	case CustomType:
-		ctx.addError(fmt.Sprintf("unsupported type '%s' in property declaration at %s:%d", t.Name, loc.File, loc.Line))
+		ctx.addErrorWithLoc(fmt.Sprintf("unsupported type '%s' in property declaration at %s:%d", t.Name, loc.File, loc.Line), &loc)
 	}
 }
 
@@ -136,12 +162,12 @@ func (ctx *validationContext) validateConstructor() {
 
 	// Check super() as first statement
 	if len(ctor.Body) == 0 {
-		ctx.addError("constructor must call super() as its first statement")
+		ctx.addErrorWithLoc("constructor must call super() as its first statement", &ctor.SourceLocation)
 		return
 	}
 
 	if !isSuperCall(ctor.Body[0]) {
-		ctx.addError("constructor must call super() as its first statement")
+		ctx.addErrorWithLoc("constructor must call super() as its first statement", &ctor.SourceLocation)
 	}
 
 	// Check all properties without initializers are assigned
@@ -162,7 +188,7 @@ func (ctx *validationContext) validateConstructor() {
 	}
 	for name := range propNames {
 		if !assignedProps[name] && !propsWithInit[name] {
-			ctx.addError(fmt.Sprintf("property '%s' must be assigned in the constructor", name))
+			ctx.addErrorWithLoc(fmt.Sprintf("property '%s' must be assigned in the constructor", name), &ctor.SourceLocation)
 		}
 	}
 
@@ -203,7 +229,7 @@ func (ctx *validationContext) validateMethod(method MethodNode) {
 	// where the compiler auto-injects the final assert)
 	if method.Visibility == "public" && ctx.contract.ParentClass != "StatefulSmartContract" {
 		if !endsWithAssert(method.Body) {
-			ctx.addError(fmt.Sprintf("public method '%s' must end with an assert() call", method.Name))
+			ctx.addErrorWithLoc(fmt.Sprintf("public method '%s' must end with an assert() call", method.Name), &method.SourceLocation)
 		}
 	}
 
@@ -324,7 +350,15 @@ func (ctx *validationContext) validateExpression(expr Expression) {
 		ctx.validateExpression(e.Operand)
 	case CallExpr:
 		ctx.validateExpression(e.Callee)
-		for _, arg := range e.Args {
+		// assert() message (2nd arg) is a human-readable string, not hex — skip validation
+		isAssertExpr := false
+		if id, ok := e.Callee.(Identifier); ok && id.Name == "assert" {
+			isAssertExpr = true
+		}
+		for i, arg := range e.Args {
+			if isAssertExpr && i >= 1 {
+				continue
+			}
 			ctx.validateExpression(arg)
 		}
 	case MemberExpr:
@@ -340,7 +374,26 @@ func (ctx *validationContext) validateExpression(expr Expression) {
 		ctx.validateExpression(e.Operand)
 	case DecrementExpr:
 		ctx.validateExpression(e.Operand)
+	case ByteStringLiteral:
+		val := e.Value
+		if len(val) > 0 {
+			if len(val)%2 != 0 {
+				ctx.addError(fmt.Sprintf("ByteString literal '%s' has odd length (%d) — hex strings must have an even number of characters", val, len(val)))
+			} else if !isHexString(val) {
+				ctx.addError(fmt.Sprintf("ByteString literal '%s' contains non-hex characters — only 0-9, a-f, A-F are allowed", val))
+			}
+		}
 	}
+}
+
+// isHexString returns true if s contains only hexadecimal characters.
+func isHexString(s string) bool {
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 // ---------------------------------------------------------------------------
@@ -352,11 +405,11 @@ func (ctx *validationContext) warnManualPreimageUsage(method MethodNode) {
 		// Detect manual checkPreimage(...)
 		if call, ok := expr.(CallExpr); ok {
 			if id, ok := call.Callee.(Identifier); ok && id.Name == "checkPreimage" {
-				ctx.addWarning(fmt.Sprintf("StatefulSmartContract auto-injects checkPreimage(); calling it manually in '%s' will cause a duplicate verification", method.Name))
+				ctx.addWarningWithLoc(fmt.Sprintf("StatefulSmartContract auto-injects checkPreimage(); calling it manually in '%s' will cause a duplicate verification", method.Name), &method.SourceLocation)
 			}
 			// Detect manual this.getStateScript()
 			if pa, ok := call.Callee.(PropertyAccessExpr); ok && pa.Property == "getStateScript" {
-				ctx.addWarning(fmt.Sprintf("StatefulSmartContract auto-injects state continuation; calling getStateScript() manually in '%s' is redundant", method.Name))
+				ctx.addWarningWithLoc(fmt.Sprintf("StatefulSmartContract auto-injects state continuation; calling getStateScript() manually in '%s' is redundant", method.Name), &method.SourceLocation)
 			}
 		}
 	})
@@ -440,7 +493,7 @@ func (ctx *validationContext) checkNoRecursion() {
 		visited := make(map[string]bool)
 		stack := make(map[string]bool)
 		if hasCycle(method.Name, callGraph, methodNames, visited, stack) {
-			ctx.addError(fmt.Sprintf("recursion detected: method '%s' calls itself directly or indirectly", method.Name))
+			ctx.addErrorWithLoc(fmt.Sprintf("recursion detected: method '%s' calls itself directly or indirectly", method.Name), &method.SourceLocation)
 		}
 	}
 }

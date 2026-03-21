@@ -12,7 +12,16 @@ import (
 // TypeCheckResult holds the output of the type checking pass.
 type TypeCheckResult struct {
 	Contract *ContractNode // same AST, types verified
-	Errors   []string
+	Errors   []Diagnostic
+}
+
+// ErrorStrings returns error messages as strings (for backward compatibility).
+func (r *TypeCheckResult) ErrorStrings() []string {
+	result := make([]string, len(r.Errors))
+	for i, d := range r.Errors {
+		result[i] = d.FormatMessage()
+	}
+	return result
 }
 
 // TypeCheck type-checks a Rúnar AST. Returns the same AST plus any errors.
@@ -220,11 +229,12 @@ var consumingFunctions = map[string][]int{
 }
 
 type typeChecker struct {
-	contract       *ContractNode
-	errors         []string
-	propTypes      map[string]string
-	methodSigs     map[string]funcSig
-	consumedValues map[string]bool
+	contract         *ContractNode
+	errors           []Diagnostic
+	propTypes        map[string]string
+	methodSigs       map[string]funcSig
+	consumedValues   map[string]bool
+	currentMethodLoc *SourceLocation
 }
 
 func newTypeChecker(contract *ContractNode) *typeChecker {
@@ -260,12 +270,15 @@ func newTypeChecker(contract *ContractNode) *typeChecker {
 }
 
 func (tc *typeChecker) addError(msg string) {
-	tc.errors = append(tc.errors, msg)
+	tc.errors = append(tc.errors, Diagnostic{Message: msg, Severity: SeverityError, Loc: tc.currentMethodLoc})
 }
 
 func (tc *typeChecker) checkConstructor() {
 	ctor := tc.contract.Constructor
 	env := newTypeEnv()
+
+	// Set current method location for diagnostics
+	tc.currentMethodLoc = &ctor.SourceLocation
 
 	// Reset affine tracking for this scope
 	tc.consumedValues = make(map[string]bool)
@@ -282,6 +295,9 @@ func (tc *typeChecker) checkConstructor() {
 
 func (tc *typeChecker) checkMethod(method MethodNode) {
 	env := newTypeEnv()
+
+	// Set current method location for diagnostics
+	tc.currentMethodLoc = &method.SourceLocation
 
 	// Reset affine tracking for this method
 	tc.consumedValues = make(map[string]bool)
@@ -599,7 +615,7 @@ func (tc *typeChecker) checkCallExpr(e CallExpr, env *typeEnv) string {
 			}
 			return "<unknown>"
 		}
-		tc.errors = append(tc.errors, fmt.Sprintf(
+		tc.addError(fmt.Sprintf(
 			"unknown function '%s' — only Rúnar built-in functions and contract methods are allowed", id.Name))
 		for _, arg := range e.Args {
 			tc.inferExprType(arg, env)
@@ -621,7 +637,7 @@ func (tc *typeChecker) checkCallExpr(e CallExpr, env *typeEnv) string {
 		if sig, ok := tc.methodSigs[pa.Property]; ok {
 			return tc.checkCallArgs(pa.Property, sig, e.Args, env)
 		}
-		tc.errors = append(tc.errors, fmt.Sprintf(
+		tc.addError(fmt.Sprintf(
 			"unknown method 'this.%s' — only Rúnar built-in methods and contract methods are allowed", pa.Property))
 		for _, arg := range e.Args {
 			tc.inferExprType(arg, env)
@@ -648,7 +664,7 @@ func (tc *typeChecker) checkCallExpr(e CallExpr, env *typeEnv) string {
 		if id, ok := me.Object.(Identifier); ok {
 			objName = id.Name
 		}
-		tc.errors = append(tc.errors, fmt.Sprintf(
+		tc.addError(fmt.Sprintf(
 			"unknown function '%s.%s' — only Rúnar built-in functions and contract methods are allowed",
 			objName, me.Property))
 		for _, arg := range e.Args {
@@ -658,7 +674,7 @@ func (tc *typeChecker) checkCallExpr(e CallExpr, env *typeEnv) string {
 	}
 
 	// Fallback — unknown callee shape
-	tc.errors = append(tc.errors, "unsupported function call expression — only Rúnar built-in functions and contract methods are allowed")
+	tc.addError("unsupported function call expression — only Rúnar built-in functions and contract methods are allowed")
 	tc.inferExprType(e.Callee, env)
 	for _, arg := range e.Args {
 		tc.inferExprType(arg, env)
