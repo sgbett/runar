@@ -27,7 +27,7 @@ func CompileCheck(contractFile string) error {
 
 	result := frontend.ParseSource(source, contractFile)
 	if len(result.Errors) > 0 {
-		return fmt.Errorf("parse errors: %s", strings.Join(result.Errors, "; "))
+		return fmt.Errorf("parse errors: %s", strings.Join(result.ErrorStrings(), "; "))
 	}
 	if result.Contract == nil {
 		return fmt.Errorf("no contract found in %s", contractFile)
@@ -35,12 +35,12 @@ func CompileCheck(contractFile string) error {
 
 	v := frontend.Validate(result.Contract)
 	if len(v.Errors) > 0 {
-		return fmt.Errorf("validation errors: %s", strings.Join(v.Errors, "; "))
+		return fmt.Errorf("validation errors: %s", strings.Join(v.ErrorStrings(), "; "))
 	}
 
 	tc := frontend.TypeCheck(result.Contract)
 	if len(tc.Errors) > 0 {
-		return fmt.Errorf("type check errors: %s", strings.Join(tc.Errors, "; "))
+		return fmt.Errorf("type check errors: %s", strings.Join(tc.ErrorStrings(), "; "))
 	}
 
 	return nil
