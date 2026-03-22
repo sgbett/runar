@@ -257,6 +257,7 @@ class _TypeChecker:
         self.method_sigs: dict[str, FuncSig] = {}
         self.consumed_values: dict[str, bool] = {}
         self._current_method_loc: SourceLocation | None = None
+        self._current_stmt_loc: SourceLocation | None = None
 
         for prop in contract.properties:
             self.prop_types[prop.name] = _type_node_to_string(prop.type)
@@ -273,7 +274,8 @@ class _TypeChecker:
             self.method_sigs[method.name] = FuncSig(params=params, return_type=ret_type)
 
     def _add_error(self, msg: str) -> None:
-        self.errors.append(Diagnostic(message=msg, severity=Severity.ERROR, loc=self._current_method_loc))
+        loc = self._current_stmt_loc if self._current_stmt_loc is not None else self._current_method_loc
+        self.errors.append(Diagnostic(message=msg, severity=Severity.ERROR, loc=loc))
 
     def check_constructor(self) -> None:
         ctor = self.contract.constructor
@@ -311,6 +313,12 @@ class _TypeChecker:
             self._check_statement(stmt, env)
 
     def _check_statement(self, stmt: Statement, env: _TypeEnv) -> None:
+        # Set statement-level source location for diagnostics
+        prev_stmt_loc = self._current_stmt_loc
+        stmt_loc = _stmt_source_location(stmt)
+        if stmt_loc is not None:
+            self._current_stmt_loc = stmt_loc
+
         if isinstance(stmt, VariableDeclStmt):
             init_type = self._infer_expr_type(stmt.init, env)
             if stmt.type is not None:
@@ -360,6 +368,9 @@ class _TypeChecker:
         elif isinstance(stmt, ReturnStmt):
             if stmt.value is not None:
                 self._infer_expr_type(stmt.value, env)
+
+        # Restore previous statement location
+        self._current_stmt_loc = prev_stmt_loc
 
     # -------------------------------------------------------------------
     # Type inference
@@ -883,3 +894,11 @@ def _type_node_to_string(node: TypeNode | None) -> str:
     if isinstance(node, CustomType):
         return node.name
     return "<unknown>"
+
+
+def _stmt_source_location(stmt: Statement) -> SourceLocation | None:
+    """Extract the SourceLocation from a statement node, if it has a meaningful value."""
+    loc = getattr(stmt, "source_location", None)
+    if loc is not None and (loc.file or loc.line > 0):
+        return loc
+    return None

@@ -235,6 +235,7 @@ type typeChecker struct {
 	methodSigs       map[string]funcSig
 	consumedValues   map[string]bool
 	currentMethodLoc *SourceLocation
+	currentStmtLoc   *SourceLocation
 }
 
 func newTypeChecker(contract *ContractNode) *typeChecker {
@@ -270,7 +271,15 @@ func newTypeChecker(contract *ContractNode) *typeChecker {
 }
 
 func (tc *typeChecker) addError(msg string) {
-	tc.errors = append(tc.errors, Diagnostic{Message: msg, Severity: SeverityError, Loc: tc.currentMethodLoc})
+	loc := tc.currentStmtLoc
+	if loc == nil {
+		loc = tc.currentMethodLoc
+	}
+	tc.errors = append(tc.errors, Diagnostic{Message: msg, Severity: SeverityError, Loc: loc})
+}
+
+func (tc *typeChecker) addErrorWithLoc(msg string, loc *SourceLocation) {
+	tc.errors = append(tc.errors, Diagnostic{Message: msg, Severity: SeverityError, Loc: loc})
 }
 
 func (tc *typeChecker) checkConstructor() {
@@ -316,6 +325,12 @@ func (tc *typeChecker) checkStatements(stmts []Statement, env *typeEnv) {
 }
 
 func (tc *typeChecker) checkStatement(stmt Statement, env *typeEnv) {
+	// Set statement-level source location for diagnostics
+	prevStmtLoc := tc.currentStmtLoc
+	if loc := stmtSourceLocation(stmt); loc != nil {
+		tc.currentStmtLoc = loc
+	}
+
 	switch s := stmt.(type) {
 	case VariableDeclStmt:
 		initType := tc.inferExprType(s.Init, env)
@@ -368,6 +383,40 @@ func (tc *typeChecker) checkStatement(stmt Statement, env *typeEnv) {
 			tc.inferExprType(s.Value, env)
 		}
 	}
+
+	// Restore previous statement location
+	tc.currentStmtLoc = prevStmtLoc
+}
+
+// stmtSourceLocation extracts the SourceLocation from a statement node, if available.
+func stmtSourceLocation(stmt Statement) *SourceLocation {
+	switch s := stmt.(type) {
+	case VariableDeclStmt:
+		if s.SourceLocation.File != "" || s.SourceLocation.Line > 0 {
+			return &s.SourceLocation
+		}
+	case AssignmentStmt:
+		if s.SourceLocation.File != "" || s.SourceLocation.Line > 0 {
+			return &s.SourceLocation
+		}
+	case IfStmt:
+		if s.SourceLocation.File != "" || s.SourceLocation.Line > 0 {
+			return &s.SourceLocation
+		}
+	case ForStmt:
+		if s.SourceLocation.File != "" || s.SourceLocation.Line > 0 {
+			return &s.SourceLocation
+		}
+	case ExpressionStmt:
+		if s.SourceLocation.File != "" || s.SourceLocation.Line > 0 {
+			return &s.SourceLocation
+		}
+	case ReturnStmt:
+		if s.SourceLocation.File != "" || s.SourceLocation.Line > 0 {
+			return &s.SourceLocation
+		}
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------
