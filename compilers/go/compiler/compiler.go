@@ -101,6 +101,9 @@ func CompileFromIRBytes(data []byte, opts ...CompileOptions) (*Artifact, error) 
 func CompileFromProgram(program *ir.ANFProgram, opts ...CompileOptions) (*Artifact, error) {
 	o := mergeOptions(opts)
 
+	// Bake constructor args into ANF properties.
+	applyConstructorArgs(program, o.ConstructorArgs)
+
 	// Pass 4.25: Constant folding (on by default)
 	if !o.DisableConstantFolding {
 		program = frontend.FoldConstants(program)
@@ -413,6 +416,9 @@ func CompileFromSourceWithResult(sourcePath string, opts ...CompileOptions) *Com
 	// Pass 4: ANF lowering
 	result.ANF = frontend.LowerToANF(result.Contract)
 
+	// Bake constructor args into ANF properties.
+	applyConstructorArgs(result.ANF, o.ConstructorArgs)
+
 	// Pass 4.25: Constant folding (on by default)
 	if !o.DisableConstantFolding {
 		result.ANF = frontend.FoldConstants(result.ANF)
@@ -540,6 +546,9 @@ func CompileFromSourceStrWithResult(source string, fileName string, opts ...Comp
 
 	// Pass 4: ANF lowering
 	result.ANF = frontend.LowerToANF(result.Contract)
+
+	// Bake constructor args into ANF properties.
+	applyConstructorArgs(result.ANF, o.ConstructorArgs)
 
 	// Pass 4.25: Constant folding (on by default)
 	if !o.DisableConstantFolding {

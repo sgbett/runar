@@ -28,6 +28,9 @@ pub struct CompileOptions {
     pub validate_only: bool,
     /// Stop compilation after the type-check pass (pass 3).
     pub typecheck_only: bool,
+    /// Bake property values into the locking script (replaces OP_0 placeholders).
+    /// Keys are property names; values are JSON values (string, number, bool).
+    pub constructor_args: std::collections::HashMap<String, serde_json::Value>,
 }
 
 impl Default for CompileOptions {
@@ -37,6 +40,19 @@ impl Default for CompileOptions {
             parse_only: false,
             validate_only: false,
             typecheck_only: false,
+            constructor_args: std::collections::HashMap::new(),
+        }
+    }
+}
+
+/// Apply constructor args by setting ANF property initial_value fields.
+fn apply_constructor_args(program: &mut ir::ANFProgram, args: &std::collections::HashMap<String, serde_json::Value>) {
+    if args.is_empty() {
+        return;
+    }
+    for prop in &mut program.properties {
+        if let Some(val) = args.get(&prop.name) {
+            prop.initial_value = Some(val.clone());
         }
     }
 }
@@ -172,6 +188,9 @@ pub fn compile_from_source_str_with_options(
     // Pass 4: ANF Lower
     let mut anf_program = frontend::anf_lower::lower_to_anf(&contract);
 
+    // Bake constructor args into ANF properties.
+    apply_constructor_args(&mut anf_program, &opts.constructor_args);
+
     // Pass 4.25: Constant folding (optional)
     if !opts.disable_constant_folding {
         anf_program = frontend::constant_fold::fold_constants(&anf_program);
@@ -243,6 +262,9 @@ pub fn compile_source_str_to_ir_with_options(
     }
 
     let mut anf_program = frontend::anf_lower::lower_to_anf(&contract);
+
+    // Bake constructor args into ANF properties.
+    apply_constructor_args(&mut anf_program, &opts.constructor_args);
 
     // Pass 4.25: Constant folding (optional)
     if !opts.disable_constant_folding {
@@ -374,6 +396,9 @@ pub fn compile_from_source_str_with_result(
 
     // Pass 4: ANF lowering
     let mut anf_program = frontend::anf_lower::lower_to_anf(contract);
+
+    // Bake constructor args into ANF properties.
+    apply_constructor_args(&mut anf_program, &opts.constructor_args);
 
     // Pass 4.25: Constant folding (optional)
     if !opts.disable_constant_folding {

@@ -201,6 +201,16 @@ def _load_ir_from_bytes(data: bytes) -> ANFProgram:
 # Compilation pipeline
 # ---------------------------------------------------------------------------
 
+
+def _apply_constructor_args(program: ANFProgram, args: dict[str, object] | None) -> None:
+    """Bake constructor arg values into ANF property initial_values."""
+    if not args:
+        return
+    for prop in program.properties:
+        if prop.name in args:
+            prop.initial_value = args[prop.name]
+
+
 def compile_from_ir(ir_path: str, disable_constant_folding: bool = False) -> Artifact:
     """Read an ANF IR JSON file and compile it to a Runar artifact."""
     program = _load_ir(ir_path)
@@ -242,7 +252,11 @@ def compile_from_program(program: ANFProgram, disable_constant_folding: bool = F
     )
 
 
-def compile_from_source(source_path: str, disable_constant_folding: bool = False) -> Artifact:
+def compile_from_source(
+    source_path: str,
+    disable_constant_folding: bool = False,
+    constructor_args: dict[str, object] | None = None,
+) -> Artifact:
     """Compile a source file through all passes to a Runar artifact.
 
     Supports .runar.ts, .runar.sol, .runar.move, .runar.go, .runar.rs,
@@ -270,11 +284,18 @@ def compile_from_source(source_path: str, disable_constant_folding: bool = False
     # Pass 4: ANF lowering
     program = _lower_to_anf(parse_result.contract)
 
+    # Bake constructor args into ANF properties.
+    _apply_constructor_args(program, constructor_args)
+
     # Feed into existing compilation pipeline (passes 4.25-6)
     return compile_from_program(program, disable_constant_folding=disable_constant_folding)
 
 
-def compile_source_to_ir(source_path: str, disable_constant_folding: bool = False) -> ANFProgram:
+def compile_source_to_ir(
+    source_path: str,
+    disable_constant_folding: bool = False,
+    constructor_args: dict[str, object] | None = None,
+) -> ANFProgram:
     """Run passes 1-4 on a source file and return the ANF program."""
     source = _read_file(source_path)
 
@@ -293,6 +314,9 @@ def compile_source_to_ir(source_path: str, disable_constant_folding: bool = Fals
         raise CompilationError("type check errors:\n  " + "\n  ".join(tc_result.error_strings()))
 
     program = _lower_to_anf(parse_result.contract)
+
+    # Bake constructor args into ANF properties.
+    _apply_constructor_args(program, constructor_args)
 
     # Pass 4.25: Constant folding (on by default)
     if not disable_constant_folding:
@@ -564,6 +588,7 @@ def compile_from_source_with_result(
     parse_only: bool = False,
     validate_only: bool = False,
     typecheck_only: bool = False,
+    constructor_args: dict[str, object] | None = None,
 ) -> CompileResult:
     """Compile a source file through all passes, collecting ALL diagnostics.
 
@@ -593,6 +618,7 @@ def compile_from_source_with_result(
         parse_only=parse_only,
         validate_only=validate_only,
         typecheck_only=typecheck_only,
+        constructor_args=constructor_args,
     )
 
 
@@ -603,6 +629,7 @@ def compile_from_source_str_with_result(
     parse_only: bool = False,
     validate_only: bool = False,
     typecheck_only: bool = False,
+    constructor_args: dict[str, object] | None = None,
 ) -> CompileResult:
     """Compile a source string through all passes, collecting ALL diagnostics.
 
@@ -617,6 +644,7 @@ def compile_from_source_str_with_result(
         parse_only=parse_only,
         validate_only=validate_only,
         typecheck_only=typecheck_only,
+        constructor_args=constructor_args,
     )
 
 
@@ -627,6 +655,7 @@ def _compile_from_source_str_with_result(
     parse_only: bool = False,
     validate_only: bool = False,
     typecheck_only: bool = False,
+    constructor_args: dict[str, object] | None = None,
 ) -> CompileResult:
     """Internal implementation: compile source string, collect all diagnostics."""
     from runar_compiler.frontend.diagnostic import Diagnostic, Severity
@@ -701,6 +730,9 @@ def _compile_from_source_str_with_result(
             Diagnostic(message=f"ANF lowering error: {e}", severity=Severity.ERROR)
         )
         return result
+
+    # Bake constructor args into ANF properties.
+    _apply_constructor_args(result.anf, constructor_args)
 
     # Pass 4.25: Constant folding (on by default)
     if not disable_constant_folding:
