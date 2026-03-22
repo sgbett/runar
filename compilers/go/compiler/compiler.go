@@ -54,15 +54,18 @@ type ConstructorSlot = codegen.ConstructorSlot
 
 // Artifact is the final compiled output of a Rúnar compiler.
 type Artifact struct {
-	Version          string            `json:"version"`
-	CompilerVersion  string            `json:"compilerVersion"`
-	ContractName     string            `json:"contractName"`
-	ABI              ABI               `json:"abi"`
-	Script           string            `json:"script"`
-	ASM              string            `json:"asm"`
-	StateFields      []StateField      `json:"stateFields,omitempty"`
-	ConstructorSlots []ConstructorSlot `json:"constructorSlots,omitempty"`
-	BuildTimestamp   string            `json:"buildTimestamp"`
+	Version                string            `json:"version"`
+	CompilerVersion        string            `json:"compilerVersion"`
+	ContractName           string            `json:"contractName"`
+	ABI                    ABI               `json:"abi"`
+	Script                 string            `json:"script"`
+	ASM                    string            `json:"asm"`
+	StateFields            []StateField      `json:"stateFields,omitempty"`
+	ConstructorSlots       []ConstructorSlot `json:"constructorSlots,omitempty"`
+	CodeSeparatorIndex     *int              `json:"codeSeparatorIndex,omitempty"`
+	CodeSeparatorIndices   []int             `json:"codeSeparatorIndices,omitempty"`
+	BuildTimestamp         string            `json:"buildTimestamp"`
+	ANF                    *ir.ANFProgram    `json:"anf,omitempty"`
 }
 
 const (
@@ -123,12 +126,12 @@ func CompileFromProgram(program *ir.ANFProgram, opts ...CompileOptions) (*Artifa
 		return nil, fmt.Errorf("emit: %w", err)
 	}
 
-	artifact := assembleArtifact(program, emitResult.ScriptHex, emitResult.ScriptAsm, emitResult.ConstructorSlots)
+	artifact := assembleArtifact(program, emitResult.ScriptHex, emitResult.ScriptAsm, emitResult.ConstructorSlots, emitResult.CodeSeparatorIndex, emitResult.CodeSeparatorIndices)
 	return artifact, nil
 }
 
 // assembleArtifact builds the final output artifact from the compilation products.
-func assembleArtifact(program *ir.ANFProgram, scriptHex, scriptAsm string, constructorSlots []ConstructorSlot) *Artifact {
+func assembleArtifact(program *ir.ANFProgram, scriptHex, scriptAsm string, constructorSlots []ConstructorSlot, codeSeparatorIndex int, codeSeparatorIndices []int) *Artifact {
 	// Build ABI
 	// Build constructor params, excluding properties with initializers
 	// (properties with default values are not constructor parameters).
@@ -189,7 +192,19 @@ func assembleArtifact(program *ir.ANFProgram, scriptHex, scriptAsm string, const
 		methods = append(methods, m)
 	}
 
-	return &Artifact{
+	// Only include codeSeparatorIndex when an OP_CODESEPARATOR was emitted (index >= 0)
+	var csIndex *int
+	if codeSeparatorIndex >= 0 {
+		v := codeSeparatorIndex
+		csIndex = &v
+	}
+	// Only include codeSeparatorIndices when non-empty
+	var csIndices []int
+	if len(codeSeparatorIndices) > 0 {
+		csIndices = codeSeparatorIndices
+	}
+
+	artifact := &Artifact{
 		Version:         schemaVersion,
 		CompilerVersion: compilerVersion,
 		ContractName:    program.ContractName,
@@ -197,12 +212,22 @@ func assembleArtifact(program *ir.ANFProgram, scriptHex, scriptAsm string, const
 			Constructor: ABIConstructor{Params: constructorParams},
 			Methods:     methods,
 		},
-		Script:           scriptHex,
-		ASM:              scriptAsm,
-		StateFields:      stateFields,
-		ConstructorSlots: constructorSlots,
-		BuildTimestamp:    time.Now().UTC().Format(time.RFC3339),
+		Script:               scriptHex,
+		ASM:                  scriptAsm,
+		StateFields:          stateFields,
+		ConstructorSlots:     constructorSlots,
+		CodeSeparatorIndex:   csIndex,
+		CodeSeparatorIndices: csIndices,
+		BuildTimestamp:       time.Now().UTC().Format(time.RFC3339),
 	}
+
+	// Always include ANF IR for stateful contracts — the SDK uses it
+	// to auto-compute state transitions without requiring manual newState.
+	if isStateful {
+		artifact.ANF = program
+	}
+
+	return artifact
 }
 
 // CompileFromSource compiles a .runar.ts source file through all passes to a Rúnar artifact.
@@ -449,7 +474,7 @@ func CompileFromSourceWithResult(sourcePath string, opts ...CompileOptions) *Com
 			return
 		}
 
-		artifact := assembleArtifact(result.ANF, emitResult.ScriptHex, emitResult.ScriptAsm, emitResult.ConstructorSlots)
+		artifact := assembleArtifact(result.ANF, emitResult.ScriptHex, emitResult.ScriptAsm, emitResult.ConstructorSlots, emitResult.CodeSeparatorIndex, emitResult.CodeSeparatorIndices)
 		result.Artifact = artifact
 		result.ScriptHex = emitResult.ScriptHex
 		result.ScriptAsm = emitResult.ScriptAsm
@@ -577,7 +602,7 @@ func CompileFromSourceStrWithResult(source string, fileName string, opts ...Comp
 			return
 		}
 
-		artifact := assembleArtifact(result.ANF, emitResult.ScriptHex, emitResult.ScriptAsm, emitResult.ConstructorSlots)
+		artifact := assembleArtifact(result.ANF, emitResult.ScriptHex, emitResult.ScriptAsm, emitResult.ConstructorSlots, emitResult.CodeSeparatorIndex, emitResult.CodeSeparatorIndices)
 		result.Artifact = artifact
 		result.ScriptHex = emitResult.ScriptHex
 		result.ScriptAsm = emitResult.ScriptAsm
