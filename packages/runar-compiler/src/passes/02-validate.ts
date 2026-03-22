@@ -427,12 +427,16 @@ function validateExpression(expr: Expression, ctx: ValidationContext): void {
       validateExpression(expr.operand, ctx);
       break;
 
-    case 'call_expr':
+    case 'call_expr': {
       validateExpression(expr.callee, ctx);
-      for (const arg of expr.args) {
-        validateExpression(arg, ctx);
+      // assert() message (2nd arg) is a human-readable string, not hex — skip validation
+      const isAssert = expr.callee.kind === 'identifier' && expr.callee.name === 'assert';
+      for (let i = 0; i < expr.args.length; i++) {
+        if (isAssert && i >= 1) continue;
+        validateExpression(expr.args[i]!, ctx);
       }
       break;
+    }
 
     case 'member_expr':
       validateExpression(expr.object, ctx);
