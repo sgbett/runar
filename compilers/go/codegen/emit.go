@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+
+	"github.com/icellan/runar/compilers/go/ir"
 )
 
 // ---------------------------------------------------------------------------
@@ -122,6 +124,19 @@ type ConstructorSlot struct {
 }
 
 // ---------------------------------------------------------------------------
+// SourceMapping
+// ---------------------------------------------------------------------------
+
+// SourceMapping records the relationship between an emitted opcode and its
+// original source location (opcode index -> source file:line:column).
+type SourceMapping struct {
+	OpcodeIndex int    `json:"opcodeIndex"`
+	SourceFile  string `json:"sourceFile"`
+	Line        int    `json:"line"`
+	Column      int    `json:"column"`
+}
+
+// ---------------------------------------------------------------------------
 // EmitResult
 // ---------------------------------------------------------------------------
 
@@ -132,6 +147,7 @@ type EmitResult struct {
 	ConstructorSlots       []ConstructorSlot
 	CodeSeparatorIndex     int   // -1 if no OP_CODESEPARATOR was emitted
 	CodeSeparatorIndices   []int // per-method byte offsets
+	SourceMap              []SourceMapping
 }
 
 // ---------------------------------------------------------------------------
@@ -145,10 +161,35 @@ type emitContext struct {
 	constructorSlots       []ConstructorSlot
 	codeSeparatorIndex     int
 	codeSeparatorIndices   []int
+	opcodeIndex            int
+	sourceMap              []SourceMapping
+	pendingSourceLoc       *ir.SourceLocation
 }
 
 func newEmitContext() *emitContext {
 	return &emitContext{codeSeparatorIndex: -1}
+}
+
+// setSourceLoc sets the source location to attach to the next emitted opcode(s).
+func (ctx *emitContext) setSourceLoc(loc *ir.SourceLocation) {
+	ctx.pendingSourceLoc = loc
+}
+
+// recordSourceMapping records a source mapping if a pending source location is set.
+func (ctx *emitContext) recordSourceMapping() {
+	if ctx.pendingSourceLoc != nil {
+		ctx.sourceMap = append(ctx.sourceMap, SourceMapping{
+			OpcodeIndex: ctx.opcodeIndex,
+			SourceFile:  ctx.pendingSourceLoc.File,
+			Line:        ctx.pendingSourceLoc.Line,
+			Column:      ctx.pendingSourceLoc.Column,
+		})
+	}
+}
+
+// nextOpcodeIndex increments the opcode index counter.
+func (ctx *emitContext) nextOpcodeIndex() {
+	ctx.opcodeIndex++
 }
 
 func (ctx *emitContext) appendHex(h string) {
@@ -169,21 +210,27 @@ func (ctx *emitContext) emitOpcode(name string) error {
 		ctx.codeSeparatorIndex = ctx.byteLength
 		ctx.codeSeparatorIndices = append(ctx.codeSeparatorIndices, ctx.byteLength)
 	}
+	ctx.recordSourceMapping()
 	ctx.appendHex(fmt.Sprintf("%02x", b))
 	ctx.appendAsm(name)
+	ctx.nextOpcodeIndex()
 	return nil
 }
 
 func (ctx *emitContext) emitPush(value PushValue) {
 	h, a := encodePushValue(value)
+	ctx.recordSourceMapping()
 	ctx.appendHex(h)
 	ctx.appendAsm(a)
+	ctx.nextOpcodeIndex()
 }
 
 func (ctx *emitContext) emitPlaceholder(paramIndex int) {
 	byteOffset := ctx.byteLength
+	ctx.recordSourceMapping()
 	ctx.appendHex("00") // OP_0 placeholder byte
 	ctx.appendAsm("OP_0")
+	ctx.nextOpcodeIndex()
 	ctx.constructorSlots = append(ctx.constructorSlots, ConstructorSlot{
 		ParamIndex: paramIndex,
 		ByteOffset: byteOffset,
@@ -348,6 +395,12 @@ func encodePushBigInt(n *big.Int) (hexStr string, asmStr string) {
 // ---------------------------------------------------------------------------
 
 func emitStackOp(op *StackOp, ctx *emitContext) error {
+	// Propagate source location from StackOp to the emit context
+	if op.SourceLoc != nil {
+		ctx.setSourceLoc(op.SourceLoc)
+	}
+	defer ctx.setSourceLoc(nil)
+
 	switch op.Op {
 	case "push":
 		ctx.emitPush(op.Value)
@@ -463,6 +516,7 @@ func Emit(methods []StackMethod) (*EmitResult, error) {
 		ConstructorSlots:     ctx.constructorSlots,
 		CodeSeparatorIndex:   ctx.codeSeparatorIndex,
 		CodeSeparatorIndices: ctx.codeSeparatorIndices,
+		SourceMap:            ctx.sourceMap,
 	}, nil
 }
 
@@ -530,5 +584,6 @@ func EmitMethod(method *StackMethod) (*EmitResult, error) {
 		ConstructorSlots:     ctx.constructorSlots,
 		CodeSeparatorIndex:   ctx.codeSeparatorIndex,
 		CodeSeparatorIndices: ctx.codeSeparatorIndices,
+		SourceMap:            ctx.sourceMap,
 	}, nil
 }

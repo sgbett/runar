@@ -43,14 +43,27 @@ type ANFParam struct {
 }
 
 // ---------------------------------------------------------------------------
+// Source location (shared across IR and codegen packages)
+// ---------------------------------------------------------------------------
+
+// SourceLocation records a position in a source file. Used for debug info
+// (source maps) and diagnostics.
+type SourceLocation struct {
+	File   string `json:"file"`
+	Line   int    `json:"line"`
+	Column int    `json:"column"`
+}
+
+// ---------------------------------------------------------------------------
 // Bindings — the core of the ANF representation
 // ---------------------------------------------------------------------------
 
 // ANFBinding is a single let-binding: `let <Name> = <Value>`.
 // Names follow the pattern t0, t1, ... and are scoped per method.
 type ANFBinding struct {
-	Name  string   `json:"name"`
-	Value ANFValue `json:"value"`
+	Name      string          `json:"name"`
+	Value     ANFValue        `json:"value"`
+	SourceLoc *SourceLocation `json:"sourceLoc,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

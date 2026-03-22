@@ -313,14 +313,15 @@ func lowerParams(params []ParamNode) []ir.ANFParam {
 // ---------------------------------------------------------------------------
 
 type lowerCtx struct {
-	bindings      []ir.ANFBinding
-	counter       int
-	contract      *ContractNode
-	localNames    map[string]bool   // tracks variable names registered via addLocal
-	paramNames    map[string]bool   // tracks parameter names registered via addParam
-	addOutputRefs []string          // tracks addOutput binding refs for multi-output continuation
-	localAliases  map[string]string // maps local variable names to their current ANF binding name (updated after if-statements that reassign locals in both branches)
-	localByteVars map[string]bool   // tracks local variables known to be byte-typed
+	bindings         []ir.ANFBinding
+	counter          int
+	contract         *ContractNode
+	localNames       map[string]bool   // tracks variable names registered via addLocal
+	paramNames       map[string]bool   // tracks parameter names registered via addParam
+	addOutputRefs    []string          // tracks addOutput binding refs for multi-output continuation
+	localAliases     map[string]string // maps local variable names to their current ANF binding name (updated after if-statements that reassign locals in both branches)
+	localByteVars    map[string]bool   // tracks local variables known to be byte-typed
+	currentSourceLoc *ir.SourceLocation // Debug: source location to attach to emitted ANF bindings
 }
 
 func newLowerCtx(contract *ContractNode) *lowerCtx {
@@ -343,13 +344,21 @@ func (ctx *lowerCtx) freshTemp() string {
 // emit appends a binding and returns the name of the temp variable.
 func (ctx *lowerCtx) emit(value ir.ANFValue) string {
 	name := ctx.freshTemp()
-	ctx.bindings = append(ctx.bindings, ir.ANFBinding{Name: name, Value: value})
+	binding := ir.ANFBinding{Name: name, Value: value}
+	if ctx.currentSourceLoc != nil {
+		binding.SourceLoc = ctx.currentSourceLoc
+	}
+	ctx.bindings = append(ctx.bindings, binding)
 	return name
 }
 
 // emitNamed appends a binding with a specific name (for named variables).
 func (ctx *lowerCtx) emitNamed(name string, value ir.ANFValue) {
-	ctx.bindings = append(ctx.bindings, ir.ANFBinding{Name: name, Value: value})
+	binding := ir.ANFBinding{Name: name, Value: value}
+	if ctx.currentSourceLoc != nil {
+		binding.SourceLoc = ctx.currentSourceLoc
+	}
+	ctx.bindings = append(ctx.bindings, binding)
 }
 
 // addLocal records a local variable name.
@@ -512,6 +521,10 @@ func branchEndsWithReturn(stmts []Statement) bool {
 }
 
 func (ctx *lowerCtx) lowerStatement(stmt Statement) {
+	// Propagate source location to emitted ANF bindings
+	ctx.currentSourceLoc = stmtSourceLoc(stmt)
+	defer func() { ctx.currentSourceLoc = nil }()
+
 	switch s := stmt.(type) {
 	case VariableDeclStmt:
 		ctx.lowerVariableDecl(s)
@@ -537,6 +550,32 @@ func (ctx *lowerCtx) lowerStatement(stmt Statement) {
 			}
 		}
 	}
+}
+
+// stmtSourceLoc extracts the SourceLocation from a concrete statement type
+// and converts it to an ir.SourceLocation pointer (nil if the location is empty).
+func stmtSourceLoc(stmt Statement) *ir.SourceLocation {
+	var loc SourceLocation
+	switch s := stmt.(type) {
+	case VariableDeclStmt:
+		loc = s.SourceLocation
+	case AssignmentStmt:
+		loc = s.SourceLocation
+	case IfStmt:
+		loc = s.SourceLocation
+	case ForStmt:
+		loc = s.SourceLocation
+	case ReturnStmt:
+		loc = s.SourceLocation
+	case ExpressionStmt:
+		loc = s.SourceLocation
+	default:
+		return nil
+	}
+	if loc.File == "" && loc.Line == 0 && loc.Column == 0 {
+		return nil
+	}
+	return &ir.SourceLocation{File: loc.File, Line: loc.Line, Column: loc.Column}
 }
 
 // lowerVariableDecl matches the TS reference:

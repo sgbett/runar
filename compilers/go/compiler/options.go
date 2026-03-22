@@ -21,6 +21,12 @@ type CompileOptions struct {
 	// replacing OP_0 placeholders with real push data.
 	// Keys are property names; values are string (hex bytes), int64, or bool.
 	ConstructorArgs map[string]interface{}
+
+	// IncludeSourceMap includes source-level debug mappings in the artifact.
+	IncludeSourceMap bool
+
+	// IncludeIR includes ANF and Stack IR snapshots in the artifact for debugging.
+	IncludeIR bool
 }
 
 func mergeOptions(opts []CompileOptions) CompileOptions {

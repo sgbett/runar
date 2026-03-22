@@ -33,6 +33,7 @@ type StackOp struct {
 	Else       []StackOp // for if ops
 	ParamIndex int       // for placeholder ops — index into constructor params
 	ParamName  string    // for placeholder ops — name of constructor param
+	SourceLoc  *ir.SourceLocation // Debug: source location from ANF binding
 }
 
 // PushValue holds the typed value for a push operation.
@@ -308,6 +309,7 @@ type loweringContext struct {
 	localBindings      map[string]bool // binding names in current lowerBindings scope; used by @ref: handler
 	outerProtectedRefs map[string]bool // parent-scope refs that must not be consumed (used after current if-branch)
 	insideBranch       bool            // true when executing inside an if-branch; update_prop skips old-value removal
+	currentSourceLoc   *ir.SourceLocation // Debug: source location to attach to next emitted StackOps
 }
 
 func newLoweringContext(params []string, properties []ir.ANFProperty) *loweringContext {
@@ -328,6 +330,9 @@ func (ctx *loweringContext) trackDepth() {
 }
 
 func (ctx *loweringContext) emitOp(op StackOp) {
+	if ctx.currentSourceLoc != nil && op.SourceLoc == nil {
+		op.SourceLoc = ctx.currentSourceLoc
+	}
 	ctx.ops = append(ctx.ops, op)
 	ctx.trackDepth()
 }
@@ -706,6 +711,8 @@ func (ctx *loweringContext) lowerBindings(bindings []ir.ANFBinding, terminalAsse
 	}
 
 	for i, binding := range bindings {
+		// Propagate source location from ANF binding to StackOps
+		ctx.currentSourceLoc = binding.SourceLoc
 		if binding.Value.Kind == "assert" && i == lastAssertIdx {
 			// Terminal assert: leave value on stack instead of OP_VERIFY
 			ctx.lowerAssert(binding.Value.ValueRef, i, lastUses, true)
@@ -715,6 +722,7 @@ func (ctx *loweringContext) lowerBindings(bindings []ir.ANFBinding, terminalAsse
 		} else {
 			ctx.lowerBinding(&binding, i, lastUses)
 		}
+		ctx.currentSourceLoc = nil
 	}
 }
 
@@ -736,7 +744,9 @@ func (ctx *loweringContext) lowerBindingsProtected(bindings []ir.ANFBinding, pro
 	}
 
 	for i, binding := range bindings {
+		ctx.currentSourceLoc = binding.SourceLoc
 		ctx.lowerBinding(&binding, i, lastUses)
+		ctx.currentSourceLoc = nil
 	}
 }
 

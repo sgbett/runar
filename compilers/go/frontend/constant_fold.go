@@ -381,7 +381,11 @@ func foldBinding(binding ir.ANFBinding, env *constEnv) ir.ANFBinding {
 		}
 	}
 
-	return ir.ANFBinding{Name: binding.Name, Value: *foldedValue}
+	result := ir.ANFBinding{Name: binding.Name, Value: *foldedValue}
+	if binding.SourceLoc != nil {
+		result.SourceLoc = binding.SourceLoc
+	}
+	return result
 }
 
 func anfValueToConst(v *ir.ANFValue) *constValue {
