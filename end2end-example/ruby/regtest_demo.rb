@@ -378,7 +378,8 @@ def compile_contract(abs_path)
   JS
 
   output = `node -e #{Shellwords.escape(script)} 2>&1`
-  raise "Compilation failed:\n#{output}" unless $?.success?
+  status = Process.last_status
+  raise "Compilation failed:\n#{output}" unless status&.success?
 
   Runar::SDK::RunarArtifact.from_json(output)
 end
