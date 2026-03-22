@@ -22,7 +22,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::ast::*;
-use crate::ir::{ANFBinding, ANFMethod, ANFParam, ANFProgram, ANFProperty, ANFValue};
+use crate::ir::{ANFBinding, ANFMethod, ANFParam, ANFProgram, ANFProperty, ANFValue, SourceLocation};
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -318,6 +318,9 @@ struct LoweringContext<'a> {
     local_aliases: HashMap<String, String>,
     /// Tracks local variables known to be byte-typed.
     local_byte_vars: HashSet<String>,
+    /// Current source location for debug source maps. Set from each AST statement's
+    /// source_location and propagated to emitted ANF bindings.
+    current_source_loc: Option<SourceLocation>,
 }
 
 impl<'a> LoweringContext<'a> {
@@ -331,6 +334,7 @@ impl<'a> LoweringContext<'a> {
             add_output_refs: Vec::new(),
             local_aliases: HashMap::new(),
             local_byte_vars: HashSet::new(),
+            current_source_loc: None,
         }
     }
 
@@ -347,6 +351,7 @@ impl<'a> LoweringContext<'a> {
         self.bindings.push(ANFBinding {
             name: name.clone(),
             value,
+            source_loc: self.current_source_loc.clone(),
         });
         name
     }
@@ -356,6 +361,7 @@ impl<'a> LoweringContext<'a> {
         self.bindings.push(ANFBinding {
             name: name.to_string(),
             value,
+            source_loc: self.current_source_loc.clone(),
         });
     }
 
@@ -401,6 +407,7 @@ impl<'a> LoweringContext<'a> {
         sub.local_names = self.local_names.clone();
         sub.local_aliases = self.local_aliases.clone();
         sub.local_byte_vars = self.local_byte_vars.clone();
+        sub.current_source_loc = self.current_source_loc.clone();
         // Note: add_output_refs is NOT propagated to sub-contexts
         // because addOutput calls in sub-blocks should flow up to
         // the parent context via explicit tracking.
@@ -466,7 +473,27 @@ fn branch_ends_with_return(stmts: &[Statement]) -> bool {
     }
 }
 
+/// Extract the source location from any Statement variant.
+fn statement_source_location(stmt: &Statement) -> &super::ast::SourceLocation {
+    match stmt {
+        Statement::VariableDecl { source_location, .. }
+        | Statement::Assignment { source_location, .. }
+        | Statement::IfStatement { source_location, .. }
+        | Statement::ForStatement { source_location, .. }
+        | Statement::ReturnStatement { source_location, .. }
+        | Statement::ExpressionStatement { source_location, .. } => source_location,
+    }
+}
+
 fn lower_statement(stmt: &Statement, ctx: &mut LoweringContext) {
+    // Propagate source location to emitted ANF bindings
+    let ast_loc = statement_source_location(stmt);
+    ctx.current_source_loc = Some(SourceLocation {
+        file: ast_loc.file.clone(),
+        line: ast_loc.line,
+        column: ast_loc.column,
+    });
+
     match stmt {
         Statement::VariableDecl {
             name, init, ..
@@ -1700,6 +1727,7 @@ fn lift_branch_update_props(bindings: Vec<ANFBinding>) -> Vec<ANFBinding> {
                 result.push(ANFBinding {
                     name: new_name,
                     value: remap_value_refs(&csb.value, &name_map),
+                    source_loc: None,
                 });
             }
             cond_refs.push(
@@ -1732,6 +1760,7 @@ fn lift_branch_update_props(bindings: Vec<ANFBinding>) -> Vec<ANFBinding> {
                         operand: cond_refs[j].clone().unwrap(),
                         result_type: None,
                     },
+                    source_loc: None,
                 });
                 negated_conds.push(neg_name);
             }
@@ -1748,6 +1777,7 @@ fn lift_branch_update_props(bindings: Vec<ANFBinding>) -> Vec<ANFBinding> {
                         right: negated_conds[j].clone(),
                         result_type: None,
                     },
+                    source_loc: None,
                 });
                 and_ref = and_name;
             }
@@ -1763,6 +1793,7 @@ fn lift_branch_update_props(bindings: Vec<ANFBinding>) -> Vec<ANFBinding> {
                         right: cond_refs[i].clone().unwrap(),
                         result_type: None,
                     },
+                    source_loc: None,
                 });
                 effective_conds.push(final_name);
             } else {
@@ -1780,6 +1811,7 @@ fn lift_branch_update_props(bindings: Vec<ANFBinding>) -> Vec<ANFBinding> {
                 value: ANFValue::LoadProp {
                     name: branch.prop_name.clone(),
                 },
+                source_loc: None,
             });
 
             // Remap value bindings for the then-branch
@@ -1791,6 +1823,7 @@ fn lift_branch_update_props(bindings: Vec<ANFBinding>) -> Vec<ANFBinding> {
                 then_bindings.push(ANFBinding {
                     name: new_name,
                     value: remap_value_refs(&vb.value, &branch_map),
+                    source_loc: None,
                 });
             }
 
@@ -1801,6 +1834,7 @@ fn lift_branch_update_props(bindings: Vec<ANFBinding>) -> Vec<ANFBinding> {
                 value: ANFValue::LoadConst {
                     value: serde_json::Value::String(format!("@ref:{}", old_prop_ref)),
                 },
+                source_loc: None,
             }];
 
             // Emit conditional if-expression
@@ -1812,6 +1846,7 @@ fn lift_branch_update_props(bindings: Vec<ANFBinding>) -> Vec<ANFBinding> {
                     then: then_bindings,
                     else_branch: else_bindings,
                 },
+                source_loc: None,
             });
 
             // Emit update_prop
@@ -1821,6 +1856,7 @@ fn lift_branch_update_props(bindings: Vec<ANFBinding>) -> Vec<ANFBinding> {
                     name: branch.prop_name.clone(),
                     value: cond_if_ref,
                 },
+                source_loc: None,
             });
         }
     }

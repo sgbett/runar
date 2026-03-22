@@ -9,6 +9,18 @@ pub mod loader;
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
+// Source locations
+// ---------------------------------------------------------------------------
+
+/// Source location in the original file (used for debug source maps).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceLocation {
+    pub file: String,
+    pub line: usize,
+    pub column: usize,
+}
+
+// ---------------------------------------------------------------------------
 // Program structure
 // ---------------------------------------------------------------------------
 
@@ -59,6 +71,9 @@ pub struct ANFParam {
 pub struct ANFBinding {
     pub name: String,
     pub value: ANFValue,
+    /// Debug-only: source location of the originating AST node. Not part of conformance.
+    #[serde(rename = "sourceLoc", skip_serializing_if = "Option::is_none")]
+    pub source_loc: Option<SourceLocation>,
 }
 
 // ---------------------------------------------------------------------------

@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::codegen::emit::ConstructorSlot;
+use crate::codegen::emit::{ConstructorSlot, SourceMapping};
 use crate::ir::ANFProgram;
 
 // ---------------------------------------------------------------------------
@@ -54,6 +54,23 @@ pub struct StateField {
 }
 
 // ---------------------------------------------------------------------------
+// Source map
+// ---------------------------------------------------------------------------
+
+/// Source-level debug mappings (opcode index to source location).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceMapData {
+    pub mappings: Vec<SourceMapping>,
+}
+
+/// Optional IR snapshots for debugging / conformance checking.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IRDebug {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anf: Option<ANFProgram>,
+}
+
+// ---------------------------------------------------------------------------
 // Top-level artifact
 // ---------------------------------------------------------------------------
 
@@ -67,6 +84,10 @@ pub struct RunarArtifact {
     pub abi: ABI,
     pub script: String,
     pub asm: String,
+    #[serde(rename = "sourceMap", skip_serializing_if = "Option::is_none")]
+    pub source_map: Option<SourceMapData>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ir: Option<IRDebug>,
     #[serde(rename = "stateFields", skip_serializing_if = "Vec::is_empty")]
     pub state_fields: Vec<StateField>,
     #[serde(rename = "constructorSlots", skip_serializing_if = "Vec::is_empty", default)]
@@ -97,6 +118,7 @@ pub fn assemble_artifact(
     code_separator_index: i64,
     code_separator_indices: Vec<usize>,
     include_anf: bool,
+    source_mappings: Vec<SourceMapping>,
 ) -> RunarArtifact {
     // Build constructor params from properties, excluding those with initializers
     // (properties with default values are not constructor parameters).
@@ -174,6 +196,22 @@ pub fn assemble_artifact(
         None
     };
 
+    let source_map = if source_mappings.is_empty() {
+        None
+    } else {
+        Some(SourceMapData {
+            mappings: source_mappings,
+        })
+    };
+
+    let ir = if include_anf {
+        Some(IRDebug {
+            anf: Some(program.clone()),
+        })
+    } else {
+        None
+    };
+
     RunarArtifact {
         version: SCHEMA_VERSION.to_string(),
         compiler_version: COMPILER_VERSION.to_string(),
@@ -186,6 +224,8 @@ pub fn assemble_artifact(
         },
         script: script_hex.to_string(),
         asm: script_asm.to_string(),
+        source_map,
+        ir,
         state_fields,
         constructor_slots,
         code_separator_index: cs_index,

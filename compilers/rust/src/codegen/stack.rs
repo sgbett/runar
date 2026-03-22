@@ -65,6 +65,9 @@ pub struct StackMethod {
     pub name: String,
     pub ops: Vec<StackOp>,
     pub max_stack_depth: usize,
+    /// Parallel to `ops`: optional source location for each stack operation.
+    /// Used for generating source maps in the emit phase.
+    pub source_locs: Vec<Option<crate::ir::SourceLocation>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -324,6 +327,8 @@ fn collect_refs(value: &ANFValue) -> Vec<String> {
 struct LoweringContext {
     sm: StackMap,
     ops: Vec<StackOp>,
+    /// Parallel to `ops`: source location for each emitted op.
+    source_locs: Vec<Option<crate::ir::SourceLocation>>,
     max_depth: usize,
     properties: Vec<ANFProperty>,
     private_methods: HashMap<String, ANFMethod>,
@@ -335,6 +340,8 @@ struct LoweringContext {
     /// True when executing inside an if-branch. update_prop skips old-value
     /// removal so that the same-property detection in lower_if can handle it.
     inside_branch: bool,
+    /// Current source location from the ANF binding being lowered.
+    current_source_loc: Option<crate::ir::SourceLocation>,
 }
 
 impl LoweringContext {
@@ -342,12 +349,14 @@ impl LoweringContext {
         let mut ctx = LoweringContext {
             sm: StackMap::new(params),
             ops: Vec::new(),
+            source_locs: Vec::new(),
             max_depth: 0,
             properties: properties.to_vec(),
             private_methods: HashMap::new(),
             local_bindings: HashSet::new(),
             outer_protected_refs: None,
             inside_branch: false,
+            current_source_loc: None,
         };
         ctx.track_depth();
         ctx
@@ -361,6 +370,7 @@ impl LoweringContext {
 
     fn emit_op(&mut self, op: StackOp) {
         self.ops.push(op);
+        self.source_locs.push(self.current_source_loc.clone());
         self.track_depth();
     }
 
@@ -719,6 +729,9 @@ impl LoweringContext {
         }
 
         for (i, binding) in bindings.iter().enumerate() {
+            // Propagate source location from ANF binding to StackOps
+            self.current_source_loc = binding.source_loc.clone();
+
             if matches!(&binding.value, ANFValue::Assert { .. }) && i as isize == last_assert_idx {
                 // Terminal assert: leave value on stack instead of OP_VERIFY
                 if let ANFValue::Assert { value } = &binding.value {
@@ -4101,6 +4114,7 @@ fn lower_method_with_private_methods(
 
     Ok(StackMethod {
         name: method.name.clone(),
+        source_locs: ctx.source_locs,
         ops: ctx.ops,
         max_stack_depth: ctx.max_depth,
     })
@@ -4162,18 +4176,21 @@ mod tests {
                         value: ANFValue::LoadParam {
                             name: "sig".to_string(),
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t1".to_string(),
                         value: ANFValue::LoadParam {
                             name: "pubKey".to_string(),
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t2".to_string(),
                         value: ANFValue::LoadProp {
                             name: "pubKeyHash".to_string(),
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t3".to_string(),
@@ -4181,6 +4198,7 @@ mod tests {
                             func: "hash160".to_string(),
                             args: vec!["t1".to_string()],
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t4".to_string(),
@@ -4190,12 +4208,14 @@ mod tests {
                             right: "t2".to_string(),
                             result_type: None,
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t5".to_string(),
                         value: ANFValue::Assert {
                             value: "t4".to_string(),
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t6".to_string(),
@@ -4203,12 +4223,14 @@ mod tests {
                             func: "checkSig".to_string(),
                             args: vec!["t0".to_string(), "t1".to_string()],
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t7".to_string(),
                         value: ANFValue::Assert {
                             value: "t6".to_string(),
                         },
+                        source_loc: None,
                     },
                 ],
                 is_public: true,
@@ -4389,6 +4411,7 @@ mod tests {
                     ANFBinding {
                         name: "t0".to_string(),
                         value: ANFValue::LoadParam { name: "preimage".to_string() },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t1".to_string(),
@@ -4396,14 +4419,17 @@ mod tests {
                             func: "extractOutputHash".to_string(),
                             args: vec!["t0".to_string()],
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t2".to_string(),
                         value: ANFValue::LoadConst { value: serde_json::Value::Bool(true) },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t3".to_string(),
                         value: ANFValue::Assert { value: "t2".to_string() },
+                        source_loc: None,
                     },
                 ],
                 is_public: true,
@@ -4447,10 +4473,12 @@ mod tests {
                     ANFBinding {
                         name: "t0".to_string(),
                         value: ANFValue::LoadParam { name: "mode".to_string() },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t1".to_string(),
                         value: ANFValue::LoadParam { name: "x".to_string() },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t2".to_string(),
@@ -4462,6 +4490,7 @@ mod tests {
                                     value: ANFValue::LoadConst {
                                         value: serde_json::Value::Number(serde_json::Number::from(10)),
                                     },
+                                    source_loc: None,
                                 },
                                 ANFBinding {
                                     name: "t4".to_string(),
@@ -4471,10 +4500,12 @@ mod tests {
                                         right: "t3".to_string(),
                                         result_type: None,
                                     },
+                                    source_loc: None,
                                 },
                                 ANFBinding {
                                     name: "t5".to_string(),
                                     value: ANFValue::Assert { value: "t4".to_string() },
+                                    source_loc: None,
                                 },
                             ],
                             else_branch: vec![
@@ -4483,6 +4514,7 @@ mod tests {
                                     value: ANFValue::LoadConst {
                                         value: serde_json::Value::Number(serde_json::Number::from(5)),
                                     },
+                                    source_loc: None,
                                 },
                                 ANFBinding {
                                     name: "t7".to_string(),
@@ -4492,13 +4524,16 @@ mod tests {
                                         right: "t6".to_string(),
                                         result_type: None,
                                     },
+                                    source_loc: None,
                                 },
                                 ANFBinding {
                                     name: "t8".to_string(),
                                     value: ANFValue::Assert { value: "t7".to_string() },
+                                    source_loc: None,
                                 },
                             ],
                         },
+                        source_loc: None,
                     },
                 ],
                 is_public: true,
@@ -4541,6 +4576,7 @@ mod tests {
                     ANFBinding {
                         name: "t0".to_string(),
                         value: ANFValue::LoadParam { name: "data".to_string() },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t1".to_string(),
@@ -4548,12 +4584,14 @@ mod tests {
                             func: "unpack".to_string(),
                             args: vec!["t0".to_string()],
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t2".to_string(),
                         value: ANFValue::LoadConst {
                             value: serde_json::Value::Number(serde_json::Number::from(42)),
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t3".to_string(),
@@ -4563,10 +4601,12 @@ mod tests {
                             right: "t2".to_string(),
                             result_type: None,
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t4".to_string(),
                         value: ANFValue::Assert { value: "t3".to_string() },
+                        source_loc: None,
                     },
                 ],
                 is_public: true,
@@ -4596,6 +4636,7 @@ mod tests {
                     ANFBinding {
                         name: "t0".to_string(),
                         value: ANFValue::LoadParam { name: "x".to_string() },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t1".to_string(),
@@ -4603,16 +4644,19 @@ mod tests {
                             func: "pack".to_string(),
                             args: vec!["t0".to_string()],
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t2".to_string(),
                         value: ANFValue::LoadConst {
                             value: serde_json::Value::Bool(true),
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t3".to_string(),
                         value: ANFValue::Assert { value: "t2".to_string() },
+                        source_loc: None,
                     },
                 ],
                 is_public: true,
@@ -4648,6 +4692,7 @@ mod tests {
                     ANFBinding {
                         name: "t0".to_string(),
                         value: ANFValue::LoadParam { name: "x".to_string() },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t1".to_string(),
@@ -4655,16 +4700,19 @@ mod tests {
                             func: "toByteString".to_string(),
                             args: vec!["t0".to_string()],
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t2".to_string(),
                         value: ANFValue::LoadConst {
                             value: serde_json::Value::Bool(true),
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t3".to_string(),
                         value: ANFValue::Assert { value: "t2".to_string() },
+                        source_loc: None,
                     },
                 ],
                 is_public: true,
@@ -4699,6 +4747,7 @@ mod tests {
                     ANFBinding {
                         name: "t0".to_string(),
                         value: ANFValue::LoadParam { name: "n".to_string() },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t1".to_string(),
@@ -4706,12 +4755,14 @@ mod tests {
                             func: "sqrt".to_string(),
                             args: vec!["t0".to_string()],
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t2".to_string(),
                         value: ANFValue::LoadConst {
                             value: serde_json::Value::Number(serde_json::Number::from(0)),
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t3".to_string(),
@@ -4721,10 +4772,12 @@ mod tests {
                             right: "t2".to_string(),
                             result_type: None,
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t4".to_string(),
                         value: ANFValue::Assert { value: "t3".to_string() },
+                        source_loc: None,
                     },
                 ],
                 is_public: true,
@@ -4772,6 +4825,7 @@ mod tests {
                     ANFBinding {
                         name: "t0".to_string(),
                         value: ANFValue::LoadParam { name: "x".to_string() },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t_loop".to_string(),
@@ -4782,24 +4836,29 @@ mod tests {
                                 ANFBinding {
                                     name: "t1".to_string(),
                                     value: ANFValue::LoadParam { name: "x".to_string() },
+                                    source_loc: None,
                                 },
                                 ANFBinding {
                                     name: "t2".to_string(),
                                     value: ANFValue::Assert { value: "t1".to_string() },
+                                    source_loc: None,
                                 },
                             ],
                             iter_var: "__i".to_string(),
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t_final".to_string(),
                         value: ANFValue::LoadConst {
                             value: serde_json::Value::Bool(true),
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t_assert".to_string(),
                         value: ANFValue::Assert { value: "t_final".to_string() },
+                        source_loc: None,
                     },
                 ],
                 is_public: true,
@@ -4885,6 +4944,7 @@ mod tests {
                     ANFBinding {
                         name: "t0".to_string(),
                         value: ANFValue::LoadParam { name: "n".to_string() },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t1".to_string(),
@@ -4892,12 +4952,14 @@ mod tests {
                             func: "log2".to_string(),
                             args: vec!["t0".to_string()],
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t2".to_string(),
                         value: ANFValue::LoadConst {
                             value: serde_json::Value::Number(serde_json::Number::from(0)),
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t3".to_string(),
@@ -4907,10 +4969,12 @@ mod tests {
                             right: "t2".to_string(),
                             result_type: None,
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t4".to_string(),
                         value: ANFValue::Assert { value: "t3".to_string() },
+                        source_loc: None,
                     },
                 ],
                 is_public: true,
@@ -4970,6 +5034,7 @@ mod tests {
                     ANFBinding {
                         name: "t0".to_string(),
                         value: ANFValue::LoadParam { name: "data".to_string() },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t1".to_string(),
@@ -4977,16 +5042,19 @@ mod tests {
                             func: "reverseBytes".to_string(),
                             args: vec!["t0".to_string()],
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t2".to_string(),
                         value: ANFValue::LoadConst {
                             value: serde_json::Value::Bool(true),
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t3".to_string(),
                         value: ANFValue::Assert { value: "t2".to_string() },
+                        source_loc: None,
                     },
                 ],
                 is_public: true,
@@ -5070,12 +5138,14 @@ mod tests {
                         ANFBinding {
                             name: "t0".to_string(),
                             value: ANFValue::LoadParam { name: "x".to_string() },
+                            source_loc: None,
                         },
                         ANFBinding {
                             name: "t1".to_string(),
                             value: ANFValue::LoadConst {
                                 value: serde_json::Value::Number(serde_json::Number::from(42)),
                             },
+                            source_loc: None,
                         },
                         ANFBinding {
                             name: "t2".to_string(),
@@ -5085,10 +5155,12 @@ mod tests {
                                 right: "t1".to_string(),
                                 result_type: None,
                             },
+                            source_loc: None,
                         },
                         ANFBinding {
                             name: "t3".to_string(),
                             value: ANFValue::Assert { value: "t2".to_string() },
+                            source_loc: None,
                         },
                     ],
                     is_public: true,
@@ -5103,12 +5175,14 @@ mod tests {
                         ANFBinding {
                             name: "t0".to_string(),
                             value: ANFValue::LoadParam { name: "y".to_string() },
+                            source_loc: None,
                         },
                         ANFBinding {
                             name: "t1".to_string(),
                             value: ANFValue::LoadConst {
                                 value: serde_json::Value::Number(serde_json::Number::from(100)),
                             },
+                            source_loc: None,
                         },
                         ANFBinding {
                             name: "t2".to_string(),
@@ -5118,10 +5192,12 @@ mod tests {
                                 right: "t1".to_string(),
                                 result_type: None,
                             },
+                            source_loc: None,
                         },
                         ANFBinding {
                             name: "t3".to_string(),
                             value: ANFValue::Assert { value: "t2".to_string() },
+                            source_loc: None,
                         },
                     ],
                     is_public: true,
@@ -5158,6 +5234,7 @@ mod tests {
                     ANFBinding {
                         name: "t0".to_string(),
                         value: ANFValue::LoadParam { name: "preimage".to_string() },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t1".to_string(),
@@ -5165,10 +5242,12 @@ mod tests {
                             func: "extractOutputs".to_string(),
                             args: vec!["t0".to_string()],
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t2".to_string(),
                         value: ANFValue::Assert { value: "t1".to_string() },
+                        source_loc: None,
                     },
                 ],
                 is_public: true,
@@ -5219,10 +5298,12 @@ mod tests {
                     ANFBinding {
                         name: "t0".to_string(),
                         value: ANFValue::LoadParam { name: "a".to_string() },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t1".to_string(),
                         value: ANFValue::LoadParam { name: "b".to_string() },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t2".to_string(),
@@ -5232,10 +5313,12 @@ mod tests {
                             right: "t1".to_string(),
                             result_type: None,
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t3".to_string(),
                         value: ANFValue::LoadProp { name: "target".to_string() },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t4".to_string(),
@@ -5245,10 +5328,12 @@ mod tests {
                             right: "t3".to_string(),
                             result_type: None,
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t5".to_string(),
                         value: ANFValue::Assert { value: "t4".to_string() },
+                        source_loc: None,
                     },
                 ],
                 is_public: true,
@@ -5337,10 +5422,12 @@ mod tests {
                     ANFBinding {
                         name: "t0".to_string(),
                         value: ANFValue::LoadParam { name: "a".to_string() },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t1".to_string(),
                         value: ANFValue::LoadParam { name: "b".to_string() },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t2".to_string(),
@@ -5350,10 +5437,12 @@ mod tests {
                             right: "t1".to_string(),
                             result_type: Some("bytes".to_string()), // ByteString concat
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t3".to_string(),
                         value: ANFValue::LoadParam { name: "expected".to_string() },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t4".to_string(),
@@ -5363,10 +5452,12 @@ mod tests {
                             right: "t3".to_string(),
                             result_type: Some("bytes".to_string()),
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t5".to_string(),
                         value: ANFValue::Assert { value: "t4".to_string() },
+                        source_loc: None,
                     },
                 ],
                 is_public: true,
@@ -5407,6 +5498,7 @@ mod tests {
                     ANFBinding {
                         name: "t0".to_string(),
                         value: ANFValue::LoadParam { name: "n".to_string() },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t1".to_string(),
@@ -5414,12 +5506,14 @@ mod tests {
                             func: "log2".to_string(),
                             args: vec!["t0".to_string()],
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t2".to_string(),
                         value: ANFValue::LoadConst {
                             value: serde_json::Value::Number(serde_json::Number::from(0)),
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t3".to_string(),
@@ -5429,10 +5523,12 @@ mod tests {
                             right: "t2".to_string(),
                             result_type: None,
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t4".to_string(),
                         value: ANFValue::Assert { value: "t3".to_string() },
+                        source_loc: None,
                     },
                 ],
                 is_public: true,

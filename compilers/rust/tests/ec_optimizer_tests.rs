@@ -51,6 +51,7 @@ fn const_hex(name: &str, hex: &str) -> ANFBinding {
         value: ANFValue::LoadConst {
             value: serde_json::Value::String(hex.to_string()),
         },
+        source_loc: None,
     }
 }
 
@@ -60,6 +61,7 @@ fn const_int(name: &str, n: i64) -> ANFBinding {
         value: ANFValue::LoadConst {
             value: serde_json::json!(n),
         },
+        source_loc: None,
     }
 }
 
@@ -70,6 +72,7 @@ fn call(name: &str, func: &str, args: Vec<&str>) -> ANFBinding {
             func: func.to_string(),
             args: args.into_iter().map(str::to_string).collect(),
         },
+        source_loc: None,
     }
 }
 
@@ -79,6 +82,7 @@ fn assert_binding(name: &str, val_ref: &str) -> ANFBinding {
         value: ANFValue::Assert {
             value: val_ref.to_string(),
         },
+        source_loc: None,
     }
 }
 
@@ -334,6 +338,7 @@ fn test_non_ec_program_passes_through_unchanged() {
                 right: "t1".to_string(),
                 result_type: None,
             },
+            source_loc: None,
         },
         assert_binding("t3", "t2"),
     ];
@@ -432,6 +437,7 @@ fn test_side_effect_call_preserved_even_if_unreferenced() {
                 func: "checkSig".to_string(),
                 args: vec!["t0".to_string(), "t1".to_string()],
             },
+            source_loc: None,
         },
         // t2 is never referenced — but must not be eliminated
     ];
@@ -459,6 +465,7 @@ fn test_hash160_call_unchanged() {
                 func: "hash160".to_string(),
                 args: vec!["t0".to_string()],
             },
+            source_loc: None,
         },
         assert_binding("t2", "t1"),
     ];

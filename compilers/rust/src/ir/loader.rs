@@ -453,12 +453,14 @@ mod tests {
                         value: ANFValue::LoadParam {
                             name: "amount".to_string(),
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "_t1".to_string(),
                         value: ANFValue::LoadProp {
                             name: "count".to_string(),
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "_t2".to_string(),
@@ -468,6 +470,7 @@ mod tests {
                             right: "_t0".to_string(),
                             result_type: Some("bigint".to_string()),
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "_t3".to_string(),
@@ -475,6 +478,7 @@ mod tests {
                             name: "count".to_string(),
                             value: "_t2".to_string(),
                         },
+                        source_loc: None,
                     },
                 ],
                 is_public: true,
@@ -519,12 +523,14 @@ mod tests {
                         value: ANFValue::LoadConst {
                             value: serde_json::json!(true),
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "_t1".to_string(),
                         value: ANFValue::Assert {
                             value: "_t0".to_string(),
                         },
+                        source_loc: None,
                     },
                 ],
                 is_public: true,
@@ -551,6 +557,7 @@ mod tests {
                         value: ANFValue::LoadConst {
                             value: serde_json::json!(true),
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "_if".to_string(),
@@ -561,14 +568,17 @@ mod tests {
                                 value: ANFValue::LoadConst {
                                     value: serde_json::json!(1),
                                 },
+                                source_loc: None,
                             }],
                             else_branch: vec![ANFBinding {
                                 name: "_e".to_string(),
                                 value: ANFValue::LoadConst {
                                     value: serde_json::json!(2),
                                 },
+                                source_loc: None,
                             }],
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "_loop".to_string(),
@@ -579,9 +589,11 @@ mod tests {
                                 value: ANFValue::LoadConst {
                                     value: serde_json::json!(0),
                                 },
+                                source_loc: None,
                             }],
                             iter_var: "i".to_string(),
                         },
+                        source_loc: None,
                     },
                 ],
                 is_public: true,

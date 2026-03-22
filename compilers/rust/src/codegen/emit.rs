@@ -25,6 +25,21 @@ pub struct ConstructorSlot {
 }
 
 // ---------------------------------------------------------------------------
+// SourceMapping
+// ---------------------------------------------------------------------------
+
+/// Maps an emitted opcode to a source location.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceMapping {
+    #[serde(rename = "opcodeIndex")]
+    pub opcode_index: usize,
+    #[serde(rename = "sourceFile")]
+    pub source_file: String,
+    pub line: usize,
+    pub column: usize,
+}
+
+// ---------------------------------------------------------------------------
 // EmitResult
 // ---------------------------------------------------------------------------
 
@@ -36,6 +51,8 @@ pub struct EmitResult {
     pub constructor_slots: Vec<ConstructorSlot>,
     pub code_separator_index: i64,
     pub code_separator_indices: Vec<usize>,
+    /// Source mappings (opcode index to source location).
+    pub source_map: Vec<SourceMapping>,
 }
 
 // ---------------------------------------------------------------------------
@@ -49,6 +66,10 @@ struct EmitContext {
     constructor_slots: Vec<ConstructorSlot>,
     code_separator_index: i64,
     code_separator_indices: Vec<usize>,
+    opcode_index: usize,
+    source_map: Vec<SourceMapping>,
+    /// Pending source location to attach to the next emitted opcode.
+    pending_source_loc: Option<crate::ir::SourceLocation>,
 }
 
 impl EmitContext {
@@ -60,12 +81,27 @@ impl EmitContext {
             constructor_slots: Vec::new(),
             code_separator_index: -1,
             code_separator_indices: Vec::new(),
+            opcode_index: 0,
+            source_map: Vec::new(),
+            pending_source_loc: None,
         }
     }
 
     fn append_hex(&mut self, hex: &str) {
         self.byte_length += hex.len() / 2;
         self.hex_parts.push(hex.to_string());
+    }
+
+    /// Record a source mapping if a pending source location is set.
+    fn record_source_mapping(&mut self) {
+        if let Some(ref loc) = self.pending_source_loc {
+            self.source_map.push(SourceMapping {
+                opcode_index: self.opcode_index,
+                source_file: loc.file.clone(),
+                line: loc.line,
+                column: loc.column,
+            });
+        }
     }
 
     fn emit_opcode(&mut self, name: &str) -> Result<(), String> {
@@ -75,21 +111,27 @@ impl EmitContext {
             self.code_separator_index = self.byte_length as i64;
             self.code_separator_indices.push(self.byte_length);
         }
+        self.record_source_mapping();
         self.append_hex(&format!("{:02x}", byte));
         self.asm_parts.push(name.to_string());
+        self.opcode_index += 1;
         Ok(())
     }
 
     fn emit_push(&mut self, value: &PushValue) {
         let (h, a) = encode_push_value(value);
+        self.record_source_mapping();
         self.append_hex(&h);
         self.asm_parts.push(a);
+        self.opcode_index += 1;
     }
 
     fn emit_placeholder(&mut self, param_index: usize, _param_name: &str) {
         let byte_offset = self.byte_length;
+        self.record_source_mapping();
         self.append_hex("00"); // OP_0 placeholder byte
         self.asm_parts.push("OP_0".to_string());
+        self.opcode_index += 1;
         self.constructor_slots.push(ConstructorSlot {
             param_index,
             byte_offset,
@@ -330,11 +372,14 @@ pub fn emit(methods: &[StackMethod]) -> Result<EmitResult, String> {
             constructor_slots: Vec::new(),
             code_separator_index: -1,
             code_separator_indices: Vec::new(),
+            source_map: Vec::new(),
         });
     }
 
     if public_methods.len() == 1 {
-        for op in &public_methods[0].ops {
+        let m = &public_methods[0];
+        for (idx, op) in m.ops.iter().enumerate() {
+            ctx.pending_source_loc = m.source_locs.get(idx).cloned().flatten();
             emit_stack_op(op, &mut ctx)?;
         }
     } else {
@@ -348,6 +393,7 @@ pub fn emit(methods: &[StackMethod]) -> Result<EmitResult, String> {
         constructor_slots: ctx.constructor_slots,
         code_separator_index: ctx.code_separator_index,
         code_separator_indices: ctx.code_separator_indices,
+        source_map: ctx.source_map,
     })
 }
 
@@ -370,7 +416,8 @@ fn emit_method_dispatch(
             ctx.emit_opcode("OP_NUMEQUALVERIFY")?;
         }
 
-        for op in &method.ops {
+        for (idx, op) in method.ops.iter().enumerate() {
+            ctx.pending_source_loc = method.source_locs.get(idx).cloned().flatten();
             emit_stack_op(op, ctx)?;
         }
 
@@ -390,7 +437,8 @@ fn emit_method_dispatch(
 /// Emit a single method's ops. Useful for testing.
 pub fn emit_method(method: &StackMethod) -> Result<EmitResult, String> {
     let mut ctx = EmitContext::new();
-    for op in &method.ops {
+    for (idx, op) in method.ops.iter().enumerate() {
+        ctx.pending_source_loc = method.source_locs.get(idx).cloned().flatten();
         emit_stack_op(op, &mut ctx)?;
     }
     Ok(EmitResult {
@@ -399,6 +447,7 @@ pub fn emit_method(method: &StackMethod) -> Result<EmitResult, String> {
         constructor_slots: ctx.constructor_slots,
         code_separator_index: ctx.code_separator_index,
         code_separator_indices: ctx.code_separator_indices,
+        source_map: ctx.source_map,
     })
 }
 
@@ -419,6 +468,7 @@ mod tests {
                 param_name: "pubKeyHash".to_string(),
             }],
             max_stack_depth: 1,
+            source_locs: vec![],
         };
 
         let result = emit_method(&method).expect("emit should succeed");
@@ -446,6 +496,7 @@ mod tests {
                 },
             ],
             max_stack_depth: 2,
+            source_locs: vec![],
         };
 
         let result = emit_method(&method).expect("emit should succeed");
@@ -482,6 +533,7 @@ mod tests {
                 },
             ],
             max_stack_depth: 2,
+            source_locs: vec![],
         };
 
         let result = emit_method(&method).expect("emit should succeed");
@@ -511,6 +563,7 @@ mod tests {
                 StackOp::Opcode("OP_VERIFY".to_string()),
             ],
             max_stack_depth: 1,
+            source_locs: vec![],
         };
 
         // Apply peephole optimization before emit (as the compiler pipeline does)
@@ -518,6 +571,7 @@ mod tests {
             name: method.name.clone(),
             ops: optimize_stack_ops(&method.ops),
             max_stack_depth: method.max_stack_depth,
+            source_locs: vec![],
         };
 
         let result = emit(&[optimized_method]).expect("emit should succeed");
@@ -552,6 +606,7 @@ mod tests {
                 StackOp::Push(PushValue::Bool(false)),
             ],
             max_stack_depth: 2,
+            source_locs: vec![],
         };
 
         let result = emit_method(&method).expect("emit should succeed");
@@ -589,6 +644,7 @@ mod tests {
                 StackOp::Opcode("OP_ADD".to_string()),
             ],
             max_stack_depth: 2,
+            source_locs: vec![],
         };
 
         let result = emit_method(&method).expect("emit should succeed");
@@ -620,6 +676,7 @@ mod tests {
                 StackOp::Opcode("OP_HASH160".to_string()),
             ],
             max_stack_depth: 1,
+            source_locs: vec![],
         };
 
         let result = emit_method(&method).expect("emit should succeed");
@@ -650,6 +707,7 @@ mod tests {
             name: "check".to_string(),
             ops: optimized_ops,
             max_stack_depth: 1,
+            source_locs: vec![],
         };
 
         let result = emit_method(&method).expect("emit should succeed");
@@ -696,12 +754,14 @@ mod tests {
                         ANFBinding {
                             name: "t0".to_string(),
                             value: ANFValue::LoadParam { name: "x".to_string() },
+                            source_loc: None,
                         },
                         ANFBinding {
                             name: "t1".to_string(),
                             value: ANFValue::LoadConst {
                                 value: serde_json::Value::Number(serde_json::Number::from(1)),
                             },
+                            source_loc: None,
                         },
                         ANFBinding {
                             name: "t2".to_string(),
@@ -711,10 +771,12 @@ mod tests {
                                 right: "t1".to_string(),
                                 result_type: None,
                             },
+                            source_loc: None,
                         },
                         ANFBinding {
                             name: "t3".to_string(),
                             value: ANFValue::Assert { value: "t2".to_string() },
+                            source_loc: None,
                         },
                     ],
                     is_public: true,
@@ -729,12 +791,14 @@ mod tests {
                         ANFBinding {
                             name: "t0".to_string(),
                             value: ANFValue::LoadParam { name: "y".to_string() },
+                            source_loc: None,
                         },
                         ANFBinding {
                             name: "t1".to_string(),
                             value: ANFValue::LoadConst {
                                 value: serde_json::Value::Number(serde_json::Number::from(2)),
                             },
+                            source_loc: None,
                         },
                         ANFBinding {
                             name: "t2".to_string(),
@@ -744,10 +808,12 @@ mod tests {
                                 right: "t1".to_string(),
                                 result_type: None,
                             },
+                            source_loc: None,
                         },
                         ANFBinding {
                             name: "t3".to_string(),
                             value: ANFValue::Assert { value: "t2".to_string() },
+                            source_loc: None,
                         },
                     ],
                     is_public: true,
@@ -765,6 +831,7 @@ mod tests {
                 name: m.name.clone(),
                 ops: optimize_stack_ops(&m.ops),
                 max_stack_depth: m.max_stack_depth,
+                source_locs: vec![],
             })
             .collect();
 
@@ -810,6 +877,7 @@ mod tests {
                 StackOp::Opcode("OP_CHECKSIG".to_string()),
             ],
             max_stack_depth: 2,
+            source_locs: vec![],
         };
 
         let result = emit_method(&method).expect("emit should succeed");
@@ -852,6 +920,7 @@ mod tests {
                     ANFBinding {
                         name: "t0".to_string(),
                         value: ANFValue::LoadParam { name: "pubKey".to_string() },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t1".to_string(),
@@ -859,10 +928,12 @@ mod tests {
                             func: "hash160".to_string(),
                             args: vec!["t0".to_string()],
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t2".to_string(),
                         value: ANFValue::LoadProp { name: "pubKeyHash".to_string() },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t3".to_string(),
@@ -872,18 +943,22 @@ mod tests {
                             right: "t2".to_string(),
                             result_type: Some("bytes".to_string()),
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t4".to_string(),
                         value: ANFValue::Assert { value: "t3".to_string() },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t5".to_string(),
                         value: ANFValue::LoadParam { name: "sig".to_string() },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t6".to_string(),
                         value: ANFValue::LoadParam { name: "pubKey".to_string() },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t7".to_string(),
@@ -891,10 +966,12 @@ mod tests {
                             func: "checkSig".to_string(),
                             args: vec!["t5".to_string(), "t6".to_string()],
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t8".to_string(),
                         value: ANFValue::Assert { value: "t7".to_string() },
+                        source_loc: None,
                     },
                 ],
                 is_public: true,
@@ -924,6 +1001,7 @@ mod tests {
             name: "test".to_string(),
             ops: vec![StackOp::Push(PushValue::Int(17))],
             max_stack_depth: 1,
+            source_locs: vec![],
         };
         let result = emit_method(&method).expect("emit should succeed");
         // OP_17 would be 0x61. A push-data encoded 17 would be "0111" (length 1, value 0x11).
@@ -952,6 +1030,7 @@ mod tests {
             name: "test".to_string(),
             ops: vec![StackOp::Push(PushValue::Bytes(data))],
             max_stack_depth: 1,
+            source_locs: vec![],
         };
         let result = emit_method(&method).expect("emit should succeed");
         // OP_PUSHDATA2 = 0x4d, followed by length in 2 bytes LE: 256 = 0x0001 LE = 00 01
@@ -984,6 +1063,7 @@ mod tests {
                     ANFBinding {
                         name: "t0".to_string(),
                         value: ANFValue::LoadParam { name: "data".to_string() },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t1".to_string(),
@@ -991,10 +1071,12 @@ mod tests {
                             func: "sha256".to_string(),
                             args: vec!["t0".to_string()],
                         },
+                        source_loc: None,
                     },
                     ANFBinding {
                         name: "t2".to_string(),
                         value: ANFValue::Assert { value: "t1".to_string() },
+                        source_loc: None,
                     },
                 ],
                 is_public: true,
@@ -1020,6 +1102,7 @@ mod tests {
             name: "test".to_string(),
             ops: vec![StackOp::Dup],
             max_stack_depth: 1,
+            source_locs: vec![],
         };
         let result = emit_method(&method).expect("emit should succeed");
         assert_eq!(
@@ -1039,6 +1122,7 @@ mod tests {
             name: "test".to_string(),
             ops: vec![StackOp::Swap],
             max_stack_depth: 2,
+            source_locs: vec![],
         };
         let result = emit_method(&method).expect("emit should succeed");
         assert_eq!(
@@ -1061,6 +1145,7 @@ mod tests {
                 else_ops: vec![],
             }],
             max_stack_depth: 1,
+            source_locs: vec![],
         };
         let result = emit_method(&method).expect("emit should succeed");
         assert!(
@@ -1113,10 +1198,12 @@ mod tests {
                         ANFBinding {
                             name: "t0".to_string(),
                             value: ANFValue::LoadParam { name: "v".to_string() },
+                            source_loc: None,
                         },
                         ANFBinding {
                             name: "t1".to_string(),
                             value: ANFValue::LoadProp { name: "x".to_string() },
+                            source_loc: None,
                         },
                         ANFBinding {
                             name: "t2".to_string(),
@@ -1126,10 +1213,12 @@ mod tests {
                                 right: "t1".to_string(),
                                 result_type: None,
                             },
+                            source_loc: None,
                         },
                         ANFBinding {
                             name: "t3".to_string(),
                             value: ANFValue::Assert { value: "t2".to_string() },
+                            source_loc: None,
                         },
                     ],
                     is_public: true,

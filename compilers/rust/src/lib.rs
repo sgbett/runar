@@ -309,8 +309,14 @@ pub fn compile_from_program_with_options(program: &ir::ANFProgram, opts: &Compil
     let mut stack_methods = lower_to_stack(&optimized)?;
 
     // Peephole optimization — runs on Stack IR before emission.
+    // Note: source_locs must be resized to match the new ops length since the
+    // peephole optimizer may combine adjacent ops (reducing the count).
     for method in &mut stack_methods {
-        method.ops = optimize_stack_ops(&method.ops);
+        let new_ops = optimize_stack_ops(&method.ops);
+        // After optimization the ops array may have a different length, so rebuild
+        // source_locs with the same length (None for new/merged ops).
+        method.source_locs = vec![None; new_ops.len()];
+        method.ops = new_ops;
     }
 
     // Pass 6: Emit
@@ -324,6 +330,7 @@ pub fn compile_from_program_with_options(program: &ir::ANFProgram, opts: &Compil
         emit_result.code_separator_index,
         emit_result.code_separator_indices,
         true, // include ANF IR for SDK state auto-computation
+        emit_result.source_map,
     );
     Ok(artifact)
 }
@@ -438,7 +445,9 @@ pub fn compile_from_source_str_with_result(
 
     // Peephole optimization
     for method in &mut stack_methods {
-        method.ops = optimize_stack_ops(&method.ops);
+        let new_ops = optimize_stack_ops(&method.ops);
+        method.source_locs = vec![None; new_ops.len()];
+        method.ops = new_ops;
     }
 
     // Pass 6: Emit (catch panics)
@@ -457,6 +466,7 @@ pub fn compile_from_source_str_with_result(
                 emit_result.code_separator_index,
                 emit_result.code_separator_indices,
                 true,
+                emit_result.source_map,
             );
             result.script_hex = Some(emit_result.script_hex);
             result.script_asm = Some(emit_result.script_asm);

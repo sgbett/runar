@@ -226,6 +226,7 @@ fn try_rewrite(
                                     extra_bindings.push(ANFBinding {
                                         name: new_scalar_name.clone(),
                                         value: make_load_const_int(product),
+                                        source_loc: None,
                                     });
                                     return Some(ANFValue::Call {
                                         func: "ecMul".to_string(),
@@ -291,6 +292,7 @@ fn try_rewrite(
                                     extra_bindings.push(ANFBinding {
                                         name: new_scalar_name.clone(),
                                         value: make_load_const_int(sum),
+                                        source_loc: None,
                                     });
                                     return Some(ANFValue::Call {
                                         func: "ecMulGen".to_string(),
@@ -325,6 +327,7 @@ fn try_rewrite(
                                     extra_bindings.push(ANFBinding {
                                         name: new_scalar_name.clone(),
                                         value: make_load_const_int(sum),
+                                        source_loc: None,
                                     });
                                     return Some(ANFValue::Call {
                                         func: "ecMul".to_string(),
@@ -520,6 +523,7 @@ fn optimize_method_ec(method: &ANFMethod) -> (ANFMethod, bool) {
             result.push(ANFBinding {
                 name: binding.name.clone(),
                 value: new_value,
+                source_loc: binding.source_loc.clone(),
             });
             changed = true;
         } else {
@@ -610,6 +614,7 @@ mod tests {
             value: ANFValue::LoadConst {
                 value: serde_json::Value::String(hex.to_string()),
             },
+            source_loc: None,
         }
     }
 
@@ -619,6 +624,7 @@ mod tests {
             value: ANFValue::LoadConst {
                 value: serde_json::json!(n),
             },
+            source_loc: None,
         }
     }
 
@@ -629,6 +635,7 @@ mod tests {
                 func: func.to_string(),
                 args: args.into_iter().map(|s| s.to_string()).collect(),
             },
+            source_loc: None,
         }
     }
 
@@ -638,6 +645,7 @@ mod tests {
             value: ANFValue::Assert {
                 value: value_ref.to_string(),
             },
+            source_loc: None,
         }
     }
 
@@ -678,6 +686,7 @@ mod tests {
                     right: "t1".to_string(),
                     result_type: None,
                 },
+                source_loc: None,
             },
             assert_binding("t3", "t2"),
         ];
@@ -983,6 +992,7 @@ mod tests {
                     func: "hash160".to_string(),
                     args: vec!["t0".to_string()],
                 },
+                source_loc: None,
             },
             assert_binding("t2", "t1"),
         ];

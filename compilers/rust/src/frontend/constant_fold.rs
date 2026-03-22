@@ -338,6 +338,7 @@ fn fold_binding(binding: &ANFBinding, env: &mut ConstEnv) -> ANFBinding {
     ANFBinding {
         name: binding.name.clone(),
         value: folded_value,
+        source_loc: binding.source_loc.clone(),
     }
 }
 
@@ -528,6 +529,7 @@ mod tests {
         ANFBinding {
             name: name.to_string(),
             value,
+            source_loc: None,
         }
     }
 
