@@ -13,7 +13,7 @@ func mustParseTS(t *testing.T, source string) *ContractNode {
 	t.Helper()
 	result := ParseSource([]byte(source), "test.runar.ts")
 	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %s", strings.Join(result.Errors, "; "))
+		t.Fatalf("parse errors: %s", strings.Join(result.ErrorStrings(), "; "))
 	}
 	if result.Contract == nil {
 		t.Fatal("parse returned nil contract")
@@ -47,7 +47,7 @@ class P2PKH extends SmartContract {
 	result := Validate(contract)
 
 	if len(result.Errors) > 0 {
-		t.Errorf("expected no validation errors, got: %s", strings.Join(result.Errors, "; "))
+		t.Errorf("expected no validation errors, got: %s", strings.Join(result.ErrorStrings(), "; "))
 	}
 }
 
@@ -105,7 +105,7 @@ func TestValidate_ConstructorMissingSuperCall(t *testing.T) {
 
 	foundSuperError := false
 	for _, e := range result.Errors {
-		if strings.Contains(e, "super()") {
+		if strings.Contains(e.Message,"super()") {
 			foundSuperError = true
 			break
 		}
@@ -169,7 +169,7 @@ func TestValidate_PublicMethodMissingFinalAssert(t *testing.T) {
 
 	foundAssertError := false
 	for _, e := range result.Errors {
-		if strings.Contains(e, "assert()") {
+		if strings.Contains(e.Message,"assert()") {
 			foundAssertError = true
 			break
 		}
@@ -236,7 +236,7 @@ func TestValidate_DirectRecursion(t *testing.T) {
 
 	foundRecursionError := false
 	for _, e := range result.Errors {
-		if strings.Contains(e, "recursion") {
+		if strings.Contains(e.Message,"recursion") {
 			foundRecursionError = true
 			break
 		}
@@ -272,10 +272,10 @@ class P2PKH extends SmartContract {
 	result := Validate(contract)
 
 	if len(result.Errors) > 0 {
-		t.Errorf("P2PKH should validate without errors, got: %s", strings.Join(result.Errors, "; "))
+		t.Errorf("P2PKH should validate without errors, got: %s", strings.Join(result.ErrorStrings(), "; "))
 	}
 	if len(result.Warnings) > 0 {
-		t.Logf("validation warnings: %s", strings.Join(result.Warnings, "; "))
+		t.Logf("validation warnings: %s", strings.Join(result.WarningStrings(), "; "))
 	}
 }
 
@@ -333,8 +333,8 @@ func TestValidate_StatefulNoFinalAssertOK(t *testing.T) {
 
 	// StatefulSmartContract methods should NOT require a trailing assert
 	for _, e := range result.Errors {
-		if strings.Contains(e, "must end with an assert()") {
-			t.Errorf("StatefulSmartContract public method should not require trailing assert, got error: %s", e)
+		if strings.Contains(e.Message,"must end with an assert()") {
+			t.Errorf("StatefulSmartContract public method should not require trailing assert, got error: %s", e.Message)
 		}
 	}
 }
@@ -390,7 +390,7 @@ func TestValidate_SuperNotFirstStatement(t *testing.T) {
 
 	found := false
 	for _, e := range result.Errors {
-		if strings.Contains(e, "super()") {
+		if strings.Contains(e.Message,"super()") {
 			found = true
 			break
 		}
@@ -453,7 +453,7 @@ func TestValidate_PropertyNotAssignedInConstructor(t *testing.T) {
 
 	found := false
 	for _, e := range result.Errors {
-		if strings.Contains(e, "'y'") && strings.Contains(e, "assigned") {
+		if strings.Contains(e.Message,"'y'") && strings.Contains(e.Message,"assigned") {
 			found = true
 			break
 		}
@@ -524,7 +524,7 @@ func TestValidate_ForLoopNonConstantBound(t *testing.T) {
 
 	found := false
 	for _, e := range result.Errors {
-		if strings.Contains(e, "constant") || strings.Contains(e, "bound") {
+		if strings.Contains(e.Message,"constant") || strings.Contains(e.Message,"bound") {
 			found = true
 			break
 		}
@@ -586,7 +586,7 @@ func TestValidate_VoidPropertyType(t *testing.T) {
 
 	found := false
 	for _, e := range result.Errors {
-		if strings.Contains(e, "void") {
+		if strings.Contains(e.Message,"void") {
 			found = true
 			break
 		}
@@ -645,7 +645,7 @@ func TestValidate_SmartContractNonReadonlyProperty(t *testing.T) {
 
 	found := false
 	for _, e := range result.Errors {
-		if strings.Contains(e, "readonly") || strings.Contains(e, "mutable") || strings.Contains(e, "StatefulSmartContract") {
+		if strings.Contains(e.Message,"readonly") || strings.Contains(e.Message,"mutable") || strings.Contains(e.Message,"StatefulSmartContract") {
 			found = true
 			break
 		}
@@ -705,8 +705,8 @@ func TestValidate_StatefulSmartContractNonReadonlyAllowed(t *testing.T) {
 
 	// Must not produce any error specifically about non-readonly properties
 	for _, e := range result.Errors {
-		if strings.Contains(e, "readonly") || strings.Contains(e, "mutable") {
-			t.Errorf("StatefulSmartContract non-readonly property should be allowed, but got error: %s", e)
+		if strings.Contains(e.Message,"readonly") || strings.Contains(e.Message,"mutable") {
+			t.Errorf("StatefulSmartContract non-readonly property should be allowed, but got error: %s", e.Message)
 		}
 	}
 }
@@ -771,7 +771,7 @@ func TestValidate_IndirectRecursion(t *testing.T) {
 
 	found := false
 	for _, e := range result.Errors {
-		if strings.Contains(e, "recursion") {
+		if strings.Contains(e.Message,"recursion") {
 			found = true
 			break
 		}
@@ -887,8 +887,8 @@ func TestValidate_IfElseBothBranchesAssert_OK(t *testing.T) {
 	result := Validate(contract)
 
 	for _, e := range result.Errors {
-		if strings.Contains(e, "assert()") {
-			t.Errorf("expected no assert-related errors for if/else both ending in assert, got: %s", e)
+		if strings.Contains(e.Message,"assert()") {
+			t.Errorf("expected no assert-related errors for if/else both ending in assert, got: %s", e.Message)
 		}
 	}
 }
@@ -931,7 +931,7 @@ func TestValidate_PublicMethodEndingWithNonAssertCall_Error(t *testing.T) {
 
 	found := false
 	for _, e := range result.Errors {
-		if strings.Contains(e, "assert()") {
+		if strings.Contains(e.Message,"assert()") {
 			found = true
 			break
 		}
@@ -984,8 +984,8 @@ func TestValidate_PrivateMethodWithoutAssert_OK(t *testing.T) {
 
 	// Private method without assert should not produce an error
 	for _, e := range result.Errors {
-		if strings.Contains(e, "helper") && strings.Contains(e, "assert()") {
-			t.Errorf("expected private method without assert to be OK, but got error: %s", e)
+		if strings.Contains(e.Message,"helper") && strings.Contains(e.Message,"assert()") {
+			t.Errorf("expected private method without assert to be OK, but got error: %s", e.Message)
 		}
 	}
 }
@@ -1020,7 +1020,7 @@ func TestValidate_EmptyPublicMethodBody_Error(t *testing.T) {
 
 	found := false
 	for _, e := range result.Errors {
-		if strings.Contains(e, "assert()") || strings.Contains(e, "spend") {
+		if strings.Contains(e.Message,"assert()") || strings.Contains(e.Message,"spend") {
 			found = true
 			break
 		}
@@ -1069,8 +1069,8 @@ func TestValidate_ForLoopIdentifierBound_OK(t *testing.T) {
 
 	// Identifier bound should not produce a "constant bound" error
 	for _, e := range result.Errors {
-		if strings.Contains(e, "constant") || strings.Contains(e, "bound") {
-			t.Errorf("expected identifier for-loop bound to be accepted (treated as const), but got error: %s", e)
+		if strings.Contains(e.Message,"constant") || strings.Contains(e.Message,"bound") {
+			t.Errorf("expected identifier for-loop bound to be accepted (treated as const), but got error: %s", e.Message)
 		}
 	}
 }
@@ -1117,8 +1117,8 @@ func TestValidate_AllPropertiesAssignedInConstructor_OK(t *testing.T) {
 
 	// No property-assignment errors should be produced
 	for _, e := range result.Errors {
-		if strings.Contains(e, "assigned") {
-			t.Errorf("expected no assignment errors when all properties are assigned, but got: %s", e)
+		if strings.Contains(e.Message,"assigned") {
+			t.Errorf("expected no assignment errors when all properties are assigned, but got: %s", e.Message)
 		}
 	}
 }
@@ -1172,8 +1172,8 @@ func TestValidate_NonRecursiveMethodCalls_NoError(t *testing.T) {
 	result := Validate(contract)
 
 	for _, e := range result.Errors {
-		if strings.Contains(e, "recursion") {
-			t.Errorf("expected no recursion error for non-recursive A→B call chain, but got: %s", e)
+		if strings.Contains(e.Message,"recursion") {
+			t.Errorf("expected no recursion error for non-recursive A→B call chain, but got: %s", e.Message)
 		}
 	}
 }
@@ -1211,7 +1211,7 @@ func TestValidate_SmartContractPublicMethodNeedsAssert(t *testing.T) {
 
 	found := false
 	for _, e := range result.Errors {
-		if strings.Contains(e, "assert()") {
+		if strings.Contains(e.Message,"assert()") {
 			found = true
 			break
 		}
@@ -1224,7 +1224,6 @@ func TestValidate_SmartContractPublicMethodNeedsAssert(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Test: StatefulSmartContract method that manually calls checkPreimage() →
 // warning/error
-// TODO: not yet implemented in Go validator
 // ---------------------------------------------------------------------------
 
 func TestValidate_ManualCheckPreimage_Warning(t *testing.T) {
@@ -1284,7 +1283,7 @@ func TestValidate_ManualCheckPreimage_Warning(t *testing.T) {
 
 	found := false
 	for _, e := range append(result.Errors, result.Warnings...) {
-		if strings.Contains(e, "checkPreimage") {
+		if strings.Contains(e.Message,"checkPreimage") {
 			found = true
 			break
 		}
@@ -1296,7 +1295,6 @@ func TestValidate_ManualCheckPreimage_Warning(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // Test: Manually calling getStateScript() → warning/error
-// TODO: not yet implemented in Go validator
 // ---------------------------------------------------------------------------
 
 func TestValidate_ManualGetStateScript_Warning(t *testing.T) {
@@ -1353,7 +1351,7 @@ func TestValidate_ManualGetStateScript_Warning(t *testing.T) {
 
 	found := false
 	for _, e := range append(result.Errors, result.Warnings...) {
-		if strings.Contains(e, "getStateScript") {
+		if strings.Contains(e.Message,"getStateScript") {
 			found = true
 			break
 		}
@@ -1365,7 +1363,6 @@ func TestValidate_ManualGetStateScript_Warning(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // Test: StatefulSmartContract with no mutable properties → warning
-// TODO: not yet implemented in Go validator
 // ---------------------------------------------------------------------------
 
 func TestValidate_StatefulNoMutableProperties_Warning(t *testing.T) {
@@ -1406,7 +1403,7 @@ func TestValidate_StatefulNoMutableProperties_Warning(t *testing.T) {
 
 	found := false
 	for _, w := range result.Warnings {
-		if strings.Contains(w, "mutable") || strings.Contains(w, "property") || strings.Contains(w, "StatefulSmartContract") {
+		if strings.Contains(w.Message,"mutable") || strings.Contains(w.Message,"property") || strings.Contains(w.Message,"StatefulSmartContract") {
 			found = true
 			break
 		}
@@ -1418,7 +1415,6 @@ func TestValidate_StatefulNoMutableProperties_Warning(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // Test: Declaring 'txPreimage' as an explicit property → error
-// TODO: not yet implemented in Go validator
 // ---------------------------------------------------------------------------
 
 func TestValidate_TxPreimageExplicitProperty_Error(t *testing.T) {
@@ -1469,7 +1465,7 @@ func TestValidate_TxPreimageExplicitProperty_Error(t *testing.T) {
 
 	found := false
 	for _, e := range result.Errors {
-		if strings.Contains(e, "txPreimage") {
+		if strings.Contains(e.Message,"txPreimage") {
 			found = true
 			break
 		}

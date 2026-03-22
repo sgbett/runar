@@ -391,7 +391,7 @@ type rustMacroParser struct {
 	tokens   []rustToken
 	pos      int
 	fileName string
-	errors   []string
+	errors   []Diagnostic
 }
 
 func (p *rustMacroParser) current() rustToken {
@@ -419,9 +419,11 @@ func (p *rustMacroParser) peek() rustToken {
 func (p *rustMacroParser) expect(kind rustTokKind) {
 	if p.current().kind != kind {
 		t := p.current()
-		p.errors = append(p.errors, fmt.Sprintf(
-			"expected token kind %d, got %d ('%s') at %s:%d:%d",
-			kind, t.kind, t.value, p.fileName, t.line, t.col))
+		p.errors = append(p.errors, Diagnostic{
+			Message:  fmt.Sprintf("expected token kind %d, got %d ('%s') at %s:%d:%d", kind, t.kind, t.value, p.fileName, t.line, t.col),
+			Severity: SeverityError,
+			Loc:      &SourceLocation{File: p.fileName, Line: t.line, Column: t.col},
+		})
 	}
 	p.advance()
 }
@@ -548,7 +550,7 @@ func (p *rustMacroParser) parse() *ContractNode {
 	}
 
 	if contractName == "" {
-		p.errors = append(p.errors, "no Rúnar contract struct found in Rust source")
+		p.errors = append(p.errors, Diagnostic{Message: "no Rúnar contract struct found in Rust source", Severity: SeverityError})
 		return nil
 	}
 
@@ -1212,8 +1214,11 @@ func (p *rustMacroParser) parsePrimary() Expression {
 		p.advance()
 		val, err := strconv.ParseInt(t.value, 10, 64)
 		if err != nil {
-			p.errors = append(p.errors, fmt.Sprintf(
-				"invalid integer literal '%s' at %s:%d:%d", t.value, p.fileName, t.line, t.col))
+			p.errors = append(p.errors, Diagnostic{
+				Message:  fmt.Sprintf("invalid integer literal '%s' at %s:%d:%d", t.value, p.fileName, t.line, t.col),
+				Severity: SeverityError,
+				Loc:      &SourceLocation{File: p.fileName, Line: t.line, Column: t.col},
+			})
 			return BigIntLiteral{Value: 0}
 		}
 		return BigIntLiteral{Value: val}
@@ -1247,9 +1252,11 @@ func (p *rustMacroParser) parsePrimary() Expression {
 
 	default:
 		p.advance()
-		p.errors = append(p.errors, fmt.Sprintf(
-			"unsupported token (kind=%d, value=%q) at %s:%d:%d — not valid in Rúnar contract",
-			t.kind, t.value, p.fileName, t.line, t.col))
+		p.errors = append(p.errors, Diagnostic{
+			Message:  fmt.Sprintf("unsupported token (kind=%d, value=%q) at %s:%d:%d — not valid in Rúnar contract", t.kind, t.value, p.fileName, t.line, t.col),
+			Severity: SeverityError,
+			Loc:      &SourceLocation{File: p.fileName, Line: t.line, Column: t.col},
+		})
 		return Identifier{Name: "unknown"}
 	}
 }

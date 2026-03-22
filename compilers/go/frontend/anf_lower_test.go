@@ -14,7 +14,7 @@ func mustLowerToANF(t *testing.T, source string) (*ContractNode, []string) {
 
 	result := ParseSource([]byte(source), "test.runar.ts")
 	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %s", strings.Join(result.Errors, "; "))
+		t.Fatalf("parse errors: %s", strings.Join(result.ErrorStrings(), "; "))
 	}
 	if result.Contract == nil {
 		t.Fatal("parse returned nil contract")
@@ -22,12 +22,12 @@ func mustLowerToANF(t *testing.T, source string) (*ContractNode, []string) {
 
 	valResult := Validate(result.Contract)
 	if len(valResult.Errors) > 0 {
-		t.Fatalf("validation errors: %s", strings.Join(valResult.Errors, "; "))
+		t.Fatalf("validation errors: %s", strings.Join(valResult.ErrorStrings(), "; "))
 	}
 
 	tcResult := TypeCheck(result.Contract)
 	if len(tcResult.Errors) > 0 {
-		t.Fatalf("type check errors: %s", strings.Join(tcResult.Errors, "; "))
+		t.Fatalf("type check errors: %s", strings.Join(tcResult.ErrorStrings(), "; "))
 	}
 
 	return result.Contract, nil
@@ -1128,7 +1128,7 @@ class BadLoop extends SmartContract {
 		// Validation caught it
 		found := false
 		for _, e := range valResult.Errors {
-			if strings.Contains(e, "constant") || strings.Contains(e, "bound") {
+			if strings.Contains(e.Message, "constant") || strings.Contains(e.Message, "bound") {
 				found = true
 				break
 			}

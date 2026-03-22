@@ -20,7 +20,7 @@ func ParseGoContract(source []byte, fileName string) *ParseResult {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, fileName, source, parser.ParseComments)
 	if err != nil {
-		return &ParseResult{Errors: []string{fmt.Sprintf("Go parse error: %v", err)}}
+		return &ParseResult{Errors: []Diagnostic{{Message: fmt.Sprintf("Go parse error: %v", err), Severity: SeverityError}}}
 	}
 
 	p := &goContractParser{
@@ -31,7 +31,7 @@ func ParseGoContract(source []byte, fileName string) *ParseResult {
 
 	contract := p.extractContract()
 	if contract == nil && len(p.errors) == 0 {
-		p.errors = append(p.errors, "no Rúnar contract struct found in Go source")
+		p.addError("no Rúnar contract struct found in Go source")
 	}
 
 	return &ParseResult{
@@ -48,8 +48,12 @@ type goContractParser struct {
 	fset         *token.FileSet
 	file         *ast.File
 	fileName     string
-	errors       []string
+	errors       []Diagnostic
 	receiverName string // current method's receiver name (e.g. "c", "m", "self")
+}
+
+func (p *goContractParser) addError(msg string) {
+	p.errors = append(p.errors, Diagnostic{Message: msg, Severity: SeverityError})
 }
 
 func (p *goContractParser) extractContract() *ContractNode {
@@ -381,7 +385,7 @@ func (p *goContractParser) extractStatements(block *ast.BlockStmt) []Statement {
 			stmts = append(stmts, s)
 		} else {
 			pos := p.fset.Position(stmt.Pos())
-			p.errors = append(p.errors, fmt.Sprintf(
+			p.addError(fmt.Sprintf(
 				"unsupported Go statement at %s:%d:%d — not valid in Rúnar contract",
 				p.fileName, pos.Line, pos.Column))
 		}
@@ -562,7 +566,7 @@ func (p *goContractParser) convertExpression(expr ast.Expr) Expression {
 			}
 			// Any other package selector (math.Log, fmt.Println, etc.) is not valid Rúnar
 			pos := p.fset.Position(e.Pos())
-			p.errors = append(p.errors, fmt.Sprintf(
+			p.addError(fmt.Sprintf(
 				"unsupported expression '%s.%s' at %s:%d:%d — only runar.* builtins and contract field access are allowed",
 				ident.Name, e.Sel.Name, p.fileName, pos.Line, pos.Column))
 			return nil

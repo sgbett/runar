@@ -45,7 +45,7 @@ class P2PKH extends SmartContract {
 `
 	result := ParseSource([]byte(source), "P2PKH.runar.ts")
 	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %s", strings.Join(result.Errors, "; "))
+		t.Fatalf("parse errors: %s", strings.Join(result.ErrorStrings(), "; "))
 	}
 	if result.Contract == nil {
 		t.Fatal("expected non-nil contract")
@@ -104,7 +104,7 @@ class Counter extends StatefulSmartContract {
 `
 	result := ParseSource([]byte(source), "Counter.runar.ts")
 	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %s", strings.Join(result.Errors, "; "))
+		t.Fatalf("parse errors: %s", strings.Join(result.ErrorStrings(), "; "))
 	}
 	if result.Contract == nil {
 		t.Fatal("expected non-nil contract")
@@ -200,7 +200,7 @@ class Multi extends SmartContract {
 `
 	result := ParseSource([]byte(source), "Multi.runar.ts")
 	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %s", strings.Join(result.Errors, "; "))
+		t.Fatalf("parse errors: %s", strings.Join(result.ErrorStrings(), "; "))
 	}
 
 	c := result.Contract
@@ -253,7 +253,7 @@ class TwoProps extends SmartContract {
 `
 	result := ParseSource([]byte(source), "TwoProps.runar.ts")
 	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %s", strings.Join(result.Errors, "; "))
+		t.Fatalf("parse errors: %s", strings.Join(result.ErrorStrings(), "; "))
 	}
 
 	c := result.Contract
@@ -911,7 +911,7 @@ class ContractB extends SmartContract {
 		t.Logf("Multiple contract source: returned %s (first wins)", result.Contract.Name)
 	} else if len(result.Errors) > 0 {
 		// Check the error mentions the issue
-		combined := strings.Join(result.Errors, " ")
+		combined := strings.Join(result.ErrorStrings(), " ")
 		t.Logf("Multiple contract source produced error: %s", combined)
 	}
 	// No panic is the key invariant
@@ -932,7 +932,7 @@ func TestParse_ErrorHasSourceLocation(t *testing.T) {
 	}
 	// If errors are returned, they should be non-empty strings
 	for _, err := range result.Errors {
-		if err == "" {
+		if err.Message == "" {
 			t.Error("expected non-empty error message")
 		}
 	}
@@ -957,7 +957,7 @@ class Test extends SmartContract {
 	result := ParseSource([]byte(source), "test.runar.ts")
 	// The Go parser may return a contract or an error for missing constructor
 	if len(result.Errors) > 0 {
-		combined := strings.Join(result.Errors, " ")
+		combined := strings.Join(result.ErrorStrings(), " ")
 		if !strings.Contains(strings.ToLower(combined), "constructor") {
 			t.Logf("Error does not mention constructor: %s", combined)
 		}

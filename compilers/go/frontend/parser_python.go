@@ -24,7 +24,7 @@ func ParsePython(source []byte, fileName string) *ParseResult {
 
 	contract, err := p.parseContract()
 	if err != nil {
-		return &ParseResult{Errors: []string{err.Error()}}
+		return &ParseResult{Errors: []Diagnostic{{Message: err.Error(), Severity: SeverityError}}}
 	}
 	if len(p.errors) > 0 {
 		return &ParseResult{Contract: contract, Errors: p.errors}
@@ -103,11 +103,11 @@ type pyParser struct {
 	fileName string
 	tokens   []pyToken
 	pos      int
-	errors   []string
+	errors   []Diagnostic
 }
 
 func (p *pyParser) addError(msg string) {
-	p.errors = append(p.errors, msg)
+	p.errors = append(p.errors, Diagnostic{Message: msg, Severity: SeverityError})
 }
 
 func (p *pyParser) tokenize(source string) []pyToken {

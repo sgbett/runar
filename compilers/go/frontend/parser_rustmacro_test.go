@@ -30,7 +30,7 @@ impl P2PKH {
 `
 	result := ParseSource([]byte(source), "P2PKH.runar.rs")
 	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %s", strings.Join(result.Errors, "; "))
+		t.Fatalf("parse errors: %s", strings.Join(result.ErrorStrings(), "; "))
 	}
 	if result.Contract == nil {
 		t.Fatal("expected non-nil contract")
@@ -102,7 +102,7 @@ impl Counter {
 `
 	result := ParseSource([]byte(source), "Counter.runar.rs")
 	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %s", strings.Join(result.Errors, "; "))
+		t.Fatalf("parse errors: %s", strings.Join(result.ErrorStrings(), "; "))
 	}
 	c := result.Contract
 	if c == nil {
@@ -165,7 +165,7 @@ impl MyContract {
 `
 	result := ParseSource([]byte(source), "MyContract.runar.rs")
 	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %s", strings.Join(result.Errors, "; "))
+		t.Fatalf("parse errors: %s", strings.Join(result.ErrorStrings(), "; "))
 	}
 	c := result.Contract
 	if c == nil {
@@ -275,7 +275,7 @@ impl BoundedCounter {
 `
 	result := ParseSource([]byte(source), "BoundedCounter.runar.rs")
 	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %s", strings.Join(result.Errors, "; "))
+		t.Fatalf("parse errors: %s", strings.Join(result.ErrorStrings(), "; "))
 	}
 	c := result.Contract
 	if c == nil {
@@ -379,7 +379,7 @@ impl P2PKH {
 `
 	result := ParseSource([]byte(source), "P2PKH.runar.rs")
 	if len(result.Errors) > 0 {
-		t.Fatalf("unexpected errors: %s", strings.Join(result.Errors, "; "))
+		t.Fatalf("unexpected errors: %s", strings.Join(result.ErrorStrings(), "; "))
 	}
 	c := result.Contract
 	if c == nil {

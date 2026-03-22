@@ -28,7 +28,7 @@ module P2PKH {
 `
 	result := ParseSource([]byte(source), "P2PKH.runar.move")
 	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %s", strings.Join(result.Errors, "; "))
+		t.Fatalf("parse errors: %s", strings.Join(result.ErrorStrings(), "; "))
 	}
 	if result.Contract == nil {
 		t.Fatal("expected non-nil contract")
@@ -63,7 +63,7 @@ module Adder {
 `
 	result := ParseSource([]byte(source), "Adder.runar.move")
 	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %s", strings.Join(result.Errors, "; "))
+		t.Fatalf("parse errors: %s", strings.Join(result.ErrorStrings(), "; "))
 	}
 
 	c := result.Contract
@@ -104,7 +104,7 @@ module Counter {
 `
 	result := ParseSource([]byte(source), "Counter.runar.move")
 	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %s", strings.Join(result.Errors, "; "))
+		t.Fatalf("parse errors: %s", strings.Join(result.ErrorStrings(), "; "))
 	}
 
 	c := result.Contract
@@ -156,7 +156,7 @@ module Multi {
 `
 	result := ParseSource([]byte(source), "Multi.runar.move")
 	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %s", strings.Join(result.Errors, "; "))
+		t.Fatalf("parse errors: %s", strings.Join(result.ErrorStrings(), "; "))
 	}
 
 	c := result.Contract

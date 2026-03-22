@@ -31,7 +31,7 @@ contract P2PKH is SmartContract {
 `
 	result := ParseSource([]byte(source), "P2PKH.runar.sol")
 	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %s", strings.Join(result.Errors, "; "))
+		t.Fatalf("parse errors: %s", strings.Join(result.ErrorStrings(), "; "))
 	}
 	if result.Contract == nil {
 		t.Fatal("expected non-nil contract")
@@ -75,7 +75,7 @@ contract Adder is SmartContract {
 `
 	result := ParseSource([]byte(source), "Adder.runar.sol")
 	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %s", strings.Join(result.Errors, "; "))
+		t.Fatalf("parse errors: %s", strings.Join(result.ErrorStrings(), "; "))
 	}
 
 	c := result.Contract
@@ -121,7 +121,7 @@ contract Counter is StatefulSmartContract {
 `
 	result := ParseSource([]byte(source), "Counter.runar.sol")
 	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %s", strings.Join(result.Errors, "; "))
+		t.Fatalf("parse errors: %s", strings.Join(result.ErrorStrings(), "; "))
 	}
 
 	c := result.Contract
@@ -177,7 +177,7 @@ contract TwoProps is SmartContract {
 `
 	result := ParseSource([]byte(source), "TwoProps.runar.sol")
 	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %s", strings.Join(result.Errors, "; "))
+		t.Fatalf("parse errors: %s", strings.Join(result.ErrorStrings(), "; "))
 	}
 
 	c := result.Contract

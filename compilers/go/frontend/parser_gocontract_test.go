@@ -27,7 +27,7 @@ func (c *P2PKH) Unlock(sig runar.Sig, pubKey runar.PubKey) {
 `
 	result := ParseSource([]byte(source), "P2PKH.runar.go")
 	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %s", strings.Join(result.Errors, "; "))
+		t.Fatalf("parse errors: %s", strings.Join(result.ErrorStrings(), "; "))
 	}
 	if result.Contract == nil {
 		t.Fatal("expected non-nil contract")
@@ -70,7 +70,7 @@ func (c *Checker) Verify(a runar.Bigint, b runar.Bigint) {
 `
 	result := ParseSource([]byte(source), "Checker.runar.go")
 	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %s", strings.Join(result.Errors, "; "))
+		t.Fatalf("parse errors: %s", strings.Join(result.ErrorStrings(), "; "))
 	}
 
 	c := result.Contract
@@ -112,7 +112,7 @@ func (c *Counter) Increment() {
 `
 	result := ParseSource([]byte(source), "Counter.runar.go")
 	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %s", strings.Join(result.Errors, "; "))
+		t.Fatalf("parse errors: %s", strings.Join(result.ErrorStrings(), "; "))
 	}
 
 	c := result.Contract
@@ -170,7 +170,7 @@ func (c *TwoProps) Check(x runar.Bigint) {
 `
 	result := ParseSource([]byte(source), "TwoProps.runar.go")
 	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %s", strings.Join(result.Errors, "; "))
+		t.Fatalf("parse errors: %s", strings.Join(result.ErrorStrings(), "; "))
 	}
 
 	c := result.Contract

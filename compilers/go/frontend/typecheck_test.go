@@ -32,12 +32,12 @@ class P2PKH extends SmartContract {
 	// Validate first (prerequisite for type check)
 	valResult := Validate(contract)
 	if len(valResult.Errors) > 0 {
-		t.Fatalf("validation failed: %s", strings.Join(valResult.Errors, "; "))
+		t.Fatalf("validation failed: %s", strings.Join(valResult.ErrorStrings(), "; "))
 	}
 
 	tcResult := TypeCheck(contract)
 	if len(tcResult.Errors) > 0 {
-		t.Errorf("expected no type check errors for P2PKH, got: %s", strings.Join(tcResult.Errors, "; "))
+		t.Errorf("expected no type check errors for P2PKH, got: %s", strings.Join(tcResult.ErrorStrings(), "; "))
 	}
 	if tcResult.Contract == nil {
 		t.Error("expected non-nil contract in type check result")
@@ -114,7 +114,7 @@ func TestTypeCheck_UnknownFunction_MathFloor(t *testing.T) {
 
 	foundUnknownError := false
 	for _, e := range tcResult.Errors {
-		if strings.Contains(e, "unknown function") || strings.Contains(e, "Math.floor") {
+		if strings.Contains(e.Message,"unknown function") || strings.Contains(e.Message,"Math.floor") {
 			foundUnknownError = true
 			break
 		}
@@ -178,7 +178,7 @@ func TestTypeCheck_UnknownFunction_ConsoleLog(t *testing.T) {
 
 	foundError := false
 	for _, e := range tcResult.Errors {
-		if strings.Contains(e, "unknown function") || strings.Contains(e, "console.log") {
+		if strings.Contains(e.Message,"unknown function") || strings.Contains(e.Message,"console.log") {
 			foundError = true
 			break
 		}
@@ -247,7 +247,7 @@ func TestTypeCheck_TypeMismatch_ArithmeticOnBoolean(t *testing.T) {
 
 	foundTypeError := false
 	for _, e := range tcResult.Errors {
-		if strings.Contains(e, "must be bigint") || strings.Contains(e, "boolean") {
+		if strings.Contains(e.Message,"must be bigint") || strings.Contains(e.Message,"boolean") {
 			foundTypeError = true
 			break
 		}
@@ -287,12 +287,12 @@ class Arithmetic extends SmartContract {
 
 	valResult := Validate(contract)
 	if len(valResult.Errors) > 0 {
-		t.Fatalf("validation failed: %s", strings.Join(valResult.Errors, "; "))
+		t.Fatalf("validation failed: %s", strings.Join(valResult.ErrorStrings(), "; "))
 	}
 
 	tcResult := TypeCheck(contract)
 	if len(tcResult.Errors) > 0 {
-		t.Errorf("expected no type check errors for Arithmetic, got: %s", strings.Join(tcResult.Errors, "; "))
+		t.Errorf("expected no type check errors for Arithmetic, got: %s", strings.Join(tcResult.ErrorStrings(), "; "))
 	}
 }
 
@@ -326,12 +326,12 @@ class BoolLogic extends SmartContract {
 
 	valResult := Validate(contract)
 	if len(valResult.Errors) > 0 {
-		t.Fatalf("validation failed: %s", strings.Join(valResult.Errors, "; "))
+		t.Fatalf("validation failed: %s", strings.Join(valResult.ErrorStrings(), "; "))
 	}
 
 	tcResult := TypeCheck(contract)
 	if len(tcResult.Errors) > 0 {
-		t.Errorf("expected no type check errors for BoolLogic, got: %s", strings.Join(tcResult.Errors, "; "))
+		t.Errorf("expected no type check errors for BoolLogic, got: %s", strings.Join(tcResult.ErrorStrings(), "; "))
 	}
 }
 
@@ -361,12 +361,12 @@ class Counter extends StatefulSmartContract {
 
 	valResult := Validate(contract)
 	if len(valResult.Errors) > 0 {
-		t.Fatalf("validation failed: %s", strings.Join(valResult.Errors, "; "))
+		t.Fatalf("validation failed: %s", strings.Join(valResult.ErrorStrings(), "; "))
 	}
 
 	tcResult := TypeCheck(contract)
 	if len(tcResult.Errors) > 0 {
-		t.Errorf("expected valid StatefulSmartContract to pass type checking, got errors: %s", strings.Join(tcResult.Errors, "; "))
+		t.Errorf("expected valid StatefulSmartContract to pass type checking, got errors: %s", strings.Join(tcResult.ErrorStrings(), "; "))
 	}
 }
 
@@ -396,7 +396,7 @@ class BadArgs extends SmartContract {
 
 	valResult := Validate(contract)
 	if len(valResult.Errors) > 0 {
-		t.Fatalf("validation failed: %s", strings.Join(valResult.Errors, "; "))
+		t.Fatalf("validation failed: %s", strings.Join(valResult.ErrorStrings(), "; "))
 	}
 
 	tcResult := TypeCheck(contract)
@@ -432,8 +432,8 @@ class HashCheck extends SmartContract {
 	tcResult := TypeCheck(contract)
 	// Filter out errors that are NOT about subtype/argument type issues
 	for _, e := range tcResult.Errors {
-		if strings.Contains(e, "argument") && strings.Contains(e, "PubKey") {
-			t.Errorf("PubKey should be assignable to ByteString, but got error: %s", e)
+		if strings.Contains(e.Message,"argument") && strings.Contains(e.Message,"PubKey") {
+			t.Errorf("PubKey should be assignable to ByteString, but got error: %s", e.Message)
 		}
 	}
 }
@@ -494,7 +494,7 @@ func TestTypeCheck_UnknownStandaloneFunction(t *testing.T) {
 
 	found := false
 	for _, e := range tcResult.Errors {
-		if strings.Contains(e, "unknown function") || strings.Contains(e, "unknownFunc") {
+		if strings.Contains(e.Message,"unknown function") || strings.Contains(e.Message,"unknownFunc") {
 			found = true
 			break
 		}
@@ -532,7 +532,7 @@ class BSArith extends SmartContract {
 
 	found := false
 	for _, e := range tcResult.Errors {
-		if strings.Contains(e, "type") || strings.Contains(e, "ByteString") || strings.Contains(e, "bigint") {
+		if strings.Contains(e.Message,"type") || strings.Contains(e.Message,"ByteString") || strings.Contains(e.Message,"bigint") {
 			found = true
 			break
 		}
@@ -570,12 +570,12 @@ class BSConcat extends SmartContract {
 
 	valResult := Validate(contract)
 	if len(valResult.Errors) > 0 {
-		t.Fatalf("validation failed: %s", strings.Join(valResult.Errors, "; "))
+		t.Fatalf("validation failed: %s", strings.Join(valResult.ErrorStrings(), "; "))
 	}
 
 	tcResult := TypeCheck(contract)
 	if len(tcResult.Errors) > 0 {
-		t.Errorf("expected no type check errors for ByteString + ByteString (OP_CAT), got: %s", strings.Join(tcResult.Errors, "; "))
+		t.Errorf("expected no type check errors for ByteString + ByteString (OP_CAT), got: %s", strings.Join(tcResult.ErrorStrings(), "; "))
 	}
 }
 
@@ -640,7 +640,7 @@ class SigTwice extends SmartContract {
 
 	found := false
 	for _, e := range tcResult.Errors {
-		if strings.Contains(e, "affine") || strings.Contains(e, "Sig") || strings.Contains(e, "once") || strings.Contains(e, "linear") {
+		if strings.Contains(e.Message,"affine") || strings.Contains(e.Message,"Sig") || strings.Contains(e.Message,"once") || strings.Contains(e.Message,"linear") {
 			found = true
 			break
 		}
@@ -681,7 +681,7 @@ class IfNonBool extends SmartContract {
 
 	found := false
 	for _, e := range tcResult.Errors {
-		if strings.Contains(e, "boolean") || strings.Contains(e, "condition") {
+		if strings.Contains(e.Message,"boolean") || strings.Contains(e.Message,"condition") {
 			found = true
 			break
 		}
@@ -865,12 +865,12 @@ class BitwiseBigint extends SmartContract {
 
 	valResult := Validate(contract)
 	if len(valResult.Errors) > 0 {
-		t.Fatalf("validation failed: %s", strings.Join(valResult.Errors, "; "))
+		t.Fatalf("validation failed: %s", strings.Join(valResult.ErrorStrings(), "; "))
 	}
 
 	tcResult := TypeCheck(contract)
 	if len(tcResult.Errors) > 0 {
-		t.Errorf("expected no type errors for bigint & bigint, got: %s", strings.Join(tcResult.Errors, "; "))
+		t.Errorf("expected no type errors for bigint & bigint, got: %s", strings.Join(tcResult.ErrorStrings(), "; "))
 	}
 }
 
@@ -925,7 +925,7 @@ func TestTypeCheck_BitwiseOnBoolean_Error(t *testing.T) {
 
 	found := false
 	for _, e := range tcResult.Errors {
-		if strings.Contains(e, "boolean") || strings.Contains(e, "bigint") || strings.Contains(e, "&") {
+		if strings.Contains(e.Message,"boolean") || strings.Contains(e.Message,"bigint") || strings.Contains(e.Message,"&") {
 			found = true
 			break
 		}
@@ -961,12 +961,12 @@ class BitwiseBS extends SmartContract {
 
 	valResult := Validate(contract)
 	if len(valResult.Errors) > 0 {
-		t.Fatalf("validation failed: %s", strings.Join(valResult.Errors, "; "))
+		t.Fatalf("validation failed: %s", strings.Join(valResult.ErrorStrings(), "; "))
 	}
 
 	tcResult := TypeCheck(contract)
 	if len(tcResult.Errors) > 0 {
-		t.Errorf("expected no type errors for ByteString & ByteString, got: %s", strings.Join(tcResult.Errors, "; "))
+		t.Errorf("expected no type errors for ByteString & ByteString, got: %s", strings.Join(tcResult.ErrorStrings(), "; "))
 	}
 }
 
@@ -996,12 +996,12 @@ class BitwiseNotBS extends SmartContract {
 
 	valResult := Validate(contract)
 	if len(valResult.Errors) > 0 {
-		t.Fatalf("validation failed: %s", strings.Join(valResult.Errors, "; "))
+		t.Fatalf("validation failed: %s", strings.Join(valResult.ErrorStrings(), "; "))
 	}
 
 	tcResult := TypeCheck(contract)
 	if len(tcResult.Errors) > 0 {
-		t.Errorf("expected no type errors for ~ByteString, got: %s", strings.Join(tcResult.Errors, "; "))
+		t.Errorf("expected no type errors for ~ByteString, got: %s", strings.Join(tcResult.ErrorStrings(), "; "))
 	}
 }
 
@@ -1031,12 +1031,12 @@ class LogicalNotBool extends SmartContract {
 
 	valResult := Validate(contract)
 	if len(valResult.Errors) > 0 {
-		t.Fatalf("validation failed: %s", strings.Join(valResult.Errors, "; "))
+		t.Fatalf("validation failed: %s", strings.Join(valResult.ErrorStrings(), "; "))
 	}
 
 	tcResult := TypeCheck(contract)
 	if len(tcResult.Errors) > 0 {
-		t.Errorf("expected no type errors for !boolean, got: %s", strings.Join(tcResult.Errors, "; "))
+		t.Errorf("expected no type errors for !boolean, got: %s", strings.Join(tcResult.ErrorStrings(), "; "))
 	}
 }
 
@@ -1089,7 +1089,7 @@ func TestTypeCheck_LogicalNotOnBigint_Error(t *testing.T) {
 
 	found := false
 	for _, e := range tcResult.Errors {
-		if strings.Contains(e, "boolean") || strings.Contains(e, "bigint") || strings.Contains(e, "!") {
+		if strings.Contains(e.Message,"boolean") || strings.Contains(e.Message,"bigint") || strings.Contains(e.Message,"!") {
 			found = true
 			break
 		}
@@ -1125,12 +1125,12 @@ class UnaryMinus extends SmartContract {
 
 	valResult := Validate(contract)
 	if len(valResult.Errors) > 0 {
-		t.Fatalf("validation failed: %s", strings.Join(valResult.Errors, "; "))
+		t.Fatalf("validation failed: %s", strings.Join(valResult.ErrorStrings(), "; "))
 	}
 
 	tcResult := TypeCheck(contract)
 	if len(tcResult.Errors) > 0 {
-		t.Errorf("expected no type errors for -bigint, got: %s", strings.Join(tcResult.Errors, "; "))
+		t.Errorf("expected no type errors for -bigint, got: %s", strings.Join(tcResult.ErrorStrings(), "; "))
 	}
 }
 
@@ -1159,12 +1159,12 @@ class AssertMsg extends SmartContract {
 
 	valResult := Validate(contract)
 	if len(valResult.Errors) > 0 {
-		t.Fatalf("validation failed: %s", strings.Join(valResult.Errors, "; "))
+		t.Fatalf("validation failed: %s", strings.Join(valResult.ErrorStrings(), "; "))
 	}
 
 	tcResult := TypeCheck(contract)
 	if len(tcResult.Errors) > 0 {
-		t.Errorf("expected no type errors for assert(cond, msg), got: %s", strings.Join(tcResult.Errors, "; "))
+		t.Errorf("expected no type errors for assert(cond, msg), got: %s", strings.Join(tcResult.ErrorStrings(), "; "))
 	}
 }
 
@@ -1219,7 +1219,7 @@ func TestTypeCheck_IncompatibleEquality_Error(t *testing.T) {
 
 	found := false
 	for _, e := range tcResult.Errors {
-		if strings.Contains(e, "compare") || strings.Contains(e, "bigint") || strings.Contains(e, "ByteString") || strings.Contains(e, "===") {
+		if strings.Contains(e.Message,"compare") || strings.Contains(e.Message,"bigint") || strings.Contains(e.Message,"ByteString") || strings.Contains(e.Message,"===") {
 			found = true
 			break
 		}
@@ -1255,12 +1255,12 @@ class HashTest extends SmartContract {
 
 	valResult := Validate(contract)
 	if len(valResult.Errors) > 0 {
-		t.Fatalf("validation failed: %s", strings.Join(valResult.Errors, "; "))
+		t.Fatalf("validation failed: %s", strings.Join(valResult.ErrorStrings(), "; "))
 	}
 
 	tcResult := TypeCheck(contract)
 	if len(tcResult.Errors) > 0 {
-		t.Errorf("expected no type errors for sha256(pk), got: %s", strings.Join(tcResult.Errors, "; "))
+		t.Errorf("expected no type errors for sha256(pk), got: %s", strings.Join(tcResult.ErrorStrings(), "; "))
 	}
 }
 
@@ -1310,7 +1310,7 @@ func TestTypeCheck_CheckSigWrongFirstArgType_Error(t *testing.T) {
 
 	found := false
 	for _, e := range tcResult.Errors {
-		if strings.Contains(e, "Sig") || strings.Contains(e, "argument") || strings.Contains(e, "type") {
+		if strings.Contains(e.Message,"Sig") || strings.Contains(e.Message,"argument") || strings.Contains(e.Message,"type") {
 			found = true
 			break
 		}
@@ -1366,7 +1366,7 @@ func TestTypeCheck_CheckSigWrongSecondArgType_Error(t *testing.T) {
 
 	found := false
 	for _, e := range tcResult.Errors {
-		if strings.Contains(e, "PubKey") || strings.Contains(e, "argument") || strings.Contains(e, "type") {
+		if strings.Contains(e.Message,"PubKey") || strings.Contains(e.Message,"argument") || strings.Contains(e.Message,"type") {
 			found = true
 			break
 		}
@@ -1402,12 +1402,12 @@ class SubTest extends SmartContract {
 
 	valResult := Validate(contract)
 	if len(valResult.Errors) > 0 {
-		t.Fatalf("validation failed: %s", strings.Join(valResult.Errors, "; "))
+		t.Fatalf("validation failed: %s", strings.Join(valResult.ErrorStrings(), "; "))
 	}
 
 	tcResult := TypeCheck(contract)
 	if len(tcResult.Errors) > 0 {
-		t.Errorf("expected no type errors for bigint subtraction, got: %s", strings.Join(tcResult.Errors, "; "))
+		t.Errorf("expected no type errors for bigint subtraction, got: %s", strings.Join(tcResult.ErrorStrings(), "; "))
 	}
 }
 
@@ -1439,12 +1439,12 @@ class MulDivTest extends SmartContract {
 
 	valResult := Validate(contract)
 	if len(valResult.Errors) > 0 {
-		t.Fatalf("validation failed: %s", strings.Join(valResult.Errors, "; "))
+		t.Fatalf("validation failed: %s", strings.Join(valResult.ErrorStrings(), "; "))
 	}
 
 	tcResult := TypeCheck(contract)
 	if len(tcResult.Errors) > 0 {
-		t.Errorf("expected no type errors for bigint * and /, got: %s", strings.Join(tcResult.Errors, "; "))
+		t.Errorf("expected no type errors for bigint * and /, got: %s", strings.Join(tcResult.ErrorStrings(), "; "))
 	}
 }
 
@@ -1521,12 +1521,12 @@ class ConcatTest extends SmartContract {
 
 	valResult := Validate(contract)
 	if len(valResult.Errors) > 0 {
-		t.Fatalf("validation failed: %s", strings.Join(valResult.Errors, "; "))
+		t.Fatalf("validation failed: %s", strings.Join(valResult.ErrorStrings(), "; "))
 	}
 
 	tcResult := TypeCheck(contract)
 	if len(tcResult.Errors) > 0 {
-		t.Errorf("expected no type errors for PubKey + ByteString (subtype concat), got: %s", strings.Join(tcResult.Errors, "; "))
+		t.Errorf("expected no type errors for PubKey + ByteString (subtype concat), got: %s", strings.Join(tcResult.ErrorStrings(), "; "))
 	}
 }
 
@@ -1558,12 +1558,12 @@ class CmpTest extends SmartContract {
 
 	valResult := Validate(contract)
 	if len(valResult.Errors) > 0 {
-		t.Fatalf("validation failed: %s", strings.Join(valResult.Errors, "; "))
+		t.Fatalf("validation failed: %s", strings.Join(valResult.ErrorStrings(), "; "))
 	}
 
 	tcResult := TypeCheck(contract)
 	if len(tcResult.Errors) > 0 {
-		t.Errorf("expected no type errors for comparison operators in assert, got: %s", strings.Join(tcResult.Errors, "; "))
+		t.Errorf("expected no type errors for comparison operators in assert, got: %s", strings.Join(tcResult.ErrorStrings(), "; "))
 	}
 }
 
@@ -1592,12 +1592,12 @@ class EqTest extends SmartContract {
 
 	valResult := Validate(contract)
 	if len(valResult.Errors) > 0 {
-		t.Fatalf("validation failed: %s", strings.Join(valResult.Errors, "; "))
+		t.Fatalf("validation failed: %s", strings.Join(valResult.ErrorStrings(), "; "))
 	}
 
 	tcResult := TypeCheck(contract)
 	if len(tcResult.Errors) > 0 {
-		t.Errorf("expected no type errors for a === b in assert, got: %s", strings.Join(tcResult.Errors, "; "))
+		t.Errorf("expected no type errors for a === b in assert, got: %s", strings.Join(tcResult.ErrorStrings(), "; "))
 	}
 }
 
@@ -1645,7 +1645,7 @@ func TestTypeCheck_BigintInLogicalAnd_Error(t *testing.T) {
 
 	found := false
 	for _, e := range tcResult.Errors {
-		if strings.Contains(e, "boolean") || strings.Contains(e, "&&") || strings.Contains(e, "bigint") {
+		if strings.Contains(e.Message,"boolean") || strings.Contains(e.Message,"&&") || strings.Contains(e.Message,"bigint") {
 			found = true
 			break
 		}
@@ -1683,7 +1683,7 @@ class WrongAssign extends SmartContract {
 
 	found := false
 	for _, e := range tcResult.Errors {
-		if strings.Contains(e, "boolean") || strings.Contains(e, "bigint") || strings.Contains(e, "type") {
+		if strings.Contains(e.Message,"boolean") || strings.Contains(e.Message,"bigint") || strings.Contains(e.Message,"type") {
 			found = true
 			break
 		}
@@ -1718,12 +1718,12 @@ class PropAccess extends SmartContract {
 
 	valResult := Validate(contract)
 	if len(valResult.Errors) > 0 {
-		t.Fatalf("validation failed: %s", strings.Join(valResult.Errors, "; "))
+		t.Fatalf("validation failed: %s", strings.Join(valResult.ErrorStrings(), "; "))
 	}
 
 	tcResult := TypeCheck(contract)
 	if len(tcResult.Errors) > 0 {
-		t.Errorf("expected no type errors for this.pk access, got: %s", strings.Join(tcResult.Errors, "; "))
+		t.Errorf("expected no type errors for this.pk access, got: %s", strings.Join(tcResult.ErrorStrings(), "; "))
 	}
 }
 
@@ -1753,15 +1753,15 @@ class ReuseKey extends SmartContract {
 
 	valResult := Validate(contract)
 	if len(valResult.Errors) > 0 {
-		t.Fatalf("validation failed: %s", strings.Join(valResult.Errors, "; "))
+		t.Fatalf("validation failed: %s", strings.Join(valResult.ErrorStrings(), "; "))
 	}
 
 	tcResult := TypeCheck(contract)
 
 	// PubKey is not an affine type — it can be used multiple times
 	for _, e := range tcResult.Errors {
-		if strings.Contains(e, "affine") || strings.Contains(e, "once") || (strings.Contains(e, "PubKey") && strings.Contains(e, "consumed")) {
-			t.Errorf("expected PubKey to be reusable, but got affine/linear error: %s", e)
+		if strings.Contains(e.Message,"affine") || strings.Contains(e.Message,"once") || (strings.Contains(e.Message,"PubKey") && strings.Contains(e.Message,"consumed")) {
+			t.Errorf("expected PubKey to be reusable, but got affine/linear error: %s", e.Message)
 		}
 	}
 }
@@ -1794,12 +1794,12 @@ class BuiltinTest extends SmartContract {
 
 	valResult := Validate(contract)
 	if len(valResult.Errors) > 0 {
-		t.Fatalf("validation failed: %s", strings.Join(valResult.Errors, "; "))
+		t.Fatalf("validation failed: %s", strings.Join(valResult.ErrorStrings(), "; "))
 	}
 
 	tcResult := TypeCheck(contract)
 	if len(tcResult.Errors) > 0 {
-		t.Errorf("expected no type errors for known Rúnar builtins abs/min, got: %s", strings.Join(tcResult.Errors, "; "))
+		t.Errorf("expected no type errors for known Rúnar builtins abs/min, got: %s", strings.Join(tcResult.ErrorStrings(), "; "))
 	}
 }
 
@@ -1831,15 +1831,15 @@ class SplitTest extends SmartContract {
 
 	valResult := Validate(contract)
 	if len(valResult.Errors) > 0 {
-		t.Fatalf("validation failed: %s", strings.Join(valResult.Errors, "; "))
+		t.Fatalf("validation failed: %s", strings.Join(valResult.ErrorStrings(), "; "))
 	}
 
 	tcResult := TypeCheck(contract)
 
 	// split() must not produce an "unknown function" error
 	for _, e := range tcResult.Errors {
-		if strings.Contains(e, "split") && strings.Contains(e, "unknown") {
-			t.Errorf("split() was rejected as unknown function: %s", e)
+		if strings.Contains(e.Message,"split") && strings.Contains(e.Message,"unknown") {
+			t.Errorf("split() was rejected as unknown function: %s", e.Message)
 		}
 	}
 }
@@ -1874,15 +1874,15 @@ class PrivateMethod extends SmartContract {
 
 	valResult := Validate(contract)
 	if len(valResult.Errors) > 0 {
-		t.Fatalf("validation failed: %s", strings.Join(valResult.Errors, "; "))
+		t.Fatalf("validation failed: %s", strings.Join(valResult.ErrorStrings(), "; "))
 	}
 
 	tcResult := TypeCheck(contract)
 
 	// Calling a private method should not produce an "unknown function" error
 	for _, e := range tcResult.Errors {
-		if strings.Contains(e, "unknown") && (strings.Contains(e, "helper") || strings.Contains(e, "method")) {
-			t.Errorf("expected private method call to be allowed, but got unknown-function error: %s", e)
+		if strings.Contains(e.Message,"unknown") && (strings.Contains(e.Message,"helper") || strings.Contains(e.Message,"method")) {
+			t.Errorf("expected private method call to be allowed, but got unknown-function error: %s", e.Message)
 		}
 	}
 }
@@ -1915,7 +1915,7 @@ class PreimageTwice extends SmartContract {
 
 	found := false
 	for _, e := range tcResult.Errors {
-		if strings.Contains(e, "affine") || strings.Contains(e, "consumed") || strings.Contains(e, "SigHashPreimage") || strings.Contains(e, "once") {
+		if strings.Contains(e.Message,"affine") || strings.Contains(e.Message,"consumed") || strings.Contains(e.Message,"SigHashPreimage") || strings.Contains(e.Message,"once") {
 			found = true
 			break
 		}
@@ -1944,11 +1944,11 @@ class Test extends SmartContract {
 	contract := mustParseTS(t, source)
 	valResult := Validate(contract)
 	if len(valResult.Errors) > 0 {
-		t.Fatalf("validation failed: %s", strings.Join(valResult.Errors, "; "))
+		t.Fatalf("validation failed: %s", strings.Join(valResult.ErrorStrings(), "; "))
 	}
 	tcResult := TypeCheck(contract)
 	if len(tcResult.Errors) > 0 {
-		t.Errorf("expected no type errors for !==, got: %s", strings.Join(tcResult.Errors, "; "))
+		t.Errorf("expected no type errors for !==, got: %s", strings.Join(tcResult.ErrorStrings(), "; "))
 	}
 }
 
@@ -1971,11 +1971,11 @@ class Test extends SmartContract {
 	contract := mustParseTS(t, source)
 	valResult := Validate(contract)
 	if len(valResult.Errors) > 0 {
-		t.Fatalf("validation failed: %s", strings.Join(valResult.Errors, "; "))
+		t.Fatalf("validation failed: %s", strings.Join(valResult.ErrorStrings(), "; "))
 	}
 	tcResult := TypeCheck(contract)
 	if len(tcResult.Errors) > 0 {
-		t.Errorf("expected no type errors for Sig used once, got: %s", strings.Join(tcResult.Errors, "; "))
+		t.Errorf("expected no type errors for Sig used once, got: %s", strings.Join(tcResult.ErrorStrings(), "; "))
 	}
 }
 
@@ -2048,11 +2048,11 @@ class Test extends SmartContract {
 	contract := mustParseTS(t, source)
 	valResult := Validate(contract)
 	if len(valResult.Errors) > 0 {
-		t.Fatalf("validation failed: %s", strings.Join(valResult.Errors, "; "))
+		t.Fatalf("validation failed: %s", strings.Join(valResult.ErrorStrings(), "; "))
 	}
 	tcResult := TypeCheck(contract)
 	if len(tcResult.Errors) > 0 {
-		t.Errorf("expected no type errors for num2bin(bigint, bigint), got: %s", strings.Join(tcResult.Errors, "; "))
+		t.Errorf("expected no type errors for num2bin(bigint, bigint), got: %s", strings.Join(tcResult.ErrorStrings(), "; "))
 	}
 }
 
@@ -2077,10 +2077,10 @@ class MultiSig extends SmartContract {
 	contract := mustParseTS(t, source)
 	valResult := Validate(contract)
 	if len(valResult.Errors) > 0 {
-		t.Fatalf("validation failed: %s", strings.Join(valResult.Errors, "; "))
+		t.Fatalf("validation failed: %s", strings.Join(valResult.ErrorStrings(), "; "))
 	}
 	tcResult := TypeCheck(contract)
 	if len(tcResult.Errors) > 0 {
-		t.Errorf("expected no type errors for two distinct Sigs used once each, got: %s", strings.Join(tcResult.Errors, "; "))
+		t.Errorf("expected no type errors for two distinct Sigs used once each, got: %s", strings.Join(tcResult.ErrorStrings(), "; "))
 	}
 }

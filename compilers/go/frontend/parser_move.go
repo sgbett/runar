@@ -23,7 +23,7 @@ func ParseMove(source []byte, fileName string) *ParseResult {
 
 	contract, err := p.parseModule()
 	if err != nil {
-		return &ParseResult{Errors: []string{err.Error()}}
+		return &ParseResult{Errors: []Diagnostic{{Message: err.Error(), Severity: SeverityError}}}
 	}
 	if len(p.errors) > 0 {
 		return &ParseResult{Contract: contract, Errors: p.errors}
@@ -98,11 +98,11 @@ type moveParser struct {
 	fileName string
 	tokens   []moveToken
 	pos      int
-	errors   []string
+	errors   []Diagnostic
 }
 
 func (p *moveParser) addError(msg string) {
-	p.errors = append(p.errors, msg)
+	p.errors = append(p.errors, Diagnostic{Message: msg, Severity: SeverityError})
 }
 
 func (p *moveParser) tokenize(source string) []moveToken {

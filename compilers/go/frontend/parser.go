@@ -18,7 +18,16 @@ import (
 // ParseResult holds the result of parsing a Rúnar source file.
 type ParseResult struct {
 	Contract *ContractNode
-	Errors   []string
+	Errors   []Diagnostic
+}
+
+// ErrorStrings returns error messages as strings (for backward compatibility).
+func (r *ParseResult) ErrorStrings() []string {
+	result := make([]string, len(r.Errors))
+	for i, d := range r.Errors {
+		result[i] = d.FormatMessage()
+	}
+	return result
 }
 
 // ParseSource detects the file extension and routes to the appropriate parser.
@@ -53,7 +62,7 @@ func Parse(source []byte, fileName string) *ParseResult {
 
 	tree, err := parser.ParseCtx(context.Background(), nil, source)
 	if err != nil {
-		return &ParseResult{Errors: []string{fmt.Sprintf("parse error: %v", err)}}
+		return &ParseResult{Errors: []Diagnostic{{Message: fmt.Sprintf("parse error: %v", err), Severity: SeverityError}}}
 	}
 
 	root := tree.RootNode()
@@ -64,7 +73,8 @@ func Parse(source []byte, fileName string) *ParseResult {
 
 	contract := p.findContract(root)
 	if contract == nil {
-		return &ParseResult{Errors: append(p.errors, "no class extending SmartContract or StatefulSmartContract found")}
+		p.addError("no class extending SmartContract or StatefulSmartContract found")
+		return &ParseResult{Errors: p.errors}
 	}
 
 	return &ParseResult{
@@ -80,11 +90,11 @@ func Parse(source []byte, fileName string) *ParseResult {
 type parseContext struct {
 	source   []byte
 	fileName string
-	errors   []string
+	errors   []Diagnostic
 }
 
 func (p *parseContext) addError(msg string) {
-	p.errors = append(p.errors, msg)
+	p.errors = append(p.errors, Diagnostic{Message: msg, Severity: SeverityError})
 }
 
 func (p *parseContext) nodeText(node *sitter.Node) string {
