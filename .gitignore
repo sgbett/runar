@@ -23,3 +23,7 @@ compilers/go/runar*-go
 
 # Local Claude settings (user-specific, not shared)
 .claude/settings.local.json
+.zig-cache/
+.zig-global-cache/
+.zig-local-cache/
+zig-out/
