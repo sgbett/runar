@@ -34,6 +34,7 @@ from runar_compiler.frontend.ast_nodes import (
     PrimitiveType,
     PropertyAccessExpr,
     ReturnStmt,
+    SourceLocation as ASTSourceLocation,
     Statement,
     TernaryExpr,
     TypeNode,
@@ -47,6 +48,7 @@ from runar_compiler.ir.types import (
     ANFProgram,
     ANFProperty,
     ANFValue,
+    SourceLocation,
 )
 
 
@@ -336,6 +338,7 @@ class _LowerCtx:
         self._add_output_refs: list[str] = []
         self._local_aliases: dict[str, str] = {}
         self._local_byte_vars: set[str] = set()
+        self.current_source_loc: SourceLocation | None = None
 
     def fresh_temp(self) -> str:
         name = f"t{self._counter}"
@@ -344,11 +347,17 @@ class _LowerCtx:
 
     def emit(self, value: ANFValue) -> str:
         name = self.fresh_temp()
-        self.bindings.append(ANFBinding(name=name, value=value))
+        binding = ANFBinding(name=name, value=value)
+        if self.current_source_loc:
+            binding.source_loc = self.current_source_loc
+        self.bindings.append(binding)
         return name
 
     def emit_named(self, name: str, value: ANFValue) -> None:
-        self.bindings.append(ANFBinding(name=name, value=value))
+        binding = ANFBinding(name=name, value=value)
+        if self.current_source_loc:
+            binding.source_loc = self.current_source_loc
+        self.bindings.append(binding)
 
     def add_local(self, name: str) -> None:
         self._local_names.add(name)
@@ -438,6 +447,13 @@ class _LowerCtx:
             self.lower_statement(stmt)
 
     def lower_statement(self, stmt: Statement) -> None:
+        # Propagate source location to emitted ANF bindings
+        stmt_loc = getattr(stmt, "source_location", None)
+        if stmt_loc is not None:
+            self.current_source_loc = SourceLocation(
+                file=stmt_loc.file, line=stmt_loc.line, column=stmt_loc.column,
+            )
+
         if isinstance(stmt, VariableDeclStmt):
             self._lower_variable_decl(stmt)
         elif isinstance(stmt, AssignmentStmt):
@@ -460,6 +476,8 @@ class _LowerCtx:
                 # return value.
                 if self.bindings and self.bindings[-1].name != ref:
                     self.emit(_make_load_const_string(f"@ref:{ref}"))
+
+        self.current_source_loc = None
 
     def _lower_variable_decl(self, stmt: VariableDeclStmt) -> None:
         value_ref = self.lower_expr_to_ref(stmt.init)

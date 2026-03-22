@@ -360,7 +360,7 @@ def _fold_binding(binding: ANFBinding, env: ConstEnv) -> ANFBinding:
     if cv is not None:
         env[binding.name] = cv
 
-    return ANFBinding(name=binding.name, value=folded_value)
+    return ANFBinding(name=binding.name, value=folded_value, source_loc=binding.source_loc)
 
 
 # ---------------------------------------------------------------------------

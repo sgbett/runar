@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from runar_compiler.codegen.stack import StackOp, StackMethod, PushValue
+from runar_compiler.ir.types import SourceLocation
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +129,15 @@ class ConstructorSlot:
     byte_offset: int = 0
 
 
+@dataclass
+class SourceMapping:
+    """Maps an emitted opcode to a source location."""
+    opcode_index: int = 0
+    source_file: str = ""
+    line: int = 0
+    column: int = 0
+
+
 # ---------------------------------------------------------------------------
 # EmitResult
 # ---------------------------------------------------------------------------
@@ -137,6 +147,7 @@ class EmitResult:
     """Holds the outputs of the emission pass."""
     script_hex: str = ""
     script_asm: str = ""
+    source_map: list[SourceMapping] = field(default_factory=list)
     constructor_slots: list[ConstructorSlot] = field(default_factory=list)
     code_separator_index: int = -1
     code_separator_indices: list[int] = field(default_factory=list)
@@ -151,9 +162,29 @@ class _EmitContext:
         self.hex_parts: list[str] = []
         self.asm_parts: list[str] = []
         self.byte_length: int = 0
+        self.opcode_index: int = 0
+        self.source_map: list[SourceMapping] = []
+        self.pending_source_loc: Optional[SourceLocation] = None
         self.constructor_slots: list[ConstructorSlot] = []
         self.code_separator_index: int = -1
         self.code_separator_indices: list[int] = []
+
+    def set_source_loc(self, loc: Optional[SourceLocation]) -> None:
+        self.pending_source_loc = loc
+
+    def _record_source_mapping(self) -> None:
+        if self.pending_source_loc:
+            self.source_map.append(SourceMapping(
+                opcode_index=self.opcode_index,
+                source_file=self.pending_source_loc.file,
+                line=self.pending_source_loc.line,
+                column=self.pending_source_loc.column,
+            ))
+
+    def _advance_opcode_index(self) -> int:
+        idx = self.opcode_index
+        self.opcode_index += 1
+        return idx
 
     def append_hex(self, h: str) -> None:
         self.hex_parts.append(h)
@@ -169,16 +200,22 @@ class _EmitContext:
         if name == "OP_CODESEPARATOR":
             self.code_separator_index = self.byte_length
             self.code_separator_indices.append(self.byte_length)
+        self._record_source_mapping()
+        self._advance_opcode_index()
         self.append_hex(f"{b:02x}")
         self.append_asm(name)
 
     def emit_push(self, value: PushValue) -> None:
         h, a = encode_push_value(value)
+        self._record_source_mapping()
+        self._advance_opcode_index()
         self.append_hex(h)
         self.append_asm(a)
 
     def emit_placeholder(self, param_index: int) -> None:
         byte_offset = self.byte_length
+        self._record_source_mapping()
+        self._advance_opcode_index()
         self.append_hex("00")  # OP_0 placeholder byte
         self.append_asm("OP_0")
         self.constructor_slots.append(ConstructorSlot(
@@ -312,6 +349,10 @@ def encode_push_big_int(n: int) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 
 def _emit_stack_op(op: StackOp, ctx: _EmitContext) -> None:
+    # Propagate source location from StackOp to the emit context
+    if op.source_loc:
+        ctx.set_source_loc(op.source_loc)
+
     if op.op == "push":
         ctx.emit_push(op.value)
     elif op.op == "dup":
@@ -344,6 +385,9 @@ def _emit_stack_op(op: StackOp, ctx: _EmitContext) -> None:
         ctx.emit_push(PushValue(kind="bigint", big_int=idx))
     else:
         raise ValueError(f"unknown stack op: {op.op}")
+
+    # Clear after emitting so the location doesn't leak to the next op
+    ctx.set_source_loc(None)
 
 
 def _emit_if(then_ops: list[StackOp], else_ops: list[StackOp], ctx: _EmitContext) -> None:
@@ -413,7 +457,7 @@ def emit(methods: list[StackMethod]) -> EmitResult:
     public_methods = [m for m in methods if m.name != "constructor"]
 
     if not public_methods:
-        return EmitResult(script_hex="", script_asm="", constructor_slots=[])
+        return EmitResult(script_hex="", script_asm="", source_map=[], constructor_slots=[])
 
     if len(public_methods) == 1:
         # Single public method -- no dispatch needed
@@ -426,6 +470,7 @@ def emit(methods: list[StackMethod]) -> EmitResult:
     return EmitResult(
         script_hex=ctx.get_hex(),
         script_asm=ctx.get_asm(),
+        source_map=ctx.source_map,
         constructor_slots=ctx.constructor_slots,
         code_separator_index=ctx.code_separator_index,
         code_separator_indices=ctx.code_separator_indices,
@@ -440,6 +485,7 @@ def emit_method(method: StackMethod) -> EmitResult:
     return EmitResult(
         script_hex=ctx.get_hex(),
         script_asm=ctx.get_asm(),
+        source_map=ctx.source_map,
         constructor_slots=ctx.constructor_slots,
         code_separator_index=ctx.code_separator_index,
         code_separator_indices=ctx.code_separator_indices,

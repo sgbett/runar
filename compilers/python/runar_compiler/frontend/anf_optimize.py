@@ -75,7 +75,7 @@ def _optimize_method(method: ANFMethod) -> None:
         for binding in method.body:
             optimized = _try_optimize(binding.value, value_map)
             if optimized is not None:
-                binding = ANFBinding(name=binding.name, value=optimized)
+                binding = ANFBinding(name=binding.name, value=optimized, source_loc=binding.source_loc)
                 changed = True
             value_map[binding.name] = binding.value
             new_body.append(binding)

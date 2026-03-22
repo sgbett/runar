@@ -38,8 +38,17 @@ def _optimize_nested_if(op: StackOp) -> StackOp:
             op="if",
             then=optimized_then,
             else_ops=optimized_else,
+            source_loc=op.source_loc,
         )
     return op
+
+
+def _propagate_source_loc(original: StackOp, replacements: list[StackOp]) -> None:
+    """Copy source_loc from the first matched op to all replacement ops."""
+    if original.source_loc is not None:
+        for r in replacements:
+            if r.source_loc is None:
+                r.source_loc = original.source_loc
 
 
 def _apply_one_pass(ops: list[StackOp]) -> tuple[list[StackOp], bool]:
@@ -52,6 +61,7 @@ def _apply_one_pass(ops: list[StackOp]) -> tuple[list[StackOp], bool]:
         if i + 3 < len(ops):
             replacement = _match_window4(ops[i], ops[i + 1], ops[i + 2], ops[i + 3])
             if replacement is not None:
+                _propagate_source_loc(ops[i], replacement)
                 result.extend(replacement)
                 i += 4
                 changed = True
@@ -61,6 +71,7 @@ def _apply_one_pass(ops: list[StackOp]) -> tuple[list[StackOp], bool]:
         if i + 2 < len(ops):
             replacement = _match_window3(ops[i], ops[i + 1], ops[i + 2])
             if replacement is not None:
+                _propagate_source_loc(ops[i], replacement)
                 result.extend(replacement)
                 i += 3
                 changed = True
@@ -70,6 +81,7 @@ def _apply_one_pass(ops: list[StackOp]) -> tuple[list[StackOp], bool]:
         if i + 1 < len(ops):
             replacement = _match_window2(ops[i], ops[i + 1])
             if replacement is not None:
+                _propagate_source_loc(ops[i], replacement)
                 result.extend(replacement)
                 i += 2
                 changed = True

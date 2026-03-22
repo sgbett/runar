@@ -15,6 +15,19 @@ from typing import Any
 
 
 # ---------------------------------------------------------------------------
+# Source location
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SourceLocation:
+    """A position in a source file (for debug source maps)."""
+
+    file: str = ""
+    line: int = 0
+    column: int = 0
+
+
+# ---------------------------------------------------------------------------
 # Program structure
 # ---------------------------------------------------------------------------
 
@@ -68,6 +81,7 @@ class ANFBinding:
 
     name: str = ""
     value: ANFValue = field(default_factory=lambda: ANFValue())
+    source_loc: SourceLocation | None = None
 
 
 # ---------------------------------------------------------------------------

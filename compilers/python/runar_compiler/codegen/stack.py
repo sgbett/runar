@@ -19,6 +19,7 @@ from runar_compiler.ir.types import (
     ANFProgram,
     ANFProperty,
     ANFValue,
+    SourceLocation,
 )
 
 # ---------------------------------------------------------------------------
@@ -56,6 +57,7 @@ class StackOp:
     else_ops: list[StackOp] = field(default_factory=list)   # for if ops
     param_index: int = 0     # for placeholder ops -- index into constructor params
     param_name: str = ""     # for placeholder ops -- name of constructor param
+    source_loc: Optional[SourceLocation] = None  # debug source location for source maps
 
 
 @dataclass
@@ -300,6 +302,7 @@ class _LoweringContext:
         self.local_bindings: dict[str, bool] = {}
         self.outer_protected_refs: Optional[set[str]] = None
         self.inside_branch: bool = False
+        self.current_source_loc: Optional[SourceLocation] = None
         self._track_depth()
 
     def _track_depth(self) -> None:
@@ -307,6 +310,8 @@ class _LoweringContext:
             self.max_depth = self.sm.depth()
 
     def emit_op(self, op: StackOp) -> None:
+        if self.current_source_loc and op.source_loc is None:
+            op.source_loc = self.current_source_loc
         self.ops.append(op)
         self._track_depth()
 
@@ -648,6 +653,8 @@ class _LoweringContext:
                         break
 
         for i, binding in enumerate(bindings):
+            # Propagate source location from ANF binding to StackOps
+            self.current_source_loc = binding.source_loc
             if binding.value.kind == "assert" and i == last_assert_idx:
                 # Terminal assert: leave value on stack instead of OP_VERIFY
                 self._lower_assert(binding.value.value_ref, i, last_uses, True)
@@ -660,6 +667,7 @@ class _LoweringContext:
                 )
             else:
                 self._lower_binding(binding, i, last_uses)
+            self.current_source_loc = None
 
     def _lower_bindings_protected(self, bindings: list[ANFBinding], protected_names: set[str]) -> None:
         """Like lower_bindings but never consumes protected names."""
@@ -670,7 +678,9 @@ class _LoweringContext:
             last_uses[name] = (1 << 31) - 1
 
         for i, binding in enumerate(bindings):
+            self.current_source_loc = binding.source_loc
             self._lower_binding(binding, i, last_uses)
+            self.current_source_loc = None
 
     # -----------------------------------------------------------------
     # lower_binding dispatch

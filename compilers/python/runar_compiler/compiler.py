@@ -80,6 +80,8 @@ class Artifact:
     abi: ABI = field(default_factory=ABI)
     script: str = ""
     asm: str = ""
+    source_map: list | None = None  # list of SourceMapping dicts
+    ir: dict | None = None  # {"anf": ..., "stack": ...}
     state_fields: list[StateField] = field(default_factory=list)
     constructor_slots: list[ConstructorSlot] = field(default_factory=list)
     code_separator_index: int | None = None
@@ -249,6 +251,8 @@ def compile_from_program(program: ANFProgram, disable_constant_folding: bool = F
         emit_result.constructor_slots,
         emit_result.code_separator_index,
         emit_result.code_separator_indices,
+        source_map=emit_result.source_map,
+        stack_methods=stack_methods,
     )
 
 
@@ -339,6 +343,10 @@ def _assemble_artifact(
     constructor_slots: list[ConstructorSlot],
     code_separator_index: int = -1,
     code_separator_indices: list[int] | None = None,
+    source_map: list | None = None,
+    stack_methods: list | None = None,
+    include_ir: bool = False,
+    include_source_map: bool = True,
 ) -> Artifact:
     """Build the final output artifact from the compilation products."""
     # Build ABI
@@ -384,6 +392,19 @@ def _assemble_artifact(
     cs_index = code_separator_index if code_separator_index >= 0 else None
     cs_indices = code_separator_indices if code_separator_indices else None
 
+    # Source map (include if non-empty and requested)
+    sm = None
+    if include_source_map and source_map:
+        sm = source_map
+
+    # IR snapshots (include only when explicitly requested)
+    ir_snapshot = None
+    if include_ir and stack_methods is not None:
+        ir_snapshot = {
+            "anf": program,
+            "stack": stack_methods,
+        }
+
     art = Artifact(
         version=SCHEMA_VERSION,
         compiler_version=COMPILER_VERSION,
@@ -394,6 +415,8 @@ def _assemble_artifact(
         ),
         script=script_hex,
         asm=script_asm,
+        source_map=sm,
+        ir=ir_snapshot,
         state_fields=state_fields,
         constructor_slots=constructor_slots,
         code_separator_index=cs_index,
@@ -439,6 +462,29 @@ def artifact_to_json(artifact: Artifact) -> str:
         "script": artifact.script,
         "asm": artifact.asm,
     }
+    if artifact.source_map:
+        from runar_compiler.codegen.emit import SourceMapping
+        d["sourceMap"] = {
+            "mappings": [
+                {
+                    "opcodeIndex": sm.opcode_index,
+                    "sourceFile": sm.source_file,
+                    "line": sm.line,
+                    "column": sm.column,
+                }
+                if isinstance(sm, SourceMapping)
+                else sm
+                for sm in artifact.source_map
+            ],
+        }
+    if artifact.ir is not None:
+        ir_dict: dict[str, Any] = {}
+        if "anf" in artifact.ir and artifact.ir["anf"] is not None:
+            ir_dict["anf"] = _serialize_anf_program(artifact.ir["anf"])
+        if "stack" in artifact.ir and artifact.ir["stack"] is not None:
+            ir_dict["stack"] = _serialize_stack_methods(artifact.ir["stack"])
+        if ir_dict:
+            d["ir"] = ir_dict
     if artifact.state_fields:
         d["stateFields"] = [
             {
@@ -540,6 +586,54 @@ def _serialize_anf_program(program: ANFProgram) -> dict[str, Any]:
                 "isPublic": m.is_public,
             }
             for m in program.methods
+        ],
+    }
+
+
+def _serialize_stack_methods(methods: list) -> dict[str, Any]:
+    """Serialize a list of StackMethod objects to a JSON-compatible dict."""
+    def _ser_push_value(v: Any) -> Any:
+        if v is None:
+            return None
+        if v.kind == "bigint":
+            return {"kind": "bigint", "value": v.big_int}
+        if v.kind == "bool":
+            return {"kind": "bool", "value": v.bool_val}
+        if v.kind == "bytes":
+            return {"kind": "bytes", "value": v.bytes_val.hex() if v.bytes_val else ""}
+        return {"kind": v.kind}
+
+    def _ser_op(op: Any) -> dict[str, Any]:
+        d: dict[str, Any] = {"op": op.op}
+        if op.op == "push" and op.value is not None:
+            d["value"] = _ser_push_value(op.value)
+        if op.op in ("roll", "pick") and op.depth != 0:
+            d["depth"] = op.depth
+        if op.op == "opcode":
+            d["code"] = op.code
+        if op.op == "if":
+            d["then"] = [_ser_op(o) for o in op.then]
+            if op.else_ops:
+                d["else"] = [_ser_op(o) for o in op.else_ops]
+        if op.op == "placeholder":
+            d["paramIndex"] = op.param_index
+            d["paramName"] = op.param_name
+        if op.source_loc is not None:
+            d["sourceLoc"] = {
+                "file": op.source_loc.file,
+                "line": op.source_loc.line,
+                "column": op.source_loc.column,
+            }
+        return d
+
+    return {
+        "methods": [
+            {
+                "name": m.name,
+                "ops": [_ser_op(op) for op in m.ops],
+                "maxStackDepth": m.max_stack_depth,
+            }
+            for m in methods
         ],
     }
 
@@ -787,6 +881,8 @@ def _compile_from_source_str_with_result(
         emit_result.constructor_slots,
         emit_result.code_separator_index,
         emit_result.code_separator_indices,
+        source_map=emit_result.source_map,
+        stack_methods=stack_methods,
     )
     result.artifact = artifact
     result.script_hex = emit_result.script_hex
