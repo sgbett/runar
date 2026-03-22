@@ -23,11 +23,13 @@ def compile_source(source, file_name)
   require 'shellwords'
 
   script = <<~JS
-    const { compile } = require('#{PROJECT_ROOT}/packages/runar-compiler/dist/index.js');
-    const result = compile(#{source.inspect}, { fileName: #{file_name.inspect} });
-    if (!result.success) { console.error(JSON.stringify(result.diagnostics)); process.exit(1); }
-    const json = JSON.stringify(result.artifact, (k, v) => typeof v === 'bigint' ? v.toString() + 'n' : v);
-    process.stdout.write(json);
+    (async () => {
+      const { compile } = await import('#{PROJECT_ROOT}/packages/runar-compiler/dist/index.js');
+      const result = compile(#{source.inspect}, { fileName: #{file_name.inspect} });
+      if (!result.success) { console.error(JSON.stringify(result.diagnostics)); process.exit(1); }
+      const json = JSON.stringify(result.artifact, (k, v) => typeof v === 'bigint' ? v.toString() + 'n' : v);
+      process.stdout.write(json);
+    })();
   JS
 
   output = `node -e #{Shellwords.escape(script)} 2>&1`
