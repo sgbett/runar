@@ -95,6 +95,12 @@ jobs:
       - run: cd compilers/zig && zig build test
       - name: Zig conformance tests
         run: cd compilers/zig && zig build conformance
+      - name: Build release binary
+        run: cd compilers/zig && zig build -Doptimize=ReleaseFast
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runar-zig
+          path: compilers/zig/zig-out/bin/runar-zig
 
   zig-sdk:
     name: Zig SDK
@@ -127,7 +133,7 @@ jobs:
 
   conformance:
     name: Conformance Tests
-    needs: [typescript, go, rust, python]
+    needs: [typescript, go, rust, python, zig-compiler]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -137,7 +143,10 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: runar-rust
-      - run: chmod +x runar-go runar-compiler-rust
+      - uses: actions/download-artifact@v4
+        with:
+          name: runar-zig
+      - run: chmod +x runar-go runar-compiler-rust runar-zig
       - name: Run conformance tests
         run: |
           fail=0
@@ -147,8 +156,12 @@ jobs:
             echo -n "=== $name === "
             go_hex=$(./runar-go --ir "$test" --hex)
             rust_hex=$(./runar-compiler-rust --ir "$test" --hex)
+            zig_hex=$(./runar-zig compile-ir "$test" --hex 2>/dev/null | head -1)
             if [ "$go_hex" != "$rust_hex" ]; then
-              echo "MISMATCH (Go: ${#go_hex} chars, Rust: ${#rust_hex} chars)"
+              echo "MISMATCH Go vs Rust"
+              fail=1
+            elif [ "$go_hex" != "$zig_hex" ]; then
+              echo "MISMATCH Go vs Zig"
               fail=1
             else
               echo "OK (${#go_hex} hex chars)"
