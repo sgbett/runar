@@ -49,6 +49,13 @@
       "description": "Ruby DSL contract syntax",
       "compilers": ["ts", "go", "rust", "python"],
       "status": "experimental"
+    },
+    {
+      "extension": ".runar.zig",
+      "name": "Zig",
+      "description": "Zig struct/method contract syntax",
+      "compilers": ["zig"],
+      "status": "experimental"
     }
   ]
 }

@@ -105,6 +105,8 @@ jobs:
         with:
           version: 0.15.0
       - run: cd packages/runar-zig && zig build test
+      - name: Zig example tests
+        run: cd examples/zig && zig build test
 
   ruby:
     name: Ruby SDK
