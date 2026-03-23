@@ -164,6 +164,20 @@ RSpec.describe Runar::Builtins do
       expect(ctx.gcd(-12, 8)).to eq(4)
     end
 
+    it 'div_mod returns integer quotient' do
+      expect(ctx.div_mod(10, 3)).to eq(3)
+      expect(ctx.div_mod(7, 2)).to eq(3)
+      expect(ctx.div_mod(-7, 2)).to eq(-4)
+    end
+
+    it 'log2 returns floor of base-2 logarithm' do
+      expect(ctx.log2(1)).to eq(0)
+      expect(ctx.log2(2)).to eq(1)
+      expect(ctx.log2(8)).to eq(3)
+      expect(ctx.log2(10)).to eq(3)
+      expect(ctx.log2(0)).to eq(0)
+    end
+
     it 'within checks half-open range' do
       expect(ctx.within(5, 0, 10)).to be true
       expect(ctx.within(10, 0, 10)).to be false
