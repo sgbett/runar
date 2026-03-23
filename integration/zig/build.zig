@@ -1,0 +1,53 @@
+const std = @import("std");
+
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+
+    // bsvz dependency (same as runar-zig SDK)
+    const bsvz_dep = b.dependency("bsvz", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const bsvz_module = bsvz_dep.module("bsvz");
+
+    // Zig compiler frontend module (for compiling contracts natively)
+    const frontend_module = b.createModule(.{
+        .root_source_file = b.path("../../compilers/zig/src/frontend_api.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // runar-zig SDK module
+    const runar_module = b.createModule(.{
+        .root_source_file = b.path("../../packages/runar-zig/src/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    runar_module.addImport("runar_frontend", frontend_module);
+    runar_module.addImport("bsvz", bsvz_module);
+
+    // Build options for runar (it checks for bsvz_runar_harness)
+    const build_options = b.addOptions();
+    build_options.addOption(bool, "has_bsvz_runar_harness", false);
+    runar_module.addOptions("build_options", build_options);
+
+    // Create root module for the integration tests
+    const test_module = b.createModule(.{
+        .root_source_file = b.path("src/main_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    test_module.addImport("bsvz", bsvz_module);
+    test_module.addImport("runar", runar_module);
+    test_module.addImport("runar_frontend", frontend_module);
+
+    // Integration test executable
+    const tests = b.addTest(.{
+        .root_module = test_module,
+    });
+
+    const run_tests = b.addRunArtifact(tests);
+    const test_step = b.step("test", "Run Zig integration tests");
+    test_step.dependOn(&run_tests.step);
+}

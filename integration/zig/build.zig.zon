@@ -1,0 +1,16 @@
+.{
+    .name = .runar_zig_integration,
+    .version = "0.1.0",
+    .fingerprint = 0x80cf243a38992509,
+    .dependencies = .{
+        .bsvz = .{
+            .url = "git+https://github.com/b-open-io/bsvz.git#16957c773bdf18f4b2a75f7ea326a2e1cefa3f2d",
+            .hash = "bsvz-0.1.0-wvsL-bhiFQBIsxHKnVuig_LNW5O19aGntcqbZu3XWfjZ",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
