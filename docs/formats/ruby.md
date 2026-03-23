@@ -312,7 +312,7 @@ The `runar-lang` gem (`packages/runar-rb/`) provides:
 - **Types**: `Bigint`, `ByteString`, `PubKey`, `Sig`, `Addr`, `Point`, etc. (Ruby constants)
 - **Base classes**: `Runar::SmartContract`, `Runar::StatefulSmartContract`
 - **DSL methods**: `prop`, `runar_public`, `params`
-- **Mock crypto**: `check_sig`, `check_preimage`, `verify_wots`, `verify_slh_dsa_*` (always return true)
+- **Real crypto**: `check_sig` (ECDSA via OpenSSL), `check_preimage` (mock), `verify_wots`, `verify_slh_dsa_*` (mock)
 - **Real hashes**: `hash160`, `hash256`, `sha256`, `ripemd160` (via `digest`/`openssl`)
 - **Real EC**: `ec_add`, `ec_mul`, `ec_mul_gen`, `ec_negate`, `ec_on_curve`, etc. (pure Ruby secp256k1)
 - **Math**: `safediv`, `sqrt`, `gcd`, `clamp`, `sign`, `pow`, `mul_div`, `percent_of`, `log2`
