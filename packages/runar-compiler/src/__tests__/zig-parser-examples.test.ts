@@ -33,7 +33,10 @@ function findExampleFiles(baseDir: string, extension: string): string[] {
 }
 
 const ZIG_EXAMPLES = findExampleFiles(EXAMPLES_ZIG_DIR, '.runar.zig');
+// Exclude examples that don't have a Zig version yet (upstream #23)
+const MISSING_ZIG = new Set(['message-board']);
 const TS_EXAMPLES = findExampleFiles(EXAMPLES_TS_DIR, '.runar.ts')
+  .filter((file) => !MISSING_ZIG.has(file.split('/')[0] ?? ''))
   .map((file) => file.replace(/\.runar\.ts$/, '.runar.zig'))
   .sort();
 
