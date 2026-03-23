@@ -51,6 +51,10 @@ RSpec.describe Runar::Types do
     expect(Runar::Types::Point).to eq(String)
   end
 
+  it 'defines OpCodeType as String' do
+    expect(Runar::Types::OpCodeType).to eq(String)
+  end
+
   context 'top-level constants' do
     it 'exposes Bigint at top level' do
       expect(::Bigint).to eq(Integer)
