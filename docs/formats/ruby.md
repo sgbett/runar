@@ -112,27 +112,6 @@ Special cases:
 - `verify_wots` maps to `verifyWOTS` (not `verifyWots`)
 - All SLH-DSA variants have explicit mappings (e.g., `verify_slh_dsa_sha2_128s` → `verifySLHDSA_SHA2_128s`)
 
-#### Trailing underscore convention
-
-Five built-in math functions use a trailing underscore in Ruby contracts to avoid conflicts with Ruby's built-in `Kernel`, `Integer`, and `Math` methods. The underscore is stripped during AST conversion:
-
-| Ruby name | AST name | Reason for underscore |
-|-----------|----------|-----------------------|
-| `sign_` | `sign` | Avoids conflict with `Comparable#<=>` / `sign` conventions |
-| `pow_` | `pow` | Shadows `Integer#pow` |
-| `sqrt_` | `sqrt` | Shadows `Math.sqrt` |
-| `gcd_` | `gcd` | Shadows `Integer#gcd` |
-| `log2_` | `log2` | Shadows `Math.log2` |
-
-Use the underscore form in Ruby contracts; generated scripts use the plain name:
-
-```ruby
-result = sqrt_(value)    # compiles to: sqrt(value) in the AST
-bits = log2_(n)          # compiles to: log2(n) in the AST
-```
-
-The unadorned names (`sqrt`, `gcd`, etc.) are also accepted by the parser but will call the Ruby standard library method at runtime rather than the Runar builtin — always use the underscore form to avoid subtle bugs.
-
 ### Property Access
 
 Ruby contracts use instance variables (`@var`) to access properties:
@@ -322,7 +301,7 @@ RSpec.describe P2PKH do
 end
 ```
 
-Mock crypto functions (`check_sig`, `check_preimage`, `verify_wots`, etc.) always return `true` for business logic testing. Hash functions (`hash160`, `sha256`, etc.) use real implementations via `digest` and `openssl`.
+`check_sig` uses real ECDSA verification (secp256k1 via OpenSSL). Use `mock_sig` and `mock_pub_key` to get a valid test key pair. `check_preimage` always returns `true`. `verify_wots` and `verify_slh_dsa_*` always return `true` for business logic testing. Hash functions (`hash160`, `sha256`, etc.) use real implementations via `digest`.
 
 ---
 
@@ -333,10 +312,10 @@ The `runar-lang` gem (`packages/runar-rb/`) provides:
 - **Types**: `Bigint`, `ByteString`, `PubKey`, `Sig`, `Addr`, `Point`, etc. (Ruby constants)
 - **Base classes**: `Runar::SmartContract`, `Runar::StatefulSmartContract`
 - **DSL methods**: `prop`, `runar_public`, `params`
-- **Mock crypto**: `check_sig`, `check_preimage`, `verify_wots`, `verify_slh_dsa_*` (always return true)
+- **Real crypto**: `check_sig` (ECDSA via OpenSSL), `check_preimage` (mock), `verify_wots`, `verify_slh_dsa_*` (mock)
 - **Real hashes**: `hash160`, `hash256`, `sha256`, `ripemd160` (via `digest`/`openssl`)
 - **Real EC**: `ec_add`, `ec_mul`, `ec_mul_gen`, `ec_negate`, `ec_on_curve`, etc. (pure Ruby secp256k1)
-- **Math**: `safediv`, `sqrt_`, `gcd_`, `clamp`, `sign_`, `pow_`, `mul_div`, `percent_of`, `log2_`
+- **Math**: `safediv`, `sqrt`, `gcd`, `clamp`, `sign`, `pow`, `mul_div`, `percent_of`, `log2`
 
 Zero external dependencies. EC operations use pure Ruby integer arithmetic with secp256k1 curve parameters.
 
