@@ -8,6 +8,44 @@ pub const hex = @import("hex.zig");
 pub const test_keys = @import("test_keys.zig");
 pub const testing = @import("testing_helpers.zig");
 
+// SDK modules — deployment, calling, state serialization, provider/signer interfaces
+pub const sdk_types = @import("sdk_types.zig");
+pub const sdk_state = @import("sdk_state.zig");
+pub const sdk_provider = @import("sdk_provider.zig");
+pub const sdk_signer = @import("sdk_signer.zig");
+pub const sdk_deploy = @import("sdk_deploy.zig");
+pub const sdk_call = @import("sdk_call.zig");
+pub const sdk_contract = @import("sdk_contract.zig");
+
+// SDK type re-exports
+pub const RunarArtifact = sdk_types.RunarArtifact;
+pub const ABI = sdk_types.ABI;
+pub const ABIMethod = sdk_types.ABIMethod;
+pub const ABIParam = sdk_types.ABIParam;
+pub const StateField = sdk_types.StateField;
+pub const ConstructorSlot = sdk_types.ConstructorSlot;
+pub const UTXO = sdk_types.UTXO;
+pub const TransactionData = sdk_types.TransactionData;
+pub const DeployOptions = sdk_types.DeployOptions;
+pub const CallOptions = sdk_types.CallOptions;
+pub const StateValue = sdk_types.StateValue;
+pub const RunarContract = sdk_contract.RunarContract;
+pub const Provider = sdk_provider.Provider;
+pub const MockProvider = sdk_provider.MockProvider;
+pub const Signer = sdk_signer.Signer;
+pub const LocalSigner = sdk_signer.LocalSigner;
+pub const MockSigner = sdk_signer.MockSigner;
+pub const ExternalSigner = sdk_signer.ExternalSigner;
+pub const serializeState = sdk_state.serializeState;
+pub const deserializeState = sdk_state.deserializeState;
+pub const encodePushData = sdk_state.encodePushData;
+pub const encodeScriptNumber = sdk_state.encodeScriptNumber;
+pub const buildDeployTransaction = sdk_deploy.buildDeployTransaction;
+pub const selectUtxos = sdk_deploy.selectUtxos;
+pub const buildCallTransaction = sdk_call.buildCallTransaction;
+pub const buildP2PKHScript = sdk_deploy.buildP2PKHScript;
+pub const insertUnlockingScript = sdk_contract.insertUnlockingScript;
+
 pub const Int = base.Int;
 pub const Bigint = builtins.SignedBigint;
 pub const PubKey = base.PubKey;
@@ -108,6 +146,13 @@ test {
     _ = @import("compile_check.zig");
     _ = @import("hex.zig");
     _ = @import("testing_helpers.zig");
+    _ = @import("sdk_types.zig");
+    _ = @import("sdk_state.zig");
+    _ = @import("sdk_provider.zig");
+    _ = @import("sdk_signer.zig");
+    _ = @import("sdk_deploy.zig");
+    _ = @import("sdk_call.zig");
+    _ = @import("sdk_contract.zig");
     if (build_options.has_bsvz_runar_harness) {
         _ = @import("script_integration_test.zig");
     }
