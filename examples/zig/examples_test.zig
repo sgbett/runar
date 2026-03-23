@@ -82,6 +82,7 @@ test {
     _ = @import("./escrow/Escrow_test.zig");
     _ = @import("./function-patterns/FunctionPatterns_test.zig");
     _ = @import("./math-demo/MathDemo_test.zig");
+    _ = @import("./message-board/MessageBoard_test.zig");
     _ = @import("./oracle-price/OraclePriceFeed_test.zig");
     _ = @import("./p2blake3pkh/P2Blake3PKH_test.zig");
     _ = @import("./p2pkh/P2PKH_test.zig");
