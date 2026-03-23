@@ -155,6 +155,29 @@ jobs:
             fi
           done
           exit $fail
+      - name: Ruby format conformance (source → hex)
+        run: |
+          fail=0
+          for dir in conformance/tests/*/; do
+            name=$(basename "$dir")
+            rb_file="$dir/$name.runar.rb"
+            [ -f "$rb_file" ] || continue
+            expected_file="$dir/expected-script.hex"
+            [ -f "$expected_file" ] || continue
+            expected=$(tr -d '[:space:]' < "$expected_file" | tr '[:upper:]' '[:lower:]')
+            go_hex=$(./runar-go --source "$rb_file" --hex --disable-constant-folding 2>/dev/null | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+            rust_hex=$(./runar-compiler-rust --source "$rb_file" --hex --disable-constant-folding 2>/dev/null | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+            if [ "$go_hex" != "$rust_hex" ]; then
+              echo "MISMATCH $name: Go vs Rust differ"
+              fail=1
+            elif [ "$go_hex" != "$expected" ]; then
+              echo "MISMATCH $name: output differs from golden file"
+              fail=1
+            else
+              echo "OK $name (.runar.rb)"
+            fi
+          done
+          exit $fail
 
   integration:
     name: Integration Tests
