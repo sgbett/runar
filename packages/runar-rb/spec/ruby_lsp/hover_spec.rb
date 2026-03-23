@@ -5,7 +5,7 @@
 # The hover listener provides contextual documentation when a developer hovers
 # over Runar-specific identifiers in .runar.rb contract files.
 #
-# These tests run without the ruby-lsp gem installed: we stub just the surface
+# These tests isolate the Runar hover behavior by stubbing just the surface
 # area the hover listener touches, matching the pattern in addon_spec.rb.
 
 require 'spec_helper'

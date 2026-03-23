@@ -3,9 +3,9 @@
 # Specs for the Runar Ruby LSP addon.
 #
 # These tests verify the addon and its indexing enhancement in isolation,
-# without needing a running LSP server. We stub the minimal ruby-lsp
-# interfaces rather than loading the full gem so the spec suite remains
-# fast and free of the ruby-lsp runtime dependency.
+# without needing a running LSP server. The ruby-lsp gem is a development
+# dependency but no server process is started — we stub the minimal API
+# surface the addon touches so the spec suite remains fast.
 
 require 'spec_helper'
 require 'ostruct'
@@ -14,9 +14,9 @@ require 'uri'
 # ---------------------------------------------------------------------------
 # Minimal ruby-lsp stubs
 #
-# We define stub versions of the ruby-lsp constants so that the addon files
-# can be required without the actual ruby-lsp gem being installed in the test
-# environment. Each stub mirrors only the surface area our code touches.
+# We define stub versions of the ruby-lsp constants before loading addon
+# files. This lets us control the API surface without starting a full LSP
+# server. Each stub mirrors only the interface our code touches.
 # ---------------------------------------------------------------------------
 
 unless defined?(RubyLsp::Addon)

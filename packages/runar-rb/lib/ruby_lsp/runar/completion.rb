@@ -17,6 +17,8 @@
 # `create_completion_listener`; the listener then registers itself with
 # the Prism dispatcher so it receives AST events for the current request.
 
+require_relative 'hover'
+
 module RubyLsp
   module Runar
     # Completion listener that suggests Runar type constants and builtin
