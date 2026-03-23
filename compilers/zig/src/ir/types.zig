@@ -339,7 +339,7 @@ pub const StackIf = struct { then: []StackOp, @"else": ?[]StackOp = null };
 pub const Placeholder = struct { param_index: u32, param_name: []const u8 };
 pub const PushValue = union(enum) { bytes: []const u8, integer: i64, boolean: bool };
 
-pub const StackInstruction = union(enum) { op: Opcode, push_data: []const u8, push_int: i64, push_bool: bool };
+pub const StackInstruction = union(enum) { op: Opcode, push_data: []const u8, push_int: i64, push_bool: bool, push_codesep_index: void };
 
 // ============================================================================
 // Layer 4: Artifact Types (output of Pass 6: Emit) — maps to artifact.ts

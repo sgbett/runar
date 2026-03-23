@@ -221,6 +221,15 @@ pub fn emitStackInstruction(ctx: *EmitContext, inst: types.StackInstruction) !vo
         .push_data => |data| try ctx.emitPushData(data),
         .push_int => |n| try ctx.emitScriptNumber(n),
         .push_bool => |b| try ctx.emitPushBool(b),
+        .push_codesep_index => {
+            // Push the byte offset of the last OP_CODESEPARATOR as a numeric constant.
+            // This value is known at emit time (tracked when OP_CODESEPARATOR was emitted).
+            const idx: i64 = if (ctx.code_separator_indices.items.len > 0)
+                @intCast(ctx.code_separator_indices.items[ctx.code_separator_indices.items.len - 1])
+            else
+                0;
+            try ctx.emitScriptNumber(idx);
+        },
     }
 }
 

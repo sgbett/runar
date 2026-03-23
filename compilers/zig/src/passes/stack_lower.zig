@@ -1838,24 +1838,24 @@ const LowerCtx = struct {
         if (args.len < 1) return LowerError.InvalidBuiltin;
         _ = bind_name;
 
-        var state_prop_count: usize = 0;
-        for (self.program.properties) |prop| {
-            if (!prop.readonly) state_prop_count += 1;
-        }
-        if (state_prop_count == 0) return;
-
+        // Collect mutable state properties and their sizes
+        var state_props = std.ArrayListUnmanaged(types.ANFProperty).empty;
+        defer state_props.deinit(self.allocator);
         var prop_sizes = std.ArrayListUnmanaged(i64).empty;
         defer prop_sizes.deinit(self.allocator);
-        var total_state_len: i64 = 0;
+        var has_variable_length = false;
         for (self.program.properties) |prop| {
             if (prop.readonly) continue;
-            const size = try statePropSize(prop);
-            try prop_sizes.append(self.allocator, size);
-            total_state_len += size;
+            try state_props.append(self.allocator, prop);
+            const sz = try statePropSize(prop);
+            try prop_sizes.append(self.allocator, sz);
+            if (sz < 0) has_variable_length = true;
         }
+        if (state_props.items.len == 0) return;
 
         try self.bringToTopAuto(args[0]);
 
+        // 1. Skip first 104 bytes (header), drop prefix
         try self.emitPushInt(104);
         try self.stack.push(self.allocator, null);
         try self.emitOp(.op_split);
@@ -1868,6 +1868,7 @@ const LowerCtx = struct {
         _ = self.stack.pop();
         try self.stack.push(self.allocator, null);
 
+        // 2. Drop tail 44 bytes
         try self.emitOp(.op_size);
         try self.stack.push(self.allocator, null);
         try self.emitPushInt(44);
@@ -1884,6 +1885,7 @@ const LowerCtx = struct {
         try self.emitOp(.op_drop);
         _ = self.stack.pop();
 
+        // 3. Drop amount (last 8 bytes)
         try self.emitOp(.op_size);
         try self.stack.push(self.allocator, null);
         try self.emitPushInt(8);
@@ -1900,78 +1902,151 @@ const LowerCtx = struct {
         try self.emitOp(.op_drop);
         _ = self.stack.pop();
 
-        try self.emitOp(.op_size);
-        try self.stack.push(self.allocator, null);
-        try self.emitPushInt(total_state_len);
-        try self.stack.push(self.allocator, null);
-        try self.emitOp(.op_sub);
-        _ = self.stack.pop();
-        _ = self.stack.pop();
-        try self.stack.push(self.allocator, null);
-        try self.emitOp(.op_split);
-        _ = self.stack.pop();
-        _ = self.stack.pop();
-        try self.stack.push(self.allocator, null);
-        try self.stack.push(self.allocator, null);
-        try self.emitOp(.op_nip);
-        _ = self.stack.pop();
-        _ = self.stack.pop();
-        try self.stack.push(self.allocator, null);
+        if (!has_variable_length) {
+            // All fields fixed-size -- existing code path (backward compatible)
+            var state_len: i64 = 0;
+            for (prop_sizes.items) |sz| state_len += sz;
 
-        if (state_prop_count == 1) {
-            for (self.program.properties) |prop| {
-                if (prop.readonly) continue;
-                switch (prop.type_info) {
-                    .bigint, .boolean => try self.emitOp(.op_bin2num),
-                    else => {},
-                }
-                try self.stack.renameAtDepth(self.allocator, 0, prop.name);
-                self.trackDepth();
-                break;
-            }
-            return;
-        }
+            // 4. Extract last stateLen bytes (the state section)
+            try self.emitOp(.op_size);
+            try self.stack.push(self.allocator, null);
+            try self.emitPushInt(state_len);
+            try self.stack.push(self.allocator, null);
+            try self.emitOp(.op_sub);
+            _ = self.stack.pop();
+            _ = self.stack.pop();
+            try self.stack.push(self.allocator, null);
+            try self.emitOp(.op_split);
+            _ = self.stack.pop();
+            _ = self.stack.pop();
+            try self.stack.push(self.allocator, null);
+            try self.stack.push(self.allocator, null);
+            try self.emitOp(.op_nip);
+            _ = self.stack.pop();
+            _ = self.stack.pop();
+            try self.stack.push(self.allocator, null);
 
-        var state_index: usize = 0;
-        for (self.program.properties) |prop| {
-            if (prop.readonly) continue;
-            const size = prop_sizes.items[state_index];
-            const is_last_prop = state_index + 1 == state_prop_count;
-            state_index += 1;
+            // 5. Split fixed-size state fields
+            try self.splitFixedStateFields(state_props.items, prop_sizes.items);
+        } else if (self.stack.findDepth("_codePart") == null) {
+            // Variable-length state but _codePart not available (terminal method).
+            // Skip deserialization -- the method body doesn't use mutable state.
+            try self.emitOp(.op_drop);
+            _ = self.stack.pop();
+        } else {
+            // Variable-length path: strip varint, use _codePart to find state
 
-            if (!is_last_prop) {
-                try self.emitPushInt(size);
-                try self.stack.push(self.allocator, null);
-                try self.emitOp(.op_split);
-                _ = self.stack.pop();
-                _ = self.stack.pop();
-                try self.stack.push(self.allocator, null);
-                try self.stack.push(self.allocator, null);
+            // Strip varint prefix from varint+scriptCode
+            // SPLIT 1 -> [..., firstByte, rest]
+            try self.emitPushInt(1);
+            try self.stack.push(self.allocator, null);
+            try self.emitOp(.op_split);
+            _ = self.stack.pop();
+            _ = self.stack.pop();
+            try self.stack.push(self.allocator, null); // firstByte
+            try self.stack.push(self.allocator, null); // rest
+            // SWAP -> [..., rest, firstByte]
+            try self.emitOp(.op_swap);
+            const vt_top = self.stack.pop();
+            const vt_next = self.stack.pop();
+            try self.stack.push(self.allocator, vt_top);
+            try self.stack.push(self.allocator, vt_next);
+            // DUP -> [..., rest, firstByte, firstByte]
+            try self.emitOp(.op_dup);
+            try self.stack.push(self.allocator, self.stack.peekAtDepth(0));
+            // Zero-pad before BIN2NUM to prevent sign-bit misinterpretation (0xfd -> -125 without pad)
+            // push 0x00
+            try self.emitPushData(&.{0x00});
+            try self.stack.push(self.allocator, null);
+            // CAT -> [..., rest, firstByte, firstByte||0x00]
+            try self.emitOp(.op_cat);
+            _ = self.stack.pop();
+            _ = self.stack.pop();
+            try self.stack.push(self.allocator, null);
+            // BIN2NUM -> [..., rest, firstByte, fb_num]
+            try self.emitOp(.op_bin2num);
+            // push 253
+            try self.emitPushInt(253);
+            try self.stack.push(self.allocator, null);
+            // OP_LESSTHAN -> [..., rest, firstByte, (fb<253)]
+            try self.emitOp(.op_lessthan);
+            _ = self.stack.pop();
+            _ = self.stack.pop();
+            try self.stack.push(self.allocator, null);
 
-                try self.emitOp(.op_swap);
-                const rest = self.stack.pop();
-                const prop_bytes = self.stack.pop();
-                try self.stack.push(self.allocator, rest);
-                try self.stack.push(self.allocator, prop_bytes);
+            // OP_IF
+            try self.emitOp(.op_if);
+            _ = self.stack.pop();
+            var sm_at_varint_if = try self.stack.clone(self.allocator);
 
-                switch (prop.type_info) {
-                    .bigint, .boolean => try self.emitOp(.op_bin2num),
-                    else => {},
-                }
+            // THEN: fb < 253 -> 1-byte varint, already consumed by the SPLIT 1
+            // DROP firstByte (not needed anymore)
+            try self.emitOp(.op_drop);
+            _ = self.stack.pop();
 
-                try self.emitOp(.op_swap);
-                const prop_value = self.stack.pop();
-                const remainder = self.stack.pop();
-                try self.stack.push(self.allocator, prop_value);
-                try self.stack.push(self.allocator, remainder);
-                try self.stack.renameAtDepth(self.allocator, 1, prop.name);
-            } else {
-                switch (prop.type_info) {
-                    .bigint, .boolean => try self.emitOp(.op_bin2num),
-                    else => {},
-                }
-                try self.stack.renameAtDepth(self.allocator, 0, prop.name);
-            }
+            // OP_ELSE
+            try self.emitOp(.op_else);
+            self.stack.deinit(self.allocator);
+            self.stack = sm_at_varint_if;
+            sm_at_varint_if = .{};
+
+            // ELSE: fb >= 253 -> 2-byte varint follows, skip 2 more bytes
+            // DROP firstByte
+            try self.emitOp(.op_drop);
+            _ = self.stack.pop();
+            // push 2
+            try self.emitPushInt(2);
+            try self.stack.push(self.allocator, null);
+            // SPLIT -> [..., 2bytes, rest2]
+            try self.emitOp(.op_split);
+            _ = self.stack.pop();
+            _ = self.stack.pop();
+            try self.stack.push(self.allocator, null);
+            try self.stack.push(self.allocator, null);
+            // NIP -> [..., rest2]
+            try self.emitOp(.op_nip);
+            _ = self.stack.pop();
+            _ = self.stack.pop();
+            try self.stack.push(self.allocator, null);
+
+            // OP_ENDIF
+            try self.emitOp(.op_endif);
+
+            // Compute skip = SIZE(_codePart) - codeSepIdx
+            // PICK _codePart (non-consuming)
+            try self.bringToTop("_codePart", false);
+            // SIZE -> [..., scriptCode, _codePart_copy, size(_codePart)]
+            try self.emitOp(.op_size);
+            try self.stack.push(self.allocator, null);
+            // NIP -> [..., scriptCode, size(_codePart)]
+            try self.emitOp(.op_nip);
+            _ = self.stack.pop();
+            _ = self.stack.pop();
+            try self.stack.push(self.allocator, null);
+            // push_codesep_index -> [..., scriptCode, size(_codePart), codeSepIdx]
+            try self.emit(.{ .push_codesep_index = {} });
+            try self.stack.push(self.allocator, null);
+            // SUB -> [..., scriptCode, skip]
+            try self.emitOp(.op_sub);
+            _ = self.stack.pop();
+            _ = self.stack.pop();
+            try self.stack.push(self.allocator, null);
+
+            // Split scriptCode at skip to get state
+            // SPLIT -> [..., codePart, state]
+            try self.emitOp(.op_split);
+            _ = self.stack.pop();
+            _ = self.stack.pop();
+            try self.stack.push(self.allocator, null);
+            try self.stack.push(self.allocator, null);
+            // NIP -> [..., state]
+            try self.emitOp(.op_nip);
+            _ = self.stack.pop();
+            _ = self.stack.pop();
+            try self.stack.push(self.allocator, null);
+
+            // Parse state fields left-to-right
+            try self.parseVariableLengthStateFields(state_props.items, prop_sizes.items);
         }
         self.trackDepth();
     }
@@ -2060,6 +2135,10 @@ const LowerCtx = struct {
                     _ = self.stack.pop();
                     try self.stack.push(self.allocator, null);
                 },
+                .byte_string => {
+                    // Prepend push-data length prefix (matching SDK format)
+                    try self.emitPushDataEncode();
+                },
                 else => {},
             }
 
@@ -2084,8 +2163,441 @@ const LowerCtx = struct {
             .addr, .ripemd160 => 20,
             .sha256 => 32,
             .point => 64,
+            .byte_string => -1,
             else => LowerError.UnsupportedOperation,
         };
+    }
+
+    /// Emit opcodes to encode a ByteString value on top of the stack with a
+    /// Bitcoin Script push-data length prefix.
+    ///
+    /// Expects stack: [..., bs_value]
+    /// Leaves stack:  [..., pushdata_encoded_value]
+    fn emitPushDataEncode(self: *LowerCtx) !void {
+        // OP_SIZE -> [..., bs_value, size]
+        try self.emitOp(.op_size);
+        try self.stack.push(self.allocator, null);
+        // OP_DUP -> [..., bs_value, size, size]
+        try self.emitOp(.op_dup);
+        try self.stack.push(self.allocator, null);
+        // push 76 -> [..., bs_value, size, size, 76]
+        try self.emitPushInt(76);
+        try self.stack.push(self.allocator, null);
+        // OP_LESSTHAN -> [..., bs_value, size, (size<76)]
+        try self.emitOp(.op_lessthan);
+        _ = self.stack.pop();
+        _ = self.stack.pop();
+        try self.stack.push(self.allocator, null);
+
+        // OP_IF
+        try self.emitOp(.op_if);
+        _ = self.stack.pop();
+        // Save stack state: [..., bs_value, size]
+        var sm_after_outer_if = try self.stack.clone(self.allocator);
+
+        // THEN: len <= 75
+        // NUM2BIN(size, 2) -> [..., bs_value, size_2bytes]
+        try self.emitPushInt(2);
+        try self.stack.push(self.allocator, null);
+        try self.emitOp(.op_num2bin);
+        _ = self.stack.pop();
+        _ = self.stack.pop();
+        try self.stack.push(self.allocator, null);
+        // SPLIT 1 -> [..., bs_value, len_byte, padding]
+        try self.emitPushInt(1);
+        try self.stack.push(self.allocator, null);
+        try self.emitOp(.op_split);
+        _ = self.stack.pop();
+        _ = self.stack.pop();
+        try self.stack.push(self.allocator, null);
+        try self.stack.push(self.allocator, null);
+        // DROP padding -> [..., bs_value, len_byte]
+        try self.emitOp(.op_drop);
+        _ = self.stack.pop();
+        // SWAP -> [..., len_byte, bs_value]
+        try self.emitOp(.op_swap);
+        _ = self.stack.pop();
+        _ = self.stack.pop();
+        // CAT -> [..., len_byte || bs_value]
+        try self.emitOp(.op_cat);
+        try self.stack.push(self.allocator, null);
+        // Save end target state
+        var sm_end_target = try self.stack.clone(self.allocator);
+
+        // OP_ELSE
+        try self.emitOp(.op_else);
+        self.stack.deinit(self.allocator);
+        self.stack = sm_after_outer_if;
+        sm_after_outer_if = .{};
+
+        // DUP size -> [..., bs_value, size, size]
+        try self.emitOp(.op_dup);
+        try self.stack.push(self.allocator, null);
+        // push 256 -> [..., bs_value, size, size, 256]
+        try self.emitPushInt(256);
+        try self.stack.push(self.allocator, null);
+        // OP_LESSTHAN -> [..., bs_value, size, (size<256)]
+        try self.emitOp(.op_lessthan);
+        _ = self.stack.pop();
+        _ = self.stack.pop();
+        try self.stack.push(self.allocator, null);
+
+        // OP_IF
+        try self.emitOp(.op_if);
+        _ = self.stack.pop();
+        var sm_after_inner_if = try self.stack.clone(self.allocator);
+
+        // THEN: 76-255 -> 0x4c + 1-byte length
+        try self.emitPushInt(2);
+        try self.stack.push(self.allocator, null);
+        try self.emitOp(.op_num2bin);
+        _ = self.stack.pop();
+        _ = self.stack.pop();
+        try self.stack.push(self.allocator, null);
+        try self.emitPushInt(1);
+        try self.stack.push(self.allocator, null);
+        try self.emitOp(.op_split);
+        _ = self.stack.pop();
+        _ = self.stack.pop();
+        try self.stack.push(self.allocator, null);
+        try self.stack.push(self.allocator, null);
+        try self.emitOp(.op_drop);
+        _ = self.stack.pop();
+        // push 0x4c
+        try self.emitPushData(&.{0x4c});
+        try self.stack.push(self.allocator, null);
+        try self.emitOp(.op_swap);
+        const t1_top = self.stack.pop();
+        const t1_next = self.stack.pop();
+        try self.stack.push(self.allocator, t1_top);
+        try self.stack.push(self.allocator, t1_next);
+        _ = self.stack.pop();
+        _ = self.stack.pop();
+        try self.emitOp(.op_cat);
+        try self.stack.push(self.allocator, null);
+        try self.emitOp(.op_swap);
+        const t2_top = self.stack.pop();
+        const t2_next = self.stack.pop();
+        try self.stack.push(self.allocator, t2_top);
+        try self.stack.push(self.allocator, t2_next);
+        _ = self.stack.pop();
+        _ = self.stack.pop();
+        try self.emitOp(.op_cat);
+        try self.stack.push(self.allocator, null);
+
+        // OP_ELSE
+        try self.emitOp(.op_else);
+        self.stack.deinit(self.allocator);
+        self.stack = sm_after_inner_if;
+        sm_after_inner_if = .{};
+
+        // ELSE: >= 256 -> 0x4d + 2-byte LE length
+        try self.emitPushInt(4);
+        try self.stack.push(self.allocator, null);
+        try self.emitOp(.op_num2bin);
+        _ = self.stack.pop();
+        _ = self.stack.pop();
+        try self.stack.push(self.allocator, null);
+        try self.emitPushInt(2);
+        try self.stack.push(self.allocator, null);
+        try self.emitOp(.op_split);
+        _ = self.stack.pop();
+        _ = self.stack.pop();
+        try self.stack.push(self.allocator, null);
+        try self.stack.push(self.allocator, null);
+        try self.emitOp(.op_drop);
+        _ = self.stack.pop();
+        // push 0x4d
+        try self.emitPushData(&.{0x4d});
+        try self.stack.push(self.allocator, null);
+        try self.emitOp(.op_swap);
+        const t3_top = self.stack.pop();
+        const t3_next = self.stack.pop();
+        try self.stack.push(self.allocator, t3_top);
+        try self.stack.push(self.allocator, t3_next);
+        _ = self.stack.pop();
+        _ = self.stack.pop();
+        try self.emitOp(.op_cat);
+        try self.stack.push(self.allocator, null);
+        try self.emitOp(.op_swap);
+        const t4_top = self.stack.pop();
+        const t4_next = self.stack.pop();
+        try self.stack.push(self.allocator, t4_top);
+        try self.stack.push(self.allocator, t4_next);
+        _ = self.stack.pop();
+        _ = self.stack.pop();
+        try self.emitOp(.op_cat);
+        try self.stack.push(self.allocator, null);
+
+        // OP_ENDIF (inner)
+        try self.emitOp(.op_endif);
+        // OP_ENDIF (outer)
+        try self.emitOp(.op_endif);
+        self.stack.deinit(self.allocator);
+        self.stack = sm_end_target;
+        sm_end_target = .{};
+    }
+
+    /// Emit opcodes to decode a push-data encoded ByteString from the state
+    /// bytes on top of the stack.
+    ///
+    /// Expects stack: [..., state_bytes]
+    /// Leaves stack:  [..., data, remaining_state]
+    fn emitPushDataDecode(self: *LowerCtx) !void {
+        // Split first byte
+        try self.emitPushInt(1);
+        try self.stack.push(self.allocator, null);
+        try self.emitOp(.op_split);
+        _ = self.stack.pop();
+        _ = self.stack.pop();
+        try self.stack.push(self.allocator, null); // first_byte
+        try self.stack.push(self.allocator, null); // rest
+        // SWAP -> [..., rest, first_byte]
+        try self.emitOp(.op_swap);
+        const sw1_top = self.stack.pop();
+        const sw1_next = self.stack.pop();
+        try self.stack.push(self.allocator, sw1_top);
+        try self.stack.push(self.allocator, sw1_next);
+        // BIN2NUM -> [..., rest, fb_num]
+        try self.emitOp(.op_bin2num);
+        // DUP -> [..., rest, fb_num, fb_num]
+        try self.emitOp(.op_dup);
+        try self.stack.push(self.allocator, null);
+        // push 76 -> [..., rest, fb_num, fb_num, 76]
+        try self.emitPushInt(76);
+        try self.stack.push(self.allocator, null);
+        // OP_LESSTHAN -> [..., rest, fb_num, (fb<76)]
+        try self.emitOp(.op_lessthan);
+        _ = self.stack.pop();
+        _ = self.stack.pop();
+        try self.stack.push(self.allocator, null);
+
+        // OP_IF
+        try self.emitOp(.op_if);
+        _ = self.stack.pop();
+        // Save stack at branch: [..., rest, fb_num]
+        var sm_after_outer_if = try self.stack.clone(self.allocator);
+
+        // THEN: fb_num < 76 -> fb_num IS the length
+        // SPLIT -> [..., data, remaining]
+        try self.emitOp(.op_split);
+        _ = self.stack.pop();
+        _ = self.stack.pop();
+        try self.stack.push(self.allocator, null); // data
+        try self.stack.push(self.allocator, null); // remaining
+        // Save end target
+        var sm_end_target = try self.stack.clone(self.allocator);
+
+        // OP_ELSE
+        try self.emitOp(.op_else);
+        self.stack.deinit(self.allocator);
+        self.stack = sm_after_outer_if;
+        sm_after_outer_if = .{};
+        // Stack: [..., rest, fb_num]
+
+        // DUP -> [..., rest, fb_num, fb_num]
+        try self.emitOp(.op_dup);
+        try self.stack.push(self.allocator, null);
+        // push 77 -> [..., rest, fb_num, fb_num, 77]
+        try self.emitPushInt(77);
+        try self.stack.push(self.allocator, null);
+        // OP_NUMEQUAL -> [..., rest, fb_num, (fb==77)]
+        try self.emitOp(.op_numequal);
+        _ = self.stack.pop();
+        _ = self.stack.pop();
+        try self.stack.push(self.allocator, null);
+
+        // OP_IF
+        try self.emitOp(.op_if);
+        _ = self.stack.pop();
+        var sm_after_inner_if = try self.stack.clone(self.allocator);
+
+        // THEN: fb_num == 77 (0x4d) -> 2-byte LE length
+        // DROP fb_num -> [..., rest]
+        try self.emitOp(.op_drop);
+        _ = self.stack.pop();
+        // push 2
+        try self.emitPushInt(2);
+        try self.stack.push(self.allocator, null);
+        // SPLIT -> [..., len_2bytes, rest2]
+        try self.emitOp(.op_split);
+        _ = self.stack.pop();
+        _ = self.stack.pop();
+        try self.stack.push(self.allocator, null);
+        try self.stack.push(self.allocator, null);
+        // SWAP -> [..., rest2, len_2bytes]
+        try self.emitOp(.op_swap);
+        const sw2_top = self.stack.pop();
+        const sw2_next = self.stack.pop();
+        try self.stack.push(self.allocator, sw2_top);
+        try self.stack.push(self.allocator, sw2_next);
+        // BIN2NUM -> [..., rest2, len]
+        try self.emitOp(.op_bin2num);
+        // SPLIT -> [..., data, remaining]
+        try self.emitOp(.op_split);
+        _ = self.stack.pop();
+        _ = self.stack.pop();
+        try self.stack.push(self.allocator, null);
+        try self.stack.push(self.allocator, null);
+
+        // OP_ELSE
+        try self.emitOp(.op_else);
+        self.stack.deinit(self.allocator);
+        self.stack = sm_after_inner_if;
+        sm_after_inner_if = .{};
+
+        // ELSE: fb_num == 76 (0x4c) -> 1-byte length
+        // DROP fb_num -> [..., rest]
+        try self.emitOp(.op_drop);
+        _ = self.stack.pop();
+        // push 1
+        try self.emitPushInt(1);
+        try self.stack.push(self.allocator, null);
+        // SPLIT -> [..., len_1byte, rest2]
+        try self.emitOp(.op_split);
+        _ = self.stack.pop();
+        _ = self.stack.pop();
+        try self.stack.push(self.allocator, null);
+        try self.stack.push(self.allocator, null);
+        // SWAP -> [..., rest2, len_1byte]
+        try self.emitOp(.op_swap);
+        const sw3_top = self.stack.pop();
+        const sw3_next = self.stack.pop();
+        try self.stack.push(self.allocator, sw3_top);
+        try self.stack.push(self.allocator, sw3_next);
+        // BIN2NUM -> [..., rest2, len]
+        try self.emitOp(.op_bin2num);
+        // SPLIT -> [..., data, remaining]
+        try self.emitOp(.op_split);
+        _ = self.stack.pop();
+        _ = self.stack.pop();
+        try self.stack.push(self.allocator, null);
+        try self.stack.push(self.allocator, null);
+
+        // OP_ENDIF (inner)
+        try self.emitOp(.op_endif);
+        // OP_ENDIF (outer)
+        try self.emitOp(.op_endif);
+        self.stack.deinit(self.allocator);
+        self.stack = sm_end_target;
+        sm_end_target = .{};
+    }
+
+    /// Split fixed-size state bytes into individual properties.
+    fn splitFixedStateFields(self: *LowerCtx, state_props: []const types.ANFProperty, prop_sizes: []const i64) !void {
+        if (state_props.len == 1) {
+            const prop = state_props[0];
+            switch (prop.type_info) {
+                .bigint, .boolean => try self.emitOp(.op_bin2num),
+                else => {},
+            }
+            try self.stack.renameAtDepth(self.allocator, 0, prop.name);
+        } else {
+            for (state_props, 0..) |prop, i| {
+                const sz = prop_sizes[i];
+                if (i < state_props.len - 1) {
+                    try self.emitPushInt(sz);
+                    try self.stack.push(self.allocator, null);
+                    try self.emitOp(.op_split);
+                    _ = self.stack.pop();
+                    _ = self.stack.pop();
+                    try self.stack.push(self.allocator, null);
+                    try self.stack.push(self.allocator, null);
+
+                    try self.emitOp(.op_swap);
+                    const rest = self.stack.pop();
+                    const prop_bytes = self.stack.pop();
+                    try self.stack.push(self.allocator, rest);
+                    try self.stack.push(self.allocator, prop_bytes);
+
+                    switch (prop.type_info) {
+                        .bigint, .boolean => try self.emitOp(.op_bin2num),
+                        else => {},
+                    }
+
+                    try self.emitOp(.op_swap);
+                    const prop_value = self.stack.pop();
+                    const remainder = self.stack.pop();
+                    try self.stack.push(self.allocator, prop_value);
+                    try self.stack.push(self.allocator, remainder);
+                    try self.stack.renameAtDepth(self.allocator, 1, prop.name);
+                } else {
+                    switch (prop.type_info) {
+                        .bigint, .boolean => try self.emitOp(.op_bin2num),
+                        else => {},
+                    }
+                    try self.stack.renameAtDepth(self.allocator, 0, prop.name);
+                }
+            }
+        }
+    }
+
+    /// Parse state fields left-to-right, handling variable-length ByteString fields.
+    fn parseVariableLengthStateFields(self: *LowerCtx, state_props: []const types.ANFProperty, prop_sizes: []const i64) !void {
+        if (state_props.len == 1) {
+            const prop = state_props[0];
+            if (prop.type_info == .byte_string) {
+                // Single ByteString field: decode push-data prefix, drop trailing empty
+                try self.emitPushDataDecode(); // [..., data, remaining]
+                try self.emitOp(.op_drop);
+                _ = self.stack.pop();
+            } else {
+                switch (prop.type_info) {
+                    .bigint, .boolean => try self.emitOp(.op_bin2num),
+                    else => {},
+                }
+            }
+            try self.stack.renameAtDepth(self.allocator, 0, prop.name);
+        } else {
+            for (state_props, 0..) |prop, i| {
+                if (i < state_props.len - 1) {
+                    if (prop.type_info == .byte_string) {
+                        // ByteString: decode push-data prefix, extract data
+                        try self.emitPushDataDecode(); // [..., data, rest]
+                        _ = self.stack.pop();
+                        _ = self.stack.pop();
+                        try self.stack.push(self.allocator, prop.name);
+                        try self.stack.push(self.allocator, null); // rest on top
+                    } else {
+                        try self.emitPushInt(prop_sizes[i]);
+                        try self.stack.push(self.allocator, null);
+                        try self.emitOp(.op_split);
+                        _ = self.stack.pop();
+                        _ = self.stack.pop();
+                        try self.stack.push(self.allocator, null);
+                        try self.stack.push(self.allocator, null);
+                        try self.emitOp(.op_swap);
+                        const sw_top = self.stack.pop();
+                        const sw_next = self.stack.pop();
+                        try self.stack.push(self.allocator, sw_top);
+                        try self.stack.push(self.allocator, sw_next);
+                        switch (prop.type_info) {
+                            .bigint, .boolean => try self.emitOp(.op_bin2num),
+                            else => {},
+                        }
+                        try self.emitOp(.op_swap);
+                        const prop_val = self.stack.pop();
+                        const rest_val = self.stack.pop();
+                        try self.stack.push(self.allocator, prop_val);
+                        try self.stack.push(self.allocator, rest_val);
+                        try self.stack.renameAtDepth(self.allocator, 1, prop.name);
+                    }
+                } else {
+                    if (prop.type_info == .byte_string) {
+                        // Last ByteString: decode push-data prefix, drop trailing empty
+                        try self.emitPushDataDecode(); // [..., data, remaining]
+                        try self.emitOp(.op_drop);
+                        _ = self.stack.pop();
+                    } else {
+                        switch (prop.type_info) {
+                            .bigint, .boolean => try self.emitOp(.op_bin2num),
+                            else => {},
+                        }
+                    }
+                    try self.stack.renameAtDepth(self.allocator, 0, prop.name);
+                }
+            }
+        }
     }
 
     fn lowerComputeStateOutput(self: *LowerCtx, bind_name: []const u8, args: []const []const u8) !void {
@@ -2730,6 +3242,9 @@ const LowerCtx = struct {
                     try self.stack.push(self.allocator, null);
                     try self.emitOp(.op_num2bin);
                     _ = self.stack.pop();
+                },
+                .byte_string => {
+                    try self.emitPushDataEncode();
                 },
                 else => {},
             }
