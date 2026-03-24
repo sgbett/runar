@@ -1,0 +1,10 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Executable entry point for the Runar Ruby compiler.
+
+$LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
+
+require "runar_compiler"
+
+RunarCompiler::CLI.run
