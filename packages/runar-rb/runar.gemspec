@@ -15,4 +15,7 @@ Gem::Specification.new do |spec|
   spec.require_paths = ['lib']
 
   # No external dependencies — stdlib only (digest, openssl)
+
+  spec.add_development_dependency 'ruby-lsp', '~> 0.26'
+  spec.add_development_dependency 'ostruct'
 end
