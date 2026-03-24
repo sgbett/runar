@@ -8,6 +8,8 @@ const __dirname = dirname(__filename);
 const GO_COMPILER_DIR = resolve(__dirname, '../../compilers/go');
 const RUST_COMPILER_DIR = resolve(__dirname, '../../compilers/rust');
 const PYTHON_COMPILER_DIR = resolve(__dirname, '../../compilers/python');
+const ZIG_COMPILER_DIR = resolve(__dirname, '../../compilers/zig');
+const RUBY_COMPILER_DIR = resolve(__dirname, '../../compilers/ruby');
 
 /** Escape a string for safe interpolation into a shell command (single-quote wrapping). */
 function shellEscape(s: string): string {
@@ -30,12 +32,14 @@ function cargoAwareEnv(): NodeJS.ProcessEnv {
 
 export interface ConformanceResult {
   testName: string;
-  /** Source format used (e.g. '.runar.ts', '.runar.sol', '.runar.move', '.runar.py', '.runar.go', '.runar.rs', '.runar.rb') */
+  /** Source format used (e.g. '.runar.ts', '.runar.sol', '.runar.move', '.runar.py', '.runar.go', '.runar.rs', '.runar.rb', '.runar.zig') */
   format?: string;
   tsCompiler: CompilerOutput;
   goCompiler?: CompilerOutput;
   rustCompiler?: CompilerOutput;
   pythonCompiler?: CompilerOutput;
+  zigCompiler?: CompilerOutput;
+  rubyCompiler?: CompilerOutput;
   irMatch: boolean;
   scriptMatch: boolean;
   errors: string[];
@@ -45,13 +49,14 @@ export interface ConformanceResult {
  * Known input format extensions and which compilers support them.
  */
 export const INPUT_FORMATS = [
-  { ext: '.runar.ts',   compilers: ['ts', 'go', 'rust', 'python'] as const },
+  { ext: '.runar.ts',   compilers: ['ts', 'go', 'rust', 'python', 'zig', 'ruby'] as const },
   { ext: '.runar.sol',  compilers: ['ts', 'go', 'rust', 'python'] as const },
   { ext: '.runar.move', compilers: ['ts', 'go', 'rust', 'python'] as const },
   { ext: '.runar.py',   compilers: ['ts', 'go', 'rust', 'python'] as const },
   { ext: '.runar.go',   compilers: ['go', 'python'] as const },
   { ext: '.runar.rs',   compilers: ['rust', 'python'] as const },
-  { ext: '.runar.rb',   compilers: ['ts', 'go', 'rust', 'python'] as const },
+  { ext: '.runar.rb',   compilers: ['ts', 'go', 'rust', 'python', 'ruby'] as const },
+  { ext: '.runar.zig',  compilers: ['zig'] as const },
 ] as const;
 
 type CompilerId = (typeof INPUT_FORMATS)[number]['compilers'][number];
@@ -368,6 +373,136 @@ function runPythonCompiler(source: string, sourceFile: string): CompilerOutput |
   }
 }
 
+/**
+ * Check whether the Zig compiler binary is available.
+ */
+function findZigBinary(): string | null {
+  const candidates = [
+    join(ZIG_COMPILER_DIR, 'zig-out/bin/runar-zig'),
+    join(ZIG_COMPILER_DIR, 'runar-zig'),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  // Try PATH
+  try {
+    execSync('which runar-zig', { stdio: 'pipe' });
+    return 'runar-zig';
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Run the Zig compiler on the given source. Returns undefined if the Zig
+ * compiler is not available.
+ */
+function runZigCompiler(source: string, sourceFile: string): CompilerOutput | undefined {
+  const binary = findZigBinary();
+  if (!binary) return undefined;
+
+  const start = performance.now();
+  try {
+    const tmpDir = join(__dirname, '..', '.tmp');
+    if (!existsSync(tmpDir)) mkdirSync(tmpDir, { recursive: true });
+    const tmpFile = join(tmpDir, `zig-${basename(sourceFile)}`);
+    writeFileSync(tmpFile, source, 'utf-8');
+
+    // Get IR output
+    const irOutput = execSync(
+      `${binary} --source ${shellEscape(tmpFile)} --emit-ir --disable-constant-folding`,
+      { timeout: 30_000, encoding: 'utf-8', cwd: ZIG_COMPILER_DIR, maxBuffer: 10 * 1024 * 1024 },
+    ).trim();
+
+    // Get script hex output
+    const scriptHexOutput = execSync(
+      `${binary} --source ${shellEscape(tmpFile)} --hex --disable-constant-folding`,
+      { timeout: 30_000, encoding: 'utf-8', cwd: ZIG_COMPILER_DIR, maxBuffer: 10 * 1024 * 1024 },
+    ).trim();
+
+    const durationMs = performance.now() - start;
+    return {
+      irJson: canonicalizeJson(irOutput),
+      scriptHex: scriptHexOutput,
+      scriptAsm: '',
+      success: true,
+      durationMs,
+    };
+  } catch (err) {
+    const durationMs = performance.now() - start;
+    return {
+      irJson: '',
+      scriptHex: '',
+      scriptAsm: '',
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+      durationMs,
+    };
+  }
+}
+
+/**
+ * Check whether the Ruby compiler is available.
+ */
+function findRubyBinary(): string | null {
+  const script = join(RUBY_COMPILER_DIR, 'bin/runar-compiler-ruby');
+  if (!existsSync(script)) return null;
+  try {
+    execSync('ruby --version', { stdio: 'pipe' });
+    return `ruby ${script}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Run the Ruby compiler on the given source. Returns undefined if the Ruby
+ * compiler is not available.
+ */
+function runRubyCompiler(source: string, sourceFile: string): CompilerOutput | undefined {
+  const binary = findRubyBinary();
+  if (!binary) return undefined;
+
+  const start = performance.now();
+  try {
+    const tmpDir = join(__dirname, '..', '.tmp');
+    if (!existsSync(tmpDir)) mkdirSync(tmpDir, { recursive: true });
+    const tmpFile = join(tmpDir, `ruby-${basename(sourceFile)}`);
+    writeFileSync(tmpFile, source, 'utf-8');
+
+    // Get IR output
+    const irOutput = execSync(
+      `${binary} --source ${shellEscape(tmpFile)} --emit-ir --disable-constant-folding`,
+      { timeout: 30_000, encoding: 'utf-8', cwd: RUBY_COMPILER_DIR, maxBuffer: 10 * 1024 * 1024 },
+    ).trim();
+
+    // Get script hex output
+    const scriptHexOutput = execSync(
+      `${binary} --source ${shellEscape(tmpFile)} --hex --disable-constant-folding`,
+      { timeout: 30_000, encoding: 'utf-8', cwd: RUBY_COMPILER_DIR, maxBuffer: 10 * 1024 * 1024 },
+    ).trim();
+
+    const durationMs = performance.now() - start;
+    return {
+      irJson: canonicalizeJson(irOutput),
+      scriptHex: scriptHexOutput,
+      scriptAsm: '',
+      success: true,
+      durationMs,
+    };
+  } catch (err) {
+    const durationMs = performance.now() - start;
+    return {
+      irJson: '',
+      scriptHex: '',
+      scriptAsm: '',
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+      durationMs,
+    };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Output parsing & canonicalization
 // ---------------------------------------------------------------------------
@@ -519,6 +654,8 @@ export async function runConformanceTest(testDir: string): Promise<ConformanceRe
   const goResult = runGoCompiler(source, sourceFile);
   const rustResult = runRustCompiler(source, sourceFile);
   const pythonResult = runPythonCompiler(source, sourceFile);
+  const zigResult = runZigCompiler(source, sourceFile);
+  const rubyResult = runRubyCompiler(source, sourceFile);
 
   if (!tsResult.success) {
     errors.push(`TypeScript compiler failed: ${tsResult.error ?? 'unknown error'}`);
@@ -532,15 +669,21 @@ export async function runConformanceTest(testDir: string): Promise<ConformanceRe
   if (pythonResult && !pythonResult.success) {
     errors.push(`Python compiler failed: ${pythonResult.error ?? 'unknown error'}`);
   }
+  if (zigResult && !zigResult.success) {
+    errors.push(`Zig compiler failed: ${zigResult.error ?? 'unknown error'}`);
+  }
+  if (rubyResult && !rubyResult.success) {
+    errors.push(`Ruby compiler failed: ${rubyResult.error ?? 'unknown error'}`);
+  }
 
   // Cross-compiler IR comparison
-  const irMatch = compareIR(tsResult, goResult, rustResult, pythonResult);
+  const irMatch = compareIR(tsResult, goResult, rustResult, pythonResult, zigResult, rubyResult);
   if (!irMatch) {
     errors.push('IR mismatch between compilers');
   }
 
   // Cross-compiler script comparison
-  const scriptMatch = compareScript(tsResult, goResult, rustResult, pythonResult);
+  const scriptMatch = compareScript(tsResult, goResult, rustResult, pythonResult, zigResult, rubyResult);
   if (!scriptMatch) {
     errors.push('Script hex mismatch between compilers');
   }
@@ -562,6 +705,12 @@ export async function runConformanceTest(testDir: string): Promise<ConformanceRe
     }
     if (pythonResult?.success && pythonResult.irJson && pythonResult.irJson !== expectedIr) {
       errors.push('Python compiler IR does not match golden file');
+    }
+    if (zigResult?.success && zigResult.irJson && zigResult.irJson !== expectedIr) {
+      errors.push('Zig compiler IR does not match golden file');
+    }
+    if (rubyResult?.success && rubyResult.irJson && rubyResult.irJson !== expectedIr) {
+      errors.push('Ruby compiler IR does not match golden file');
     }
   }
 
@@ -589,6 +738,18 @@ export async function runConformanceTest(testDir: string): Promise<ConformanceRe
         errors.push('Python compiler script does not match golden file');
       }
     }
+    if (zigResult?.success && zigResult.scriptHex) {
+      const zigScript = zigResult.scriptHex.toLowerCase().replace(/\s/g, '');
+      if (zigScript !== expectedScript) {
+        errors.push('Zig compiler script does not match golden file');
+      }
+    }
+    if (rubyResult?.success && rubyResult.scriptHex) {
+      const rubyScript = rubyResult.scriptHex.toLowerCase().replace(/\s/g, '');
+      if (rubyScript !== expectedScript) {
+        errors.push('Ruby compiler script does not match golden file');
+      }
+    }
   }
 
   return {
@@ -597,6 +758,8 @@ export async function runConformanceTest(testDir: string): Promise<ConformanceRe
     goCompiler: goResult,
     rustCompiler: rustResult,
     pythonCompiler: pythonResult,
+    zigCompiler: zigResult,
+    rubyCompiler: rubyResult,
     irMatch,
     scriptMatch,
     errors,
@@ -705,6 +868,18 @@ function discoverFormats(testDir: string, testName: string): { ext: string; sour
     const sourceFile = join(testDir, `${testName}${ext}`);
     if (existsSync(sourceFile)) {
       found.push({ ext, sourceFile });
+    } else {
+      // Scan directory for any file with this extension (handles cases like
+      // P2PKH.runar.zig in the basic-p2pkh/ directory)
+      try {
+        const files = readdirSync(testDir);
+        const match = files.find(f => f.endsWith(ext));
+        if (match) {
+          found.push({ ext, sourceFile: join(testDir, match) });
+        }
+      } catch {
+        // Directory read failed, skip
+      }
     }
   }
 
@@ -749,6 +924,14 @@ export async function runConformanceTestForFormat(
     ? runPythonCompiler(source, format.sourceFile)
     : undefined;
 
+  const zigResult = supportedCompilers.includes('zig')
+    ? runZigCompiler(source, format.sourceFile)
+    : undefined;
+
+  const rubyResult = supportedCompilers.includes('ruby')
+    ? runRubyCompiler(source, format.sourceFile)
+    : undefined;
+
   if (supportedCompilers.includes('ts') && !tsResult.success) {
     errors.push(`TypeScript compiler failed on ${format.ext}: ${tsResult.error ?? 'unknown error'}`);
   }
@@ -761,6 +944,12 @@ export async function runConformanceTestForFormat(
   if (pythonResult && !pythonResult.success) {
     errors.push(`Python compiler failed on ${format.ext}: ${pythonResult.error ?? 'unknown error'}`);
   }
+  if (zigResult && !zigResult.success) {
+    errors.push(`Zig compiler failed on ${format.ext}: ${zigResult.error ?? 'unknown error'}`);
+  }
+  if (rubyResult && !rubyResult.success) {
+    errors.push(`Ruby compiler failed on ${format.ext}: ${rubyResult.error ?? 'unknown error'}`);
+  }
 
   // Cross-compiler comparison within this format
   const irMatch = compareIR(
@@ -768,6 +957,8 @@ export async function runConformanceTestForFormat(
     goResult,
     rustResult,
     pythonResult,
+    zigResult,
+    rubyResult,
   );
   if (!irMatch) {
     errors.push(`IR mismatch between compilers for ${format.ext}`);
@@ -778,6 +969,8 @@ export async function runConformanceTestForFormat(
     goResult,
     rustResult,
     pythonResult,
+    zigResult,
+    rubyResult,
   );
   if (!scriptMatch) {
     errors.push(`Script hex mismatch between compilers for ${format.ext}`);
@@ -791,6 +984,8 @@ export async function runConformanceTestForFormat(
       goResult,
       rustResult,
       pythonResult,
+      zigResult,
+      rubyResult,
     ].filter((o): o is CompilerOutput => o !== undefined && o.success && o.irJson !== '');
 
     for (const output of allOutputs) {
@@ -808,6 +1003,8 @@ export async function runConformanceTestForFormat(
       goResult,
       rustResult,
       pythonResult,
+      zigResult,
+      rubyResult,
     ].filter((o): o is CompilerOutput => o !== undefined && o.success && o.scriptHex !== '');
 
     for (const output of allOutputs) {
@@ -826,6 +1023,8 @@ export async function runConformanceTestForFormat(
     goCompiler: goResult,
     rustCompiler: rustResult,
     pythonCompiler: pythonResult,
+    zigCompiler: zigResult,
+    rubyCompiler: rubyResult,
     irMatch,
     scriptMatch,
     errors,

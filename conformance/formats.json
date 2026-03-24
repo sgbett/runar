@@ -5,7 +5,7 @@
       "extension": ".runar.ts",
       "name": "TypeScript",
       "description": "Primary TypeScript contract syntax",
-      "compilers": ["ts", "go", "rust", "python"],
+      "compilers": ["ts", "go", "rust", "python", "zig", "ruby"],
       "status": "stable"
     },
     {
@@ -47,7 +47,7 @@
       "extension": ".runar.rb",
       "name": "Ruby",
       "description": "Ruby DSL contract syntax",
-      "compilers": ["ts", "go", "rust", "python"],
+      "compilers": ["ts", "go", "rust", "python", "ruby"],
       "status": "experimental"
     },
     {

@@ -25,6 +25,8 @@ export interface TestResult {
     go?: number;
     rust?: number;
     python?: number;
+    zig?: number;
+    ruby?: number;
   };
 }
 
@@ -47,7 +49,7 @@ export function generateReport(results: ConformanceResult[]): ConformanceReport 
   const testResults: TestResult[] = results.map((r) => {
     const hasErrors = r.errors.length > 0;
     const tsOk = r.tsCompiler.success;
-    const allCompilersSkipped = !tsOk && !r.goCompiler?.success && !r.rustCompiler?.success && !r.pythonCompiler?.success;
+    const allCompilersSkipped = !tsOk && !r.goCompiler?.success && !r.rustCompiler?.success && !r.pythonCompiler?.success && !r.zigCompiler?.success && !r.rubyCompiler?.success;
 
     let status: TestResult['status'];
     if (allCompilersSkipped) {
@@ -69,6 +71,8 @@ export function generateReport(results: ConformanceResult[]): ConformanceReport 
         go: r.goCompiler?.durationMs,
         rust: r.rustCompiler?.durationMs,
         python: r.pythonCompiler?.durationMs,
+        zig: r.zigCompiler?.durationMs,
+        ruby: r.rubyCompiler?.durationMs,
       },
     };
   });
@@ -130,6 +134,34 @@ export function generateReport(results: ConformanceResult[]): ConformanceReport 
       : 0,
   });
 
+  // Zig compiler
+  const zigResults = results.filter((r) => r.zigCompiler !== undefined);
+  const zigSuccess = zigResults.filter((r) => r.zigCompiler?.success);
+  const zigDurations = zigSuccess.map((r) => r.zigCompiler!.durationMs);
+  compilers.push({
+    name: 'Zig',
+    available: zigResults.length > 0,
+    testsRun: zigResults.length,
+    testsSucceeded: zigSuccess.length,
+    averageDurationMs: zigDurations.length > 0
+      ? zigDurations.reduce((a, b) => a + b, 0) / zigDurations.length
+      : 0,
+  });
+
+  // Ruby compiler
+  const rubyResults = results.filter((r) => r.rubyCompiler !== undefined);
+  const rubySuccess = rubyResults.filter((r) => r.rubyCompiler?.success);
+  const rubyDurations = rubySuccess.map((r) => r.rubyCompiler!.durationMs);
+  compilers.push({
+    name: 'Ruby',
+    available: rubyResults.length > 0,
+    testsRun: rubyResults.length,
+    testsSucceeded: rubySuccess.length,
+    averageDurationMs: rubyDurations.length > 0
+      ? rubyDurations.reduce((a, b) => a + b, 0) / rubyDurations.length
+      : 0,
+  });
+
   return {
     timestamp,
     totalTests: results.length,
@@ -184,14 +216,15 @@ export function formatReportAsMarkdown(report: ConformanceReport): string {
   // Timing details
   lines.push('## Timing Details');
   lines.push('');
-  lines.push('| Test | TS (ms) | Go (ms) | Rust (ms) | Python (ms) |');
-  lines.push('|------|---------|---------|-----------|-------------|');
+  lines.push('| Test | TS (ms) | Go (ms) | Rust (ms) | Python (ms) | Zig (ms) |');
+  lines.push('|------|---------|---------|-----------|-------------|----------|');
   for (const r of report.results) {
     const ts = r.timings.ts !== undefined ? r.timings.ts.toFixed(1) : '-';
     const go = r.timings.go !== undefined ? r.timings.go.toFixed(1) : '-';
     const rust = r.timings.rust !== undefined ? r.timings.rust.toFixed(1) : '-';
     const python = r.timings.python !== undefined ? r.timings.python.toFixed(1) : '-';
-    lines.push(`| ${r.testName} | ${ts} | ${go} | ${rust} | ${python} |`);
+    const zig = r.timings.zig !== undefined ? r.timings.zig.toFixed(1) : '-';
+    lines.push(`| ${r.testName} | ${ts} | ${go} | ${rust} | ${python} | ${zig} |`);
   }
   lines.push('');
 
