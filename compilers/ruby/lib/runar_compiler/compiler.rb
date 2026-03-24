@@ -557,6 +557,9 @@ module RunarCompiler
 
   # Serialize an ANFProgram to a JSON-compatible dict (camelCase keys).
   def self._serialize_anf_program(program)
+    # Forward-declare ser_binding so ser_value can reference it for nested if/loop bodies
+    ser_binding = nil
+
     ser_value = lambda do |v|
       d = { "kind" => v.kind }
       d["name"] = v.name unless v.name.nil?
