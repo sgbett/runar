@@ -65,7 +65,8 @@ pub const ECDemo = struct {
     }
 
     pub fn checkEncodeCompressed(self: *const ECDemo, expected: runar.ByteString) void {
-        runar.assert(runar.bytesEq(runar.ecEncodeCompressed(self.pt), expected));
+        const compressed = runar.ecEncodeCompressed(self.pt);
+        runar.assert(runar.bytesEq(compressed, expected));
     }
 
     pub fn checkMulIdentity(self: *const ECDemo) void {
@@ -75,11 +76,13 @@ pub const ECDemo = struct {
     }
 
     pub fn checkAddOnCurve(self: *const ECDemo, other: runar.Point) void {
-        runar.assert(runar.ecOnCurve(runar.ecAdd(self.pt, other)));
+        const result = runar.ecAdd(self.pt, other);
+        runar.assert(runar.ecOnCurve(result));
     }
 
     pub fn checkMulGenOnCurve(self: *const ECDemo, scalar: i64) void {
         _ = self;
-        runar.assert(runar.ecOnCurve(runar.ecMulGen(scalar)));
+        const result = runar.ecMulGen(scalar);
+        runar.assert(runar.ecOnCurve(result));
     }
 };

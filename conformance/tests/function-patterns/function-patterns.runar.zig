@@ -10,31 +10,6 @@ pub const FunctionPatterns = struct {
         return .{ .owner = owner, .balance = balance };
     }
 
-    fn requireOwner(self: *const FunctionPatterns, sig: runar.Sig) void {
-        runar.assert(runar.checkSig(sig, self.owner));
-    }
-
-    fn computeFee(self: *const FunctionPatterns, amount: i64, feeBps: i64) i64 {
-        _ = self;
-        return runar.percentOf(amount, feeBps);
-    }
-
-    fn scaleValue(self: *const FunctionPatterns, value: i64, numerator: i64, denominator: i64) i64 {
-        _ = self;
-        return runar.mulDiv(value, numerator, denominator);
-    }
-
-    fn clampValue(self: *const FunctionPatterns, value: i64, lo: i64, hi: i64) i64 {
-        _ = self;
-        return runar.clamp(value, lo, hi);
-    }
-
-    fn roundDown(self: *const FunctionPatterns, value: i64, step: i64) i64 {
-        _ = self;
-        const remainder = runar.safemod(value, step);
-        return value - remainder;
-    }
-
     pub fn deposit(self: *FunctionPatterns, sig: runar.Sig, amount: i64) void {
         self.requireOwner(sig);
         runar.assert(amount > 0);
@@ -59,5 +34,30 @@ pub const FunctionPatterns = struct {
         self.requireOwner(sig);
         const clamped = self.clampValue(self.balance, lo, hi);
         self.balance = self.roundDown(clamped, step);
+    }
+
+    fn requireOwner(self: *const FunctionPatterns, sig: runar.Sig) void {
+        runar.assert(runar.checkSig(sig, self.owner));
+    }
+
+    fn computeFee(self: *const FunctionPatterns, amount: i64, feeBps: i64) i64 {
+        _ = self;
+        return runar.percentOf(amount, feeBps);
+    }
+
+    fn scaleValue(self: *const FunctionPatterns, value: i64, numerator: i64, denominator: i64) i64 {
+        _ = self;
+        return runar.mulDiv(value, numerator, denominator);
+    }
+
+    fn clampValue(self: *const FunctionPatterns, value: i64, lo: i64, hi: i64) i64 {
+        _ = self;
+        return runar.clamp(value, lo, hi);
+    }
+
+    fn roundDown(self: *const FunctionPatterns, value: i64, step: i64) i64 {
+        _ = self;
+        const remainder = runar.safemod(value, step);
+        return value - remainder;
     }
 };
