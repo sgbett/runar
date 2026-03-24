@@ -208,7 +208,7 @@ module IntegrationHelpers
 
   # Compile a contract from a path relative to the project root.
   #
-  # Shells out to the TypeScript compiler via +npx runar compile+. Returns a
+  # Uses the native Ruby compiler at compilers/ruby/. Returns a
   # RunarArtifact ready for RunarContract.
   #
   # @param rel_path [String] path relative to PROJECT_ROOT
@@ -216,24 +216,9 @@ module IntegrationHelpers
   # @raise [RuntimeError] if compilation fails
   def compile_contract(rel_path)
     abs_path = File.join(PROJECT_ROOT, rel_path)
-    file_name = File.basename(rel_path)
+    compiler_bin = File.join(PROJECT_ROOT, 'compilers', 'ruby', 'bin', 'runar-compiler-ruby')
 
-    # Use the compiler dist directly via dynamic import (ESM package).
-    script = <<~JS
-      (async () => {
-        const { compile } = await import('#{PROJECT_ROOT}/packages/runar-compiler/dist/index.js');
-        const fs = await import('fs');
-        const source = fs.readFileSync(#{abs_path.inspect}, 'utf-8');
-        const result = compile(source, { fileName: #{file_name.inspect} });
-        if (!result.success) { console.error(result.diagnostics); process.exit(1); }
-        const json = JSON.stringify(result.artifact, (k, v) => typeof v === 'bigint' ? v.toString() + 'n' : v);
-        process.stdout.write(json);
-      })();
-    JS
-
-    node_bin = ENV['NODE_BIN'] || `which node 2>/dev/null`.strip
-    node_bin = 'node' if node_bin.empty?
-    output = `#{node_bin} -e #{Shellwords.escape(script)} 2>&1`
+    output = `ruby #{Shellwords.escape(compiler_bin)} --source #{Shellwords.escape(abs_path)} 2>&1`
     status = Process.last_status
     raise "Compilation failed for #{rel_path}:\n#{output}" unless status&.success?
 

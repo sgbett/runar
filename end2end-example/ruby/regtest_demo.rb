@@ -354,30 +354,13 @@ def find_utxo(txid, expected_script)
 end
 
 # =============================================================================
-# Compilation helper (shell-out to TypeScript compiler)
+# Compilation helper (native Ruby compiler)
 # =============================================================================
 
 def compile_contract(abs_path)
-  file_name = File.basename(abs_path)
+  compiler_bin = File.join(PROJECT_ROOT, 'compilers', 'ruby', 'bin', 'runar-compiler-ruby')
 
-  # Use the compiler dist directly (avoids ESM/TS import issues with the CLI).
-  script = <<~JS
-    const { compile } = require('#{PROJECT_ROOT}/packages/runar-compiler/dist/index.js');
-    const fs = require('fs');
-    const source = fs.readFileSync(#{abs_path.inspect}, 'utf-8');
-    const result = compile(source, { fileName: #{file_name.inspect} });
-    if (!result.success) {
-      console.error(JSON.stringify(result.diagnostics));
-      process.exit(1);
-    }
-    const json = JSON.stringify(
-      result.artifact,
-      (k, v) => typeof v === 'bigint' ? v.toString() + 'n' : v
-    );
-    process.stdout.write(json);
-  JS
-
-  output = `node -e #{Shellwords.escape(script)} 2>&1`
+  output = `ruby #{Shellwords.escape(compiler_bin)} --source #{Shellwords.escape(abs_path)} 2>&1`
   status = Process.last_status
   raise "Compilation failed:\n#{output}" unless status&.success?
 

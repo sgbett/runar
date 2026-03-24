@@ -133,9 +133,68 @@ jobs:
           bundle install
           bundle exec rspec **/*_spec.rb
 
+  ruby-compiler:
+    name: Ruby Compiler
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+      - name: Ruby compiler conformance (IR → hex)
+        run: |
+          fail=0
+          for test in conformance/tests/*/expected-ir.json; do
+            dir=$(dirname "$test")
+            name=$(basename "$dir")
+            expected=$(tr -d '[:space:]' < "$dir/expected-script.hex" | tr '[:upper:]' '[:lower:]')
+            actual=$(ruby compilers/ruby/bin/runar-compiler-ruby --ir "$test" --hex --disable-constant-folding 2>&1 | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+            if [ "$expected" = "$actual" ]; then
+              echo "PASS $name"
+            else
+              echo "FAIL $name"
+              fail=1
+            fi
+          done
+          exit $fail
+      - name: Ruby compiler source conformance (.runar.ts → hex)
+        run: |
+          fail=0
+          for dir in conformance/tests/*/; do
+            name=$(basename "$dir")
+            ts_file="$dir/$name.runar.ts"
+            [ -f "$ts_file" ] || continue
+            expected=$(tr -d '[:space:]' < "$dir/expected-script.hex" | tr '[:upper:]' '[:lower:]')
+            actual=$(ruby compilers/ruby/bin/runar-compiler-ruby --source "$ts_file" --hex --disable-constant-folding 2>&1 | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+            if [ "$expected" = "$actual" ]; then
+              echo "PASS $name (.runar.ts)"
+            else
+              echo "FAIL $name (.runar.ts)"
+              fail=1
+            fi
+          done
+          exit $fail
+      - name: Ruby compiler source conformance (.runar.rb → hex)
+        run: |
+          fail=0
+          for dir in conformance/tests/*/; do
+            name=$(basename "$dir")
+            rb_file=$(find "$dir" -name "*.runar.rb" | head -1)
+            [ -n "$rb_file" ] || continue
+            expected=$(tr -d '[:space:]' < "$dir/expected-script.hex" | tr '[:upper:]' '[:lower:]')
+            actual=$(ruby compilers/ruby/bin/runar-compiler-ruby --source "$rb_file" --hex --disable-constant-folding 2>&1 | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+            if [ "$expected" = "$actual" ]; then
+              echo "PASS $name (.runar.rb)"
+            else
+              echo "FAIL $name (.runar.rb)"
+              fail=1
+            fi
+          done
+          exit $fail
+
   conformance:
     name: Conformance Tests
-    needs: [typescript, go, rust, python, zig-compiler]
+    needs: [typescript, go, rust, python, zig-compiler, ruby-compiler]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -148,6 +207,9 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: runar-zig
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
       - run: chmod +x runar-go runar-compiler-rust runar-zig
       - name: Run conformance tests
         run: |
@@ -159,11 +221,15 @@ jobs:
             go_hex=$(./runar-go --ir "$test" --hex)
             rust_hex=$(./runar-compiler-rust --ir "$test" --hex)
             zig_hex=$(./runar-zig compile-ir "$test" --hex 2>/dev/null | head -1)
+            ruby_hex=$(ruby compilers/ruby/bin/runar-compiler-ruby --ir "$test" --hex --disable-constant-folding 2>&1 | tr -d '[:space:]')
             if [ "$go_hex" != "$rust_hex" ]; then
               echo "MISMATCH Go vs Rust"
               fail=1
             elif [ "$go_hex" != "$zig_hex" ]; then
               echo "MISMATCH Go vs Zig"
+              fail=1
+            elif [ "$go_hex" != "$ruby_hex" ]; then
+              echo "MISMATCH Go vs Ruby"
               fail=1
             else
               echo "OK (${#go_hex} hex chars)"
