@@ -6,6 +6,7 @@
 # template-based approach used by the TypeScript, Go, Rust, and Python SDKs.
 # Zero external dependencies.
 
+require 'set'
 require_relative 'types'
 
 module Runar

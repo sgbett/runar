@@ -29,6 +29,12 @@ module RunarCompiler
       properties = _lower_properties(contract)
       methods = _lower_methods(contract)
 
+      # Post-pass: lift update_prop from if-else branches into flat conditionals.
+      # Mirrors the TS reference compiler's liftBranchUpdateProps (04-anf-lower.ts line 50).
+      methods.each do |m|
+        m.body = _lift_branch_update_props(m.body)
+      end
+
       IR::ANFProgram.new(
         contract_name: contract.name,
         properties: properties,
@@ -1204,5 +1210,427 @@ module RunarCompiler
       return node.name if node.is_a?(CustomType)
       "<unknown>"
     end
+
+    # -------------------------------------------------------------------
+    # Post-ANF pass: lift update_prop from if-else branches
+    # -------------------------------------------------------------------
+    #
+    # Mirrors the TypeScript reference compiler's liftBranchUpdateProps.
+    # Transforms if-else chains where each branch ends with update_prop
+    # into flat conditional assignments. This is critical for stateful
+    # contracts because Bitcoin Script requires ALL state fields to be
+    # explicitly on the stack after method execution.
+    #
+    # Before:
+    #   if (pos === 0) { this.c0 = turn; }
+    #   else if (pos === 1) { this.c1 = turn; }
+    #   else { assert(false); }
+    #
+    # After:
+    #   this.c0 = (pos === 0)            ? turn : this.c0;
+    #   this.c1 = (!cond0 && pos === 1)  ? turn : this.c1;
+
+    # Find the max temp index (e.g. t47 -> 47) in a binding tree.
+    def self._max_temp_index(bindings)
+      max = -1
+      bindings.each do |b|
+        if b.name.match?(/\At\d+\z/)
+          n = b.name[1..].to_i
+          max = n if n > max
+        end
+        v = b.value
+        if v.kind == "if"
+          t = _max_temp_index(v.then || [])
+          max = t if t > max
+          e = _max_temp_index(v.else_ || [])
+          max = e if e > max
+        elsif v.kind == "loop"
+          t = _max_temp_index(v.body || [])
+          max = t if t > max
+        end
+      end
+      max
+    end
+    private_class_method :_max_temp_index
+
+    # Check if all bindings are side-effect-free (safe to hoist).
+    def self._all_side_effect_free?(bindings)
+      bindings.all? do |b|
+        %w[load_prop load_param load_const bin_op unary_op].include?(b.value.kind)
+      end
+    end
+    private_class_method :_all_side_effect_free?
+
+    # Extract the update_prop target from a branch's last binding.
+    # Returns { prop_name:, value_bindings:, value_ref: } or nil.
+    def self._extract_branch_update(bindings)
+      return nil if bindings.empty?
+
+      last = bindings.last
+      return nil unless last.value.kind == "update_prop"
+
+      value_bindings = bindings[0...-1]
+      return nil unless _all_side_effect_free?(value_bindings)
+
+      {
+        prop_name: last.value.name,
+        value_bindings: value_bindings,
+        value_ref: last.value.value_ref || last.value.raw_value
+      }
+    end
+    private_class_method :_extract_branch_update
+
+    # Check if an else branch is just assert(false) — unreachable dead code.
+    def self._assert_false_else?(bindings)
+      return false if bindings.empty?
+
+      last = bindings.last
+      return false unless last.value.kind == "assert"
+
+      assert_ref = last.value.value_ref || last.value.raw_value
+      ref_binding = bindings.find { |b| b.name == assert_ref }
+      if ref_binding && ref_binding.value.kind == "load_const"
+        # Check raw_value (JSON false literal) or const_bool (decoded boolean)
+        return true if ref_binding.value.raw_value == false
+        return true if ref_binding.value.const_bool == false
+      end
+
+      false
+    end
+    private_class_method :_assert_false_else?
+
+    # Recursively collect update branches from a nested if-else chain.
+    def self._collect_update_branches(if_cond, then_bindings, else_bindings)
+      then_update = _extract_branch_update(then_bindings)
+      return nil unless then_update
+
+      branches = [{
+        cond_setup_bindings: [],
+        cond_ref: if_cond,
+        **then_update
+      }]
+
+      return nil if else_bindings.nil? || else_bindings.empty?
+
+      # Check if else is another if (else-if chain)
+      last_else = else_bindings.last
+      if last_else.value.kind == "if"
+        inner_if = last_else.value
+        cond_setup = else_bindings[0...-1]
+        return nil unless _all_side_effect_free?(cond_setup)
+
+        inner_branches = _collect_update_branches(
+          inner_if.cond, inner_if.then || [], inner_if.else_ || []
+        )
+        return nil unless inner_branches
+
+        # Prepend condition setup to first inner branch
+        inner_branches[0][:cond_setup_bindings] =
+          cond_setup + inner_branches[0][:cond_setup_bindings]
+        branches.concat(inner_branches)
+        return branches
+      end
+
+      # Otherwise, else branch should end with update_prop (final else)
+      else_update = _extract_branch_update(else_bindings)
+      if else_update
+        branches << { cond_setup_bindings: [], cond_ref: nil, **else_update }
+        return branches
+      end
+
+      # Handle unreachable else: assert(false) as dead code
+      return branches if _assert_false_else?(else_bindings)
+
+      nil
+    end
+    private_class_method :_collect_update_branches
+
+    # Remap temp references in an ANF value according to a name mapping.
+    def self._remap_value_refs(value, map)
+      r = ->(ref) { map[ref] || ref }
+
+      case value.kind
+      when "load_param", "load_prop", "get_state_script"
+        value
+      when "load_const"
+        if value.raw_value.is_a?(String) && value.raw_value.start_with?("@ref:")
+          target = value.raw_value[5..]
+          remapped = map[target]
+          if remapped
+            new_v = _clone_anf_value(value)
+            new_v.raw_value = "@ref:#{remapped}"
+            return new_v
+          end
+        end
+        value
+      when "bin_op"
+        new_v = _clone_anf_value(value)
+        new_v.left = r.call(value.left)
+        new_v.right = r.call(value.right)
+        new_v
+      when "unary_op"
+        new_v = _clone_anf_value(value)
+        new_v.operand = r.call(value.operand)
+        new_v
+      when "call"
+        new_v = _clone_anf_value(value)
+        new_v.args = (value.args || []).map { |a| r.call(a) }
+        new_v
+      when "method_call"
+        new_v = _clone_anf_value(value)
+        new_v.object = r.call(value.object)
+        new_v.args = (value.args || []).map { |a| r.call(a) }
+        new_v
+      when "assert"
+        new_v = _clone_anf_value(value)
+        ref = value.value_ref || value.raw_value
+        new_v.value_ref = r.call(ref) if ref
+        new_v.raw_value = r.call(ref) if ref
+        new_v
+      when "update_prop"
+        new_v = _clone_anf_value(value)
+        ref = value.value_ref || value.raw_value
+        new_v.value_ref = r.call(ref) if ref
+        new_v.raw_value = r.call(ref) if ref
+        new_v
+      when "if"
+        new_v = _clone_anf_value(value)
+        new_v.cond = r.call(value.cond)
+        new_v
+      when "check_preimage", "deserialize_state"
+        new_v = _clone_anf_value(value)
+        new_v.preimage = r.call(value.preimage)
+        new_v
+      when "add_output"
+        new_v = _clone_anf_value(value)
+        new_v.satoshis = r.call(value.satoshis)
+        new_v.state_values = (value.state_values || []).map { |s| r.call(s) }
+        new_v.preimage = r.call(value.preimage)
+        new_v
+      when "add_raw_output"
+        new_v = _clone_anf_value(value)
+        new_v.satoshis = r.call(value.satoshis)
+        new_v.script_bytes = r.call(value.script_bytes)
+        new_v
+      else
+        value
+      end
+    end
+    private_class_method :_remap_value_refs
+
+    # Shallow clone an ANFValue.
+    def self._clone_anf_value(v)
+      new_v = IR::ANFValue.new(kind: v.kind)
+      new_v.name = v.name
+      new_v.raw_value = v.raw_value
+      new_v.const_string = v.const_string
+      new_v.const_big_int = v.const_big_int
+      new_v.const_bool = v.const_bool
+      new_v.const_int = v.const_int
+      new_v.op = v.op
+      new_v.left = v.left
+      new_v.right = v.right
+      new_v.result_type = v.result_type
+      new_v.operand = v.operand
+      new_v.func = v.func
+      new_v.args = v.args
+      new_v.object = v.object
+      new_v.method = v.method
+      new_v.cond = v.cond
+      new_v.then = v.then
+      new_v.else_ = v.else_
+      new_v.count = v.count
+      new_v.iter_var = v.iter_var
+      new_v.body = v.body
+      new_v.value_ref = v.value_ref
+      new_v.preimage = v.preimage
+      new_v.satoshis = v.satoshis
+      new_v.state_values = v.state_values
+      new_v.script_bytes = v.script_bytes
+      new_v.elements = v.elements
+      new_v
+    end
+    private_class_method :_clone_anf_value
+
+    # Transform if-bindings whose branches all end with update_prop into
+    # flat conditional assignments.
+    def self._lift_branch_update_props(bindings)
+      next_idx = _max_temp_index(bindings) + 1
+      fresh = -> { name = "t#{next_idx}"; next_idx += 1; name }
+
+      result = []
+
+      bindings.each do |binding|
+        unless binding.value.kind == "if"
+          result << binding
+          next
+        end
+
+        if_val = binding.value
+        branches = _collect_update_branches(
+          if_val.cond, if_val.then || [], if_val.else_ || []
+        )
+
+        unless branches && branches.length >= 2
+          result << binding
+          next
+        end
+
+        # --- Transform: flatten into conditional assignments ---
+
+        # 1. Hoist condition setup bindings with fresh names
+        name_map = {}
+        cond_refs = []
+
+        branches.each do |branch|
+          branch[:cond_setup_bindings].each do |csb|
+            new_name = fresh.call
+            name_map[csb.name] = new_name
+            result << IR::ANFBinding.new(
+              name: new_name,
+              value: _remap_value_refs(csb.value, name_map)
+            )
+          end
+          cond_refs << (branch[:cond_ref] ? (name_map[branch[:cond_ref]] || branch[:cond_ref]) : nil)
+        end
+
+        # 2. Compute effective condition for each branch
+        effective_conds = []
+        negated_conds = []
+
+        branches.each_with_index do |_branch, i|
+          if i == 0
+            effective_conds << cond_refs[0]
+            next
+          end
+
+          # Negate any prior conditions not yet negated
+          (negated_conds.length...i).each do |j|
+            next if cond_refs[j].nil?
+
+            neg_name = fresh.call
+            result << IR::ANFBinding.new(
+              name: neg_name,
+              value: IR::ANFValue.new(kind: "unary_op").tap do |v|
+                v.op = "!"
+                v.operand = cond_refs[j]
+              end
+            )
+            negated_conds << neg_name
+          end
+
+          # AND all negated conditions together
+          and_ref = negated_conds[0]
+          (1...[i, negated_conds.length].min).each do |j|
+            and_name = fresh.call
+            result << IR::ANFBinding.new(
+              name: and_name,
+              value: IR::ANFValue.new(kind: "bin_op").tap do |v|
+                v.op = "&&"
+                v.left = and_ref
+                v.right = negated_conds[j]
+              end
+            )
+            and_ref = and_name
+          end
+
+          if cond_refs[i]
+            # Middle branch: AND with own condition
+            final_name = fresh.call
+            result << IR::ANFBinding.new(
+              name: final_name,
+              value: IR::ANFValue.new(kind: "bin_op").tap do |v|
+                v.op = "&&"
+                v.left = and_ref
+                v.right = cond_refs[i]
+              end
+            )
+            effective_conds << final_name
+          else
+            # Final else: just the AND of negations
+            effective_conds << and_ref
+          end
+        end
+
+        # 3. For each branch, emit: load_old, conditional if-expression, update_prop
+        branches.each_with_index do |branch, i|
+          # Load old property value
+          old_prop_ref = fresh.call
+          result << IR::ANFBinding.new(
+            name: old_prop_ref,
+            value: IR::ANFValue.new(kind: "load_prop").tap { |v| v.name = branch[:prop_name] }
+          )
+
+          # Remap value bindings for the then-branch
+          branch_map = name_map.dup
+          then_bindings = []
+          branch[:value_bindings].each do |vb|
+            new_name = fresh.call
+            branch_map[vb.name] = new_name
+            then_bindings << IR::ANFBinding.new(
+              name: new_name,
+              value: _remap_value_refs(vb.value, branch_map)
+            )
+          end
+
+          # The then-branch value: remap the value_ref through branch_map
+          then_value_ref = branch_map[branch[:value_ref]] || branch[:value_ref]
+          # If there are no value_bindings, we need a load_prop for the value
+          if then_bindings.empty?
+            load_name = fresh.call
+            then_bindings << IR::ANFBinding.new(
+              name: load_name,
+              value: IR::ANFValue.new(kind: "load_prop").tap { |v| v.name = "turn" }
+            )
+            # We need the actual turn value — use the value_ref from the branch
+            # which points to a load_prop that was inside the original branch
+            then_bindings = branch[:value_bindings].map do |vb|
+              new_name = fresh.call
+              branch_map[vb.name] = new_name
+              IR::ANFBinding.new(
+                name: new_name,
+                value: _remap_value_refs(vb.value, branch_map)
+              )
+            end
+            then_value_ref = branch_map[branch[:value_ref]] || branch[:value_ref]
+          end
+
+          # Else branch: keep old property value
+          keep_name = fresh.call
+          else_bindings = [
+            IR::ANFBinding.new(
+              name: keep_name,
+              value: IR::ANFValue.new(kind: "load_const").tap do |v|
+                v.raw_value = "@ref:#{old_prop_ref}"
+              end
+            )
+          ]
+
+          # Emit conditional if-expression
+          cond_if_ref = fresh.call
+          result << IR::ANFBinding.new(
+            name: cond_if_ref,
+            value: IR::ANFValue.new(kind: "if").tap do |v|
+              v.cond = effective_conds[i]
+              v.then = then_bindings
+              v.else_ = else_bindings
+            end
+          )
+
+          # Emit update_prop
+          result << IR::ANFBinding.new(
+            name: fresh.call,
+            value: IR::ANFValue.new(kind: "update_prop").tap do |v|
+              v.name = branch[:prop_name]
+              v.value_ref = cond_if_ref
+              v.raw_value = cond_if_ref
+            end
+          )
+        end
+      end
+
+      result
+    end
+    private_class_method :_lift_branch_update_props
   end
 end
