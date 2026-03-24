@@ -390,57 +390,63 @@ pub fn emitArtifact(
     // compilerVersion
     try w.writeAll("\"compilerVersion\":\"runar-zig-0.2.7\",");
 
-    // contract
-    try w.writeAll("\"contract\":");
+    // contractName
+    try w.writeAll("\"contractName\":");
     try writeJsonString(w, stack_program.contract_name);
     try w.writeByte(',');
 
     // abi
     try w.writeAll("\"abi\":{");
 
-    // abi.constructor — extract from ANF properties (constructor params are readonly properties)
+    // abi.constructor — extract params from the ANF constructor method
     try w.writeAll("\"constructor\":{\"params\":[");
     {
         var first = true;
-        for (anf_program.properties) |prop| {
-            if (prop.readonly) {
-                if (!first) try w.writeByte(',');
-                first = false;
-                try w.writeAll("{\"name\":");
-                try writeJsonString(w, prop.name);
-                try w.writeAll(",\"type\":");
-                try writeJsonString(w, prop.type_name);
-                try w.writeByte('}');
+        for (anf_program.methods) |method| {
+            if (std.mem.eql(u8, method.name, "constructor")) {
+                for (method.params) |param| {
+                    if (!first) try w.writeByte(',');
+                    first = false;
+                    try w.writeAll("{\"name\":");
+                    try writeJsonString(w, param.name);
+                    try w.writeAll(",\"type\":");
+                    try writeJsonString(w, param.type_name);
+                    try w.writeByte('}');
+                }
+                break;
             }
         }
     }
     try w.writeAll("]},");
 
-    // abi.methods
+    // abi.methods — only non-constructor methods
     try w.writeAll("\"methods\":[");
-    for (anf_program.methods, 0..) |method, i| {
-        if (i > 0) try w.writeByte(',');
-        try w.writeAll("{\"name\":");
-        try writeJsonString(w, method.name);
-        try w.writeAll(",\"params\":[");
-        for (method.params, 0..) |param, j| {
-            if (j > 0) try w.writeByte(',');
+    {
+        var first = true;
+        for (anf_program.methods) |method| {
+            if (std.mem.eql(u8, method.name, "constructor")) continue;
+            if (!first) try w.writeByte(',');
+            first = false;
             try w.writeAll("{\"name\":");
-            try writeJsonString(w, param.name);
-            try w.writeAll(",\"type\":");
-            try writeJsonString(w, param.type_name);
+            try writeJsonString(w, method.name);
+            try w.writeAll(",\"params\":[");
+            for (method.params, 0..) |param, j| {
+                if (j > 0) try w.writeByte(',');
+                try w.writeAll("{\"name\":");
+                try writeJsonString(w, param.name);
+                try w.writeAll(",\"type\":");
+                try writeJsonString(w, param.type_name);
+                try w.writeByte('}');
+            }
+            try w.writeAll("],\"isPublic\":");
+            try w.writeAll(if (method.is_public) "true" else "false");
             try w.writeByte('}');
         }
-        try w.writeAll("],\"index\":");
-        try w.print("{d}", .{i});
-        try w.writeAll(",\"public\":");
-        try w.writeAll(if (method.is_public) "true" else "false");
-        try w.writeByte('}');
     }
     try w.writeAll("]},");
 
-    // hex
-    try w.writeAll("\"hex\":");
+    // script
+    try w.writeAll("\"script\":");
     try writeJsonString(w, script_hex);
     try w.writeByte(',');
 
@@ -943,7 +949,17 @@ test "emitArtifact — simple contract" {
         .{ .name = "pubKey", .type_name = "PubKey" },
     };
 
+    var ctor_params = [_]types.ANFParam{
+        .{ .name = "pubKeyHash", .type_name = "Ripemd160" },
+    };
+
     var anf_methods = [_]types.ANFMethod{
+        .{
+            .name = "constructor",
+            .is_public = false,
+            .params = &ctor_params,
+            .bindings = &.{},
+        },
         .{
             .name = "unlock",
             .is_public = true,
@@ -971,15 +987,15 @@ test "emitArtifact — simple contract" {
     defer allocator.free(json);
 
     // Verify it contains expected fields
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"contract\":\"P2PKH\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"hex\":\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"contractName\":\"P2PKH\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"script\":\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"asm\":\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"abi\":{") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"constructor\":{\"params\":[") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"pubKeyHash\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"Ripemd160\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"methods\":[{\"name\":\"unlock\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"public\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"isPublic\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"codeSeparatorIndex\":0") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"stateFields\":[]") != null);
 
@@ -999,7 +1015,17 @@ test "emitArtifact — stateful contract with state fields" {
         .{ .name = "increment", .ops = &body, .max_stack_depth = 2 },
     };
 
+    var ctor_params = [_]types.ANFParam{
+        .{ .name = "count", .type_name = "bigint" },
+    };
+
     var anf_methods = [_]types.ANFMethod{
+        .{
+            .name = "constructor",
+            .is_public = false,
+            .params = &ctor_params,
+            .bindings = &.{},
+        },
         .{
             .name = "increment",
             .is_public = true,
@@ -1029,9 +1055,9 @@ test "emitArtifact — stateful contract with state fields" {
 
     // Stateful: only non-readonly properties are state fields
     try std.testing.expect(std.mem.indexOf(u8, json, "\"stateFields\":[{\"name\":\"count\",\"type\":\"bigint\",\"index\":0}]") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"contract\":\"Counter\"") != null);
-    // Constructor params = readonly properties = owner only
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"constructor\":{\"params\":[{\"name\":\"owner\",\"type\":\"PubKey\"}]}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"contractName\":\"Counter\"") != null);
+    // Constructor params come from the ANF constructor method
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"constructor\":{\"params\":[{\"name\":\"count\",\"type\":\"bigint\"}]}") != null);
 }
 
 test "writeJsonString — escaping" {

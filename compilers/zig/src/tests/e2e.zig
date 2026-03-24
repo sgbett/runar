@@ -43,10 +43,10 @@ fn hexContainsOpcode(hex: []const u8, opcode: []const u8) bool {
     return false;
 }
 
-/// Extract the hex field value from artifact JSON.
+/// Extract the script field value from artifact JSON.
 fn extractArtifactHex(json: []const u8) ![]const u8 {
-    const hex_start = std.mem.indexOf(u8, json, "\"hex\":\"") orelse return error.MissingHex;
-    const after_prefix = hex_start + 7;
+    const hex_start = std.mem.indexOf(u8, json, "\"script\":\"") orelse return error.MissingHex;
+    const after_prefix = hex_start + 10; // len of '"script":"'
     const hex_end = std.mem.indexOfPos(u8, json, after_prefix, "\"") orelse return error.MissingHex;
     return json[after_prefix..hex_end];
 }
@@ -356,7 +356,11 @@ test "e2e: P2PKH Stack IR -> emit produces OP_DUP, OP_HASH160, OP_EQUALVERIFY, O
         .{ .name = "sig", .type_info = .sig, .type_name = "Sig" },
         .{ .name = "pubKey", .type_info = .pub_key, .type_name = "PubKey" },
     };
+    var ctor_params = [_]types.ANFParam{
+        .{ .name = "pubKeyHash", .type_name = "Addr" },
+    };
     var anf_methods = [_]types.ANFMethod{
+        .{ .name = "constructor", .is_public = false, .params = &ctor_params, .bindings = &.{} },
         .{ .name = "unlock", .is_public = true, .params = &anf_params, .bindings = &.{} },
     };
     var properties = [_]types.ANFProperty{
@@ -377,8 +381,8 @@ test "e2e: P2PKH Stack IR -> emit produces OP_DUP, OP_HASH160, OP_EQUALVERIFY, O
     defer alloc.free(artifact);
 
     // Verify artifact structure
-    try std.testing.expect(std.mem.indexOf(u8, artifact, "\"contract\":\"P2PKH\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, artifact, "\"hex\":\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, artifact, "\"contractName\":\"P2PKH\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, artifact, "\"script\":\"") != null);
 
     // Extract and verify opcode content
     const hex = try extractArtifactHex(artifact);
@@ -460,7 +464,11 @@ test "e2e: stateful Counter Stack IR -> emit produces OP_CODESEPARATOR, dispatch
         .{ .name = "increment", .ops = &inc_ops, .max_stack_depth = 2 },
         .{ .name = "decrement", .ops = &dec_ops, .max_stack_depth = 2 },
     };
+    var ctor_params = [_]types.ANFParam{
+        .{ .name = "count", .type_name = "bigint" },
+    };
     var anf_methods = [_]types.ANFMethod{
+        .{ .name = "constructor", .is_public = false, .params = &ctor_params, .bindings = &.{} },
         .{ .name = "increment", .is_public = true, .params = &.{}, .bindings = &.{} },
         .{ .name = "decrement", .is_public = true, .params = &.{}, .bindings = &.{} },
     };
@@ -483,7 +491,7 @@ test "e2e: stateful Counter Stack IR -> emit produces OP_CODESEPARATOR, dispatch
     defer alloc.free(artifact);
 
     // Verify stateful contract metadata in artifact JSON
-    try std.testing.expect(std.mem.indexOf(u8, artifact, "\"contract\":\"Counter\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, artifact, "\"contractName\":\"Counter\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, artifact, "\"stateFields\":[") != null);
     try std.testing.expect(std.mem.indexOf(u8, artifact, "\"count\"") != null);
 
