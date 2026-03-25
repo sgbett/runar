@@ -230,6 +230,10 @@ pub fn emitStackInstruction(ctx: *EmitContext, inst: types.StackInstruction) !vo
                 0;
             try ctx.emitScriptNumber(idx);
         },
+        .placeholder => |ph| {
+            try ctx.recordConstructorSlot(ph.param_index);
+            try ctx.emitOpcode(.op_0);
+        },
     }
 }
 

@@ -20,7 +20,7 @@ const max_iterations = 100;
 /// Returns true if the instruction is any push variant (push_int, push_data, push_bool).
 fn isPush(inst: Inst) bool {
     return switch (inst) {
-        .push_int, .push_data, .push_bool, .push_codesep_index => true,
+        .push_int, .push_data, .push_bool, .push_codesep_index, .placeholder => true,
         .op => false,
     };
 }
@@ -61,6 +61,7 @@ fn instEql(a: Inst, b: Inst) bool {
         .push_bool => |ba| ba == b.push_bool,
         .push_data => |da| std.mem.eql(u8, da, b.push_data),
         .push_codesep_index => true,
+        .placeholder => |pa| pa.param_index == b.placeholder.param_index,
     };
 }
 

@@ -938,8 +938,14 @@ const LowerCtx = struct {
                 }
             }
         }
-        // Not found — push placeholder
-        try self.emitPushData("");
+        // Not found — push constructor param placeholder
+        // Determine param_index: count readonly properties before this one
+        var param_idx: u32 = 0;
+        for (self.program.properties) |prop| {
+            if (std.mem.eql(u8, prop.name, prop_name)) break;
+            if (prop.readonly and prop.initial_value == null) param_idx += 1;
+        }
+        try self.emit(.{ .placeholder = .{ .param_index = param_idx, .param_name = prop_name } });
         try self.stack.push(self.allocator, bind_name);
         self.trackDepth();
     }
