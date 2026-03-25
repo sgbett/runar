@@ -365,10 +365,7 @@ pub fn emitArtifact(
     var ctx = EmitContext.init(allocator);
     defer ctx.deinit();
 
-    // Emit OP_CODESEPARATOR before the dispatch table
-    try ctx.emitOpcode(.op_codeseparator);
-
-    // Emit multi-method dispatch
+    // Emit multi-method dispatch (each method body starts with its own OP_CODESEPARATOR)
     try emitDispatchTable(&ctx, stack_program.methods);
 
     const script_hex = try ctx.getHex();
@@ -481,12 +478,22 @@ pub fn emitArtifact(
     }
     try w.writeAll("],");
 
-    // codeSeparatorIndex
+    // codeSeparatorIndex — byte offset of the first OP_CODESEPARATOR
     try w.writeAll("\"codeSeparatorIndex\":");
     if (ctx.code_separator_indices.items.len > 0) {
         try w.print("{d}", .{ctx.code_separator_indices.items[0]});
     } else {
         try w.writeAll("0");
+    }
+
+    // codeSeparatorIndices — per-method byte offsets
+    if (ctx.code_separator_indices.items.len > 0) {
+        try w.writeAll(",\"codeSeparatorIndices\":[");
+        for (ctx.code_separator_indices.items, 0..) |idx, i| {
+            if (i > 0) try w.writeByte(',');
+            try w.print("{d}", .{idx});
+        }
+        try w.writeAll("]");
     }
 
     try w.writeByte('}');
@@ -999,9 +1006,9 @@ test "emitArtifact — simple contract" {
     try std.testing.expect(std.mem.indexOf(u8, json, "\"codeSeparatorIndex\":0") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"stateFields\":[]") != null);
 
-    // The script should start with OP_CODESEPARATOR (ab) then the body
-    // ab 76 a9 88 ac -> "ab76a988ac"
-    try std.testing.expect(std.mem.indexOf(u8, json, "ab76a988ac") != null);
+    // Single-method contract: no dispatch table, just the body opcodes
+    // 76 a9 88 ac = OP_DUP OP_HASH160 OP_EQUALVERIFY OP_CHECKSIG
+    try std.testing.expect(std.mem.indexOf(u8, json, "76a988ac") != null);
 }
 
 test "emitArtifact — stateful contract with state fields" {

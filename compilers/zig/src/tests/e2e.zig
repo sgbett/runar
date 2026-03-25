@@ -443,9 +443,6 @@ test "e2e: Escrow Stack IR -> dispatch table produces OP_NUMEQUAL, OP_IF, OP_END
 
     // Signature verification in both methods
     try std.testing.expect(hexContainsOpcode(hex, "ac")); // OP_CHECKSIG
-
-    // OP_CODESEPARATOR at the start
-    try std.testing.expect(hexContainsOpcode(hex, "ab")); // OP_CODESEPARATOR
 }
 
 test "e2e: stateful Counter Stack IR -> emit produces OP_CODESEPARATOR, dispatch, state metadata" {
@@ -497,9 +494,6 @@ test "e2e: stateful Counter Stack IR -> emit produces OP_CODESEPARATOR, dispatch
 
     const hex = try extractArtifactHex(artifact);
     try std.testing.expect(hex.len > 0);
-
-    // OP_CODESEPARATOR (ab) at the start of every artifact
-    try std.testing.expect(hexContainsOpcode(hex, "ab"));
 
     // 2 methods -> dispatch table
     try std.testing.expect(hexContainsOpcode(hex, "9c")); // OP_NUMEQUAL

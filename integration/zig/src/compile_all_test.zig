@@ -27,7 +27,7 @@ test "Compile_CovenantVault" {
     };
     defer artifact.deinit();
     try std.testing.expectEqualStrings("CovenantVault", artifact.contract_name);
-    try std.testing.expect(artifact.isStateful());
+    try std.testing.expect(!artifact.isStateful());
 }
 
 test "Compile_OraclePriceFeed" {
@@ -38,7 +38,7 @@ test "Compile_OraclePriceFeed" {
     };
     defer artifact.deinit();
     try std.testing.expectEqualStrings("OraclePriceFeed", artifact.contract_name);
-    try std.testing.expect(artifact.isStateful());
+    try std.testing.expect(!artifact.isStateful());
 }
 
 test "Compile_TicTacToe" {

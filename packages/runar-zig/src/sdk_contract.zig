@@ -230,8 +230,10 @@ pub const RunarContract = struct {
         // Detect which params need auto-resolution
         const abi_method = self.findMethod(method_name).?;
         var needs_change = false;
+        var needs_new_amount = false;
         for (abi_method.params) |p| {
             if (std.mem.eql(u8, p.name, "_changePKH")) needs_change = true;
+            if (std.mem.eql(u8, p.name, "_newAmount")) needs_new_amount = true;
         }
 
         // Filter user params (exclude auto-injected stateful params)
@@ -465,6 +467,8 @@ pub const RunarContract = struct {
             needs_change,
             change_pkh_hex,
             0, // placeholder change amount
+            needs_new_amount,
+            new_satoshis,
             "00" ** 181, // placeholder preimage
             method_selector_hex,
         );
@@ -529,6 +533,8 @@ pub const RunarContract = struct {
             needs_change,
             change_pkh_hex,
             change_amount,
+            needs_new_amount,
+            new_satoshis,
             ptx_result.preimage_hex,
             method_selector_hex,
         );
@@ -618,6 +624,8 @@ pub const RunarContract = struct {
             needs_change,
             change_pkh_hex,
             change_amount,
+            needs_new_amount,
+            new_satoshis,
             ptx_result.preimage_hex,
             method_selector_hex,
         );
@@ -656,6 +664,8 @@ pub const RunarContract = struct {
         needs_code_part: bool,
         change_pkh_hex: ?[]const u8,
         change_amount: i64,
+        needs_new_amount: bool,
+        new_amount: i64,
         preimage_hex: []const u8,
         method_selector_hex: ?[]const u8,
     ) ![]u8 {
@@ -694,6 +704,13 @@ pub const RunarContract = struct {
             const change_enc = try state_mod.encodeScriptNumber(self.allocator, change_amount);
             defer self.allocator.free(change_enc);
             try script.appendSlice(self.allocator, change_enc);
+        }
+
+        // _newAmount (for stateful methods that need new amount)
+        if (needs_new_amount) {
+            const encoded = try state_mod.encodeScriptNumber(self.allocator, new_amount);
+            defer self.allocator.free(encoded);
+            try script.appendSlice(self.allocator, encoded);
         }
 
         // Preimage
