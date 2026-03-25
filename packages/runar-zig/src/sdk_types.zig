@@ -75,6 +75,7 @@ pub const DeployOptions = struct {
 pub const CallOptions = struct {
     satoshis: i64 = 0,
     change_address: ?[]const u8 = null,
+    new_state: ?[]const StateValue = null,
 };
 
 /// ContractOutput describes one contract continuation output.

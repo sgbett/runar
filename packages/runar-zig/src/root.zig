@@ -15,6 +15,7 @@ pub const sdk_provider = @import("sdk_provider.zig");
 pub const sdk_signer = @import("sdk_signer.zig");
 pub const sdk_deploy = @import("sdk_deploy.zig");
 pub const sdk_call = @import("sdk_call.zig");
+pub const sdk_oppushtx = @import("sdk_oppushtx.zig");
 pub const sdk_contract = @import("sdk_contract.zig");
 
 // SDK type re-exports
@@ -43,6 +44,8 @@ pub const encodeScriptNumber = sdk_state.encodeScriptNumber;
 pub const buildDeployTransaction = sdk_deploy.buildDeployTransaction;
 pub const selectUtxos = sdk_deploy.selectUtxos;
 pub const buildCallTransaction = sdk_call.buildCallTransaction;
+pub const computeOpPushTx = sdk_oppushtx.computeOpPushTx;
+pub const opPushTxPubKeyHex = sdk_oppushtx.opPushTxPubKeyHex;
 pub const buildP2PKHScript = sdk_deploy.buildP2PKHScript;
 pub const insertUnlockingScript = sdk_contract.insertUnlockingScript;
 
@@ -152,6 +155,7 @@ test {
     _ = @import("sdk_signer.zig");
     _ = @import("sdk_deploy.zig");
     _ = @import("sdk_call.zig");
+    _ = @import("sdk_oppushtx.zig");
     _ = @import("sdk_contract.zig");
     if (build_options.has_bsvz_runar_harness) {
         _ = @import("script_integration_test.zig");

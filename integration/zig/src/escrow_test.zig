@@ -135,6 +135,72 @@ test "Escrow_ABI_Methods" {
     try std.testing.expect(has_refund);
 }
 
+test "Escrow_Call_Release_SameKey" {
+    const allocator = std.testing.allocator;
+
+    if (!helpers.isNodeAvailable(allocator)) {
+        std.log.warn("Regtest node not available, skipping test", .{});
+        return;
+    }
+
+    var artifact = compile.compileContract(allocator, "examples/zig/escrow/Escrow.runar.zig") catch |err| {
+        std.log.warn("Could not compile Escrow contract: {any}, skipping test", .{err});
+        return;
+    };
+    defer artifact.deinit();
+
+    // All three roles use the same key so auto-sign works
+    var wallet = try helpers.newWallet(allocator);
+    defer wallet.deinit();
+    const pk_hex = try wallet.pubKeyHex(allocator);
+    defer allocator.free(pk_hex);
+
+    var contract = try runar.RunarContract.init(allocator, &artifact, &[_]runar.StateValue{
+        .{ .bytes = pk_hex },
+        .{ .bytes = pk_hex },
+        .{ .bytes = pk_hex },
+    });
+    defer contract.deinit();
+
+    var funder = try helpers.newWallet(allocator);
+    defer funder.deinit();
+    const fund_txid = try helpers.fundWallet(allocator, &funder, 1.0);
+    defer allocator.free(fund_txid);
+
+    var rpc_provider = helpers.RPCProvider.init(allocator);
+    var local_signer = try funder.localSigner();
+
+    // Deploy
+    const deploy_txid = try contract.deploy(rpc_provider.provider(), local_signer.signer(), .{ .satoshis = 5000 });
+    defer allocator.free(deploy_txid);
+    std.log.info("Escrow deployed: {s}", .{deploy_txid});
+
+    // Fund the actual signer (wallet) for the call
+    const fund_txid2 = try helpers.fundWallet(allocator, &wallet, 1.0);
+    defer allocator.free(fund_txid2);
+
+    var escrow_signer = try wallet.localSigner();
+
+    // Call release with auto-sign (both Sig params auto-resolved to wallet's key)
+    const call_txid = try contract.call(
+        "release",
+        &[_]runar.StateValue{
+            .{ .int = 0 }, // sellerSig: auto-sign
+            .{ .int = 0 }, // arbiterSig: auto-sign
+        },
+        rpc_provider.provider(),
+        escrow_signer.signer(),
+        null,
+    );
+    defer allocator.free(call_txid);
+
+    std.log.info("Escrow release TX: {s}", .{call_txid});
+    try std.testing.expectEqual(@as(usize, 64), call_txid.len);
+
+    // Stateless contract: UTXO should be null after successful spend
+    try std.testing.expect(contract.getCurrentUtxo() == null);
+}
+
 test "Escrow_NotStateful" {
     const allocator = std.testing.allocator;
 

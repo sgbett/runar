@@ -6,6 +6,7 @@ const provider_mod = @import("sdk_provider.zig");
 const signer_mod = @import("sdk_signer.zig");
 const deploy_mod = @import("sdk_deploy.zig");
 const call_mod = @import("sdk_call.zig");
+const oppushtx_mod = @import("sdk_oppushtx.zig");
 
 // ---------------------------------------------------------------------------
 // RunarContract — main contract runtime wrapper
@@ -184,6 +185,535 @@ pub const RunarContract = struct {
 
         self.allocator.free(signed_tx);
         return txid;
+    }
+
+    /// Call a public method on the contract. Handles:
+    ///   - Stateless contracts: build unlocking script, sign Sig params, broadcast
+    ///   - Stateful contracts: OP_PUSH_TX (k=1), two-pass preimage convergence,
+    ///     state continuation output, method selector
+    ///
+    /// Returns the broadcast txid (caller owns).
+    pub fn call(
+        self: *RunarContract,
+        method_name: []const u8,
+        args: []const types.StateValue,
+        prov_arg: ?provider_mod.Provider,
+        signer_arg: ?signer_mod.Signer,
+        options: ?types.CallOptions,
+    ) ![]u8 {
+        const prov = prov_arg orelse self.provider orelse return ContractError.NoProviderOrSigner;
+        const sign = signer_arg orelse self.signer orelse return ContractError.NoProviderOrSigner;
+
+        if (self.current_utxo == null) return ContractError.NotDeployed;
+        const contract_utxo = self.current_utxo.?;
+
+        // Resolve method
+        const method = self.findMethod(method_name) orelse return ContractError.MethodNotFound;
+        _ = method;
+
+        const is_stateful = self.artifact.state_fields.len > 0;
+
+        // Determine method index for method selector
+        const public_methods = try self.getPublicMethods();
+        defer self.allocator.free(public_methods);
+
+        var method_index: usize = 0;
+        if (public_methods.len > 1) {
+            for (public_methods, 0..) |m, i| {
+                if (std.mem.eql(u8, m.name, method_name)) {
+                    method_index = i;
+                    break;
+                }
+            }
+        }
+
+        // Detect which params need auto-resolution
+        const abi_method = self.findMethod(method_name).?;
+        var needs_change = false;
+        for (abi_method.params) |p| {
+            if (std.mem.eql(u8, p.name, "_changePKH")) needs_change = true;
+        }
+
+        // Filter user params (exclude auto-injected stateful params)
+        var user_param_count: usize = 0;
+        if (is_stateful) {
+            for (abi_method.params) |p| {
+                if (!std.mem.eql(u8, p.type_name, "SigHashPreimage") and
+                    !std.mem.eql(u8, p.name, "_changePKH") and
+                    !std.mem.eql(u8, p.name, "_changeAmount") and
+                    !std.mem.eql(u8, p.name, "_newAmount"))
+                {
+                    user_param_count += 1;
+                }
+            }
+        } else {
+            user_param_count = abi_method.params.len;
+        }
+
+        if (args.len != user_param_count) return ContractError.ArgCountMismatch;
+
+        // Resolve args: auto-fill Sig (placeholder), PubKey (signer's key)
+        var resolved_args = try self.allocator.alloc(types.StateValue, args.len);
+        defer {
+            for (resolved_args) |*a| a.deinit(self.allocator);
+            self.allocator.free(resolved_args);
+        }
+
+        // Build user param list to know types
+        var user_params = try self.allocator.alloc(types.ABIParam, user_param_count);
+        defer self.allocator.free(user_params);
+        {
+            var idx: usize = 0;
+            if (is_stateful) {
+                for (abi_method.params) |p| {
+                    if (!std.mem.eql(u8, p.type_name, "SigHashPreimage") and
+                        !std.mem.eql(u8, p.name, "_changePKH") and
+                        !std.mem.eql(u8, p.name, "_changeAmount") and
+                        !std.mem.eql(u8, p.name, "_newAmount"))
+                    {
+                        user_params[idx] = p;
+                        idx += 1;
+                    }
+                }
+            } else {
+                for (abi_method.params, 0..) |p, i| {
+                    user_params[i] = p;
+                }
+            }
+        }
+
+        var sig_indices: std.ArrayListUnmanaged(usize) = .empty;
+        defer sig_indices.deinit(self.allocator);
+
+        for (args, 0..) |arg, i| {
+            const param_type = user_params[i].type_name;
+            if (std.mem.eql(u8, param_type, "Sig") and arg == .int and arg.int == 0) {
+                // Placeholder sig: 72 zero bytes
+                try sig_indices.append(self.allocator, i);
+                resolved_args[i] = .{ .bytes = try self.allocator.dupe(u8, "00" ** 72) };
+            } else if (std.mem.eql(u8, param_type, "PubKey") and arg == .int and arg.int == 0) {
+                // Auto-fill from signer
+                const pk = try sign.getPublicKey(self.allocator);
+                resolved_args[i] = .{ .bytes = pk };
+            } else {
+                resolved_args[i] = try arg.clone(self.allocator);
+            }
+        }
+
+        const address = try sign.getAddress(self.allocator);
+        defer self.allocator.free(address);
+        const change_address = if (options) |o| (o.change_address orelse address) else address;
+
+        // Fetch fee rate and funding UTXOs
+        const fee_rate = prov.getFeeRate() catch 100;
+        const all_utxos = prov.getUtxos(self.allocator, address) catch return ContractError.CallFailed;
+        defer {
+            for (all_utxos) |*u| u.deinit(self.allocator);
+            self.allocator.free(all_utxos);
+        }
+
+        // Filter out the contract UTXO from funding UTXOs
+        var additional_utxos: std.ArrayListUnmanaged(types.UTXO) = .empty;
+        defer additional_utxos.deinit(self.allocator);
+        for (all_utxos) |u| {
+            if (!(std.mem.eql(u8, u.txid, contract_utxo.txid) and u.output_index == contract_utxo.output_index)) {
+                try additional_utxos.append(self.allocator, u);
+            }
+        }
+
+        // Build new locking script for stateful continuation
+        var new_locking_script: []u8 = &.{};
+        var new_satoshis: i64 = 0;
+        defer if (new_locking_script.len > 0) self.allocator.free(new_locking_script);
+
+        if (is_stateful) {
+            new_satoshis = contract_utxo.satoshis;
+            if (options) |o| {
+                if (o.satoshis > 0) new_satoshis = o.satoshis;
+            }
+            // Update state if new_state is provided
+            if (options) |o| {
+                if (o.new_state) |ns| {
+                    for (self.state) |*s| s.deinit(self.allocator);
+                    if (self.state.len > 0) self.allocator.free(self.state);
+                    var vals = try self.allocator.alloc(types.StateValue, ns.len);
+                    for (ns, 0..) |s, i| {
+                        vals[i] = try s.clone(self.allocator);
+                    }
+                    self.state = vals;
+                }
+            }
+            new_locking_script = try self.getLockingScript();
+        }
+
+        // Compute change PKH for stateful methods that need it
+        var change_pkh_hex: ?[]u8 = null;
+        defer if (change_pkh_hex) |c| self.allocator.free(c);
+
+        if (is_stateful and needs_change) {
+            const pub_key_hex = try sign.getPublicKey(self.allocator);
+            defer self.allocator.free(pub_key_hex);
+            const pub_key_bytes = try state_mod.hexToBytes(self.allocator, pub_key_hex);
+            defer self.allocator.free(pub_key_bytes);
+            // hash160 = RIPEMD160(SHA256(pubkey))
+            const ripe_hash = bsvz.crypto.hash.hash160(pub_key_bytes);
+            const hex_buf = try self.allocator.alloc(u8, 40);
+            _ = bsvz.primitives.hex.encodeLower(&ripe_hash.bytes, hex_buf) catch {
+                self.allocator.free(hex_buf);
+                return ContractError.CallFailed;
+            };
+            change_pkh_hex = hex_buf;
+        }
+
+        // Build method selector hex
+        var method_selector_hex: ?[]u8 = null;
+        defer if (method_selector_hex) |ms| self.allocator.free(ms);
+
+        if (is_stateful and public_methods.len > 1) {
+            method_selector_hex = try state_mod.encodeScriptNumber(self.allocator, @intCast(method_index));
+        }
+
+        const code_sep_idx = try self.getCodeSepIndex(method_index);
+
+        // ---------------------------------------------------------------
+        // Stateless path
+        // ---------------------------------------------------------------
+        if (!is_stateful) {
+            // Build unlocking script: args + method selector
+            const unlock = try self.buildUnlockingScript(method_name, resolved_args);
+            defer self.allocator.free(unlock);
+
+            var call_result = call_mod.buildCallTransaction(
+                self.allocator,
+                contract_utxo,
+                unlock,
+                "",
+                0,
+                change_address,
+                additional_utxos.items,
+                fee_rate,
+                null,
+            ) catch return ContractError.CallFailed;
+            defer call_result.deinit(self.allocator);
+
+            // Sign P2PKH funding inputs
+            var signed_tx = try self.allocator.dupe(u8, call_result.tx_hex);
+            errdefer self.allocator.free(signed_tx);
+
+            const p2pkh_start: usize = 1;
+            var inp_idx: usize = p2pkh_start;
+            while (inp_idx < call_result.input_count) : (inp_idx += 1) {
+                const utxo_idx = inp_idx - p2pkh_start;
+                if (utxo_idx < additional_utxos.items.len) {
+                    const utxo = additional_utxos.items[utxo_idx];
+                    const sig_val = try sign.sign(self.allocator, signed_tx, inp_idx, utxo.script, utxo.satoshis, null);
+                    defer self.allocator.free(sig_val);
+                    const pub_key = try sign.getPublicKey(self.allocator);
+                    defer self.allocator.free(pub_key);
+                    const sig_push = try state_mod.encodePushData(self.allocator, sig_val);
+                    defer self.allocator.free(sig_push);
+                    const pk_push = try state_mod.encodePushData(self.allocator, pub_key);
+                    defer self.allocator.free(pk_push);
+                    const p2pkh_unlock = try std.mem.concat(self.allocator, u8, &[_][]const u8{ sig_push, pk_push });
+                    defer self.allocator.free(p2pkh_unlock);
+                    const new_tx = try insertUnlockingScript(self.allocator, signed_tx, inp_idx, p2pkh_unlock);
+                    self.allocator.free(signed_tx);
+                    signed_tx = new_tx;
+                }
+            }
+
+            // Now sign the contract input's Sig params
+            for (sig_indices.items) |idx| {
+                const real_sig = try sign.sign(self.allocator, signed_tx, 0, contract_utxo.script, contract_utxo.satoshis, null);
+                defer self.allocator.free(real_sig);
+                resolved_args[idx].deinit(self.allocator);
+                resolved_args[idx] = .{ .bytes = try self.allocator.dupe(u8, real_sig) };
+            }
+
+            // Rebuild the unlocking script with real signatures
+            if (sig_indices.items.len > 0) {
+                const real_unlock = try self.buildUnlockingScript(method_name, resolved_args);
+                defer self.allocator.free(real_unlock);
+                const new_tx = try insertUnlockingScript(self.allocator, signed_tx, 0, real_unlock);
+                self.allocator.free(signed_tx);
+                signed_tx = new_tx;
+            }
+
+            // Broadcast
+            const txid = prov.broadcast(self.allocator, signed_tx) catch return ContractError.CallFailed;
+            errdefer self.allocator.free(txid);
+
+            // Stateless: UTXO is spent
+            if (self.current_utxo) |*old| {
+                var mu = old.*;
+                mu.deinit(self.allocator);
+            }
+            self.current_utxo = null;
+
+            self.allocator.free(signed_tx);
+            return txid;
+        }
+
+        // ---------------------------------------------------------------
+        // Stateful path: OP_PUSH_TX with two-pass convergence
+        // ---------------------------------------------------------------
+
+        // First pass: build with placeholder unlocking script
+        const placeholder_unlock = try self.buildStatefulUnlockScript(
+            "00" ** 72, // placeholder sig
+            resolved_args,
+            needs_change,
+            change_pkh_hex,
+            0, // placeholder change amount
+            "00" ** 181, // placeholder preimage
+            method_selector_hex,
+        );
+        defer self.allocator.free(placeholder_unlock);
+
+        var call_result = call_mod.buildCallTransaction(
+            self.allocator,
+            contract_utxo,
+            placeholder_unlock,
+            new_locking_script,
+            new_satoshis,
+            change_address,
+            additional_utxos.items,
+            fee_rate,
+            null,
+        ) catch return ContractError.CallFailed;
+        defer call_result.deinit(self.allocator);
+
+        var change_amount = call_result.change_amount;
+
+        // Sign P2PKH funding inputs
+        var signed_tx = try self.allocator.dupe(u8, call_result.tx_hex);
+        errdefer self.allocator.free(signed_tx);
+
+        {
+            var inp_idx: usize = 1;
+            while (inp_idx < call_result.input_count) : (inp_idx += 1) {
+                const utxo_idx = inp_idx - 1;
+                if (utxo_idx < additional_utxos.items.len) {
+                    const utxo = additional_utxos.items[utxo_idx];
+                    const sig_val = try sign.sign(self.allocator, signed_tx, inp_idx, utxo.script, utxo.satoshis, null);
+                    defer self.allocator.free(sig_val);
+                    const pub_key = try sign.getPublicKey(self.allocator);
+                    defer self.allocator.free(pub_key);
+                    const sig_push = try state_mod.encodePushData(self.allocator, sig_val);
+                    defer self.allocator.free(sig_push);
+                    const pk_push = try state_mod.encodePushData(self.allocator, pub_key);
+                    defer self.allocator.free(pk_push);
+                    const p2pkh_unlock = try std.mem.concat(self.allocator, u8, &[_][]const u8{ sig_push, pk_push });
+                    defer self.allocator.free(p2pkh_unlock);
+                    const new_tx = try insertUnlockingScript(self.allocator, signed_tx, inp_idx, p2pkh_unlock);
+                    self.allocator.free(signed_tx);
+                    signed_tx = new_tx;
+                }
+            }
+        }
+
+        // First pass: compute OP_PUSH_TX
+        var ptx_result = oppushtx_mod.computeOpPushTx(
+            self.allocator,
+            signed_tx,
+            0,
+            contract_utxo.script,
+            contract_utxo.satoshis,
+            code_sep_idx orelse -1,
+        ) catch return ContractError.CallFailed;
+
+        // Build first real unlocking script
+        const first_unlock = try self.buildStatefulUnlockScript(
+            ptx_result.sig_hex,
+            resolved_args,
+            needs_change,
+            change_pkh_hex,
+            change_amount,
+            ptx_result.preimage_hex,
+            method_selector_hex,
+        );
+
+        // Rebuild transaction with real unlocking script (size may differ)
+        {
+            var rebuild_result = call_mod.buildCallTransaction(
+                self.allocator,
+                contract_utxo,
+                first_unlock,
+                new_locking_script,
+                new_satoshis,
+                change_address,
+                additional_utxos.items,
+                fee_rate,
+                null,
+            ) catch {
+                self.allocator.free(first_unlock);
+                ptx_result.deinit(self.allocator);
+                return ContractError.CallFailed;
+            };
+            change_amount = rebuild_result.change_amount;
+
+            self.allocator.free(signed_tx);
+            signed_tx = try self.allocator.dupe(u8, rebuild_result.tx_hex);
+            rebuild_result.deinit(self.allocator);
+        }
+
+        self.allocator.free(first_unlock);
+
+        // Re-sign P2PKH funding inputs
+        {
+            const input_count = 1 + additional_utxos.items.len;
+            var inp_idx: usize = 1;
+            while (inp_idx < input_count) : (inp_idx += 1) {
+                const utxo_idx = inp_idx - 1;
+                if (utxo_idx < additional_utxos.items.len) {
+                    const utxo = additional_utxos.items[utxo_idx];
+                    const sig_val = try sign.sign(self.allocator, signed_tx, inp_idx, utxo.script, utxo.satoshis, null);
+                    defer self.allocator.free(sig_val);
+                    const pub_key = try sign.getPublicKey(self.allocator);
+                    defer self.allocator.free(pub_key);
+                    const sig_push = try state_mod.encodePushData(self.allocator, sig_val);
+                    defer self.allocator.free(sig_push);
+                    const pk_push = try state_mod.encodePushData(self.allocator, pub_key);
+                    defer self.allocator.free(pk_push);
+                    const p2pkh_unlock = try std.mem.concat(self.allocator, u8, &[_][]const u8{ sig_push, pk_push });
+                    defer self.allocator.free(p2pkh_unlock);
+                    const new_tx = try insertUnlockingScript(self.allocator, signed_tx, inp_idx, p2pkh_unlock);
+                    self.allocator.free(signed_tx);
+                    signed_tx = new_tx;
+                }
+            }
+        }
+
+        // Second pass: recompute with final tx (preimage depends on tx size)
+        ptx_result.deinit(self.allocator);
+        ptx_result = oppushtx_mod.computeOpPushTx(
+            self.allocator,
+            signed_tx,
+            0,
+            contract_utxo.script,
+            contract_utxo.satoshis,
+            code_sep_idx orelse -1,
+        ) catch return ContractError.CallFailed;
+        defer ptx_result.deinit(self.allocator);
+
+        // Sign Sig params for the contract input
+        for (sig_indices.items) |idx| {
+            // In stateful contracts, user checkSig is AFTER OP_CODESEPARATOR
+            var sig_subscript = contract_utxo.script;
+            if (code_sep_idx) |cs| {
+                const hex_offset: usize = @intCast((@as(usize, @intCast(cs)) + 1) * 2);
+                if (hex_offset <= sig_subscript.len) {
+                    sig_subscript = sig_subscript[hex_offset..];
+                }
+            }
+            const real_sig = try sign.sign(self.allocator, signed_tx, 0, sig_subscript, contract_utxo.satoshis, null);
+            resolved_args[idx].deinit(self.allocator);
+            resolved_args[idx] = .{ .bytes = real_sig };
+        }
+
+        // Build final unlocking script
+        const final_unlock = try self.buildStatefulUnlockScript(
+            ptx_result.sig_hex,
+            resolved_args,
+            needs_change,
+            change_pkh_hex,
+            change_amount,
+            ptx_result.preimage_hex,
+            method_selector_hex,
+        );
+        defer self.allocator.free(final_unlock);
+
+        const final_tx = try insertUnlockingScript(self.allocator, signed_tx, 0, final_unlock);
+        self.allocator.free(signed_tx);
+        signed_tx = final_tx;
+
+        // Broadcast
+        const txid = prov.broadcast(self.allocator, signed_tx) catch return ContractError.CallFailed;
+        errdefer self.allocator.free(txid);
+
+        // Update tracked UTXO for stateful continuation
+        if (self.current_utxo) |*old| {
+            var mu = old.*;
+            mu.deinit(self.allocator);
+        }
+        self.current_utxo = .{
+            .txid = try self.allocator.dupe(u8, txid),
+            .output_index = 0,
+            .satoshis = new_satoshis,
+            .script = try self.allocator.dupe(u8, new_locking_script),
+        };
+
+        self.allocator.free(signed_tx);
+        return txid;
+    }
+
+    /// Build the full stateful unlocking script:
+    ///   [codePart] + opPushTxSig + args + [changePKH + changeAmount] + preimage + [methodSelector]
+    fn buildStatefulUnlockScript(
+        self: *const RunarContract,
+        op_sig_hex: []const u8,
+        resolved_args: []const types.StateValue,
+        needs_code_part: bool,
+        change_pkh_hex: ?[]const u8,
+        change_amount: i64,
+        preimage_hex: []const u8,
+        method_selector_hex: ?[]const u8,
+    ) ![]u8 {
+        var script: std.ArrayListUnmanaged(u8) = .empty;
+        errdefer script.deinit(self.allocator);
+
+        // _codePart (only for non-terminal stateful calls that need code)
+        if (needs_code_part and self.hasCodeSeparator()) {
+            const code_part = try self.getCodePartHex();
+            defer self.allocator.free(code_part);
+            const encoded = try state_mod.encodePushData(self.allocator, code_part);
+            defer self.allocator.free(encoded);
+            try script.appendSlice(self.allocator, encoded);
+        }
+
+        // _opPushTxSig
+        {
+            const encoded = try state_mod.encodePushData(self.allocator, op_sig_hex);
+            defer self.allocator.free(encoded);
+            try script.appendSlice(self.allocator, encoded);
+        }
+
+        // User args
+        for (resolved_args) |arg| {
+            const encoded = try state_mod.encodeArg(self.allocator, arg);
+            defer self.allocator.free(encoded);
+            try script.appendSlice(self.allocator, encoded);
+        }
+
+        // _changePKH + _changeAmount (for stateful methods that need change)
+        if (change_pkh_hex) |pkh| {
+            const pkh_push = try state_mod.encodePushData(self.allocator, pkh);
+            defer self.allocator.free(pkh_push);
+            try script.appendSlice(self.allocator, pkh_push);
+
+            const change_enc = try state_mod.encodeScriptNumber(self.allocator, change_amount);
+            defer self.allocator.free(change_enc);
+            try script.appendSlice(self.allocator, change_enc);
+        }
+
+        // Preimage
+        {
+            const encoded = try state_mod.encodePushData(self.allocator, preimage_hex);
+            defer self.allocator.free(encoded);
+            try script.appendSlice(self.allocator, encoded);
+        }
+
+        // Method selector
+        if (method_selector_hex) |ms| {
+            try script.appendSlice(self.allocator, ms);
+        }
+
+        return script.toOwnedSlice(self.allocator);
+    }
+
+    /// Returns true if the artifact has OP_CODESEPARATOR support.
+    fn hasCodeSeparator(self: *const RunarContract) bool {
+        return self.artifact.code_separator_index != null or self.artifact.code_separator_indices.len > 0;
     }
 
     /// GetLockingScript returns the full locking script hex for the contract.

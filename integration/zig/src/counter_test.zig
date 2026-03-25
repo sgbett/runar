@@ -167,3 +167,165 @@ test "Counter_StateField_Metadata" {
     }
     try std.testing.expect(public_count >= 1);
 }
+
+test "Counter_Call_Increment" {
+    const allocator = std.testing.allocator;
+
+    if (!helpers.isNodeAvailable(allocator)) {
+        std.log.warn("Regtest node not available, skipping test", .{});
+        return;
+    }
+
+    var artifact = compile.compileContract(allocator, "examples/zig/stateful-counter/Counter.runar.zig") catch |err| {
+        std.log.warn("Could not compile Counter contract: {any}, skipping test", .{err});
+        return;
+    };
+    defer artifact.deinit();
+
+    var contract = try runar.RunarContract.init(allocator, &artifact, &[_]runar.StateValue{
+        .{ .int = 0 },
+    });
+    defer contract.deinit();
+
+    var wallet = try helpers.newWallet(allocator);
+    defer wallet.deinit();
+    const fund_txid = try helpers.fundWallet(allocator, &wallet, 1.0);
+    defer allocator.free(fund_txid);
+
+    var rpc_provider = helpers.RPCProvider.init(allocator);
+    var local_signer = try wallet.localSigner();
+
+    // Deploy
+    const deploy_txid = try contract.deploy(rpc_provider.provider(), local_signer.signer(), .{ .satoshis = 5000 });
+    defer allocator.free(deploy_txid);
+    std.log.info("Counter deployed: {s}", .{deploy_txid});
+
+    // Update state for the call (count 0 -> 1)
+    const call_txid = try contract.call(
+        "increment",
+        &.{},
+        rpc_provider.provider(),
+        local_signer.signer(),
+        .{ .new_state = &[_]runar.StateValue{.{ .int = 1 }} },
+    );
+    defer allocator.free(call_txid);
+
+    std.log.info("Counter increment TX: {s}", .{call_txid});
+    try std.testing.expectEqual(@as(usize, 64), call_txid.len);
+
+    // Verify UTXO was updated
+    const utxo = contract.getCurrentUtxo();
+    try std.testing.expect(utxo != null);
+    try std.testing.expectEqual(@as(i64, 5000), utxo.?.satoshis);
+}
+
+test "Counter_Call_IncrementChain" {
+    const allocator = std.testing.allocator;
+
+    if (!helpers.isNodeAvailable(allocator)) {
+        std.log.warn("Regtest node not available, skipping test", .{});
+        return;
+    }
+
+    var artifact = compile.compileContract(allocator, "examples/zig/stateful-counter/Counter.runar.zig") catch |err| {
+        std.log.warn("Could not compile Counter contract: {any}, skipping test", .{err});
+        return;
+    };
+    defer artifact.deinit();
+
+    var contract = try runar.RunarContract.init(allocator, &artifact, &[_]runar.StateValue{
+        .{ .int = 0 },
+    });
+    defer contract.deinit();
+
+    var wallet = try helpers.newWallet(allocator);
+    defer wallet.deinit();
+    const fund_txid = try helpers.fundWallet(allocator, &wallet, 1.0);
+    defer allocator.free(fund_txid);
+
+    var rpc_provider = helpers.RPCProvider.init(allocator);
+    var local_signer = try wallet.localSigner();
+
+    const deploy_txid = try contract.deploy(rpc_provider.provider(), local_signer.signer(), .{ .satoshis = 5000 });
+    defer allocator.free(deploy_txid);
+    std.log.info("Counter deployed: {s}", .{deploy_txid});
+
+    // Increment 0 -> 1
+    const txid1 = try contract.call(
+        "increment",
+        &.{},
+        rpc_provider.provider(),
+        local_signer.signer(),
+        .{ .new_state = &[_]runar.StateValue{.{ .int = 1 }} },
+    );
+    defer allocator.free(txid1);
+    std.log.info("count->1 TX: {s}", .{txid1});
+
+    // Increment 1 -> 2
+    const txid2 = try contract.call(
+        "increment",
+        &.{},
+        rpc_provider.provider(),
+        local_signer.signer(),
+        .{ .new_state = &[_]runar.StateValue{.{ .int = 2 }} },
+    );
+    defer allocator.free(txid2);
+    std.log.info("count->2 TX: {s}", .{txid2});
+
+    std.log.info("chain: 0->1->2 succeeded", .{});
+}
+
+test "Counter_Call_IncrementThenDecrement" {
+    const allocator = std.testing.allocator;
+
+    if (!helpers.isNodeAvailable(allocator)) {
+        std.log.warn("Regtest node not available, skipping test", .{});
+        return;
+    }
+
+    var artifact = compile.compileContract(allocator, "examples/zig/stateful-counter/Counter.runar.zig") catch |err| {
+        std.log.warn("Could not compile Counter contract: {any}, skipping test", .{err});
+        return;
+    };
+    defer artifact.deinit();
+
+    var contract = try runar.RunarContract.init(allocator, &artifact, &[_]runar.StateValue{
+        .{ .int = 0 },
+    });
+    defer contract.deinit();
+
+    var wallet = try helpers.newWallet(allocator);
+    defer wallet.deinit();
+    const fund_txid = try helpers.fundWallet(allocator, &wallet, 1.0);
+    defer allocator.free(fund_txid);
+
+    var rpc_provider = helpers.RPCProvider.init(allocator);
+    var local_signer = try wallet.localSigner();
+
+    const deploy_txid = try contract.deploy(rpc_provider.provider(), local_signer.signer(), .{ .satoshis = 5000 });
+    defer allocator.free(deploy_txid);
+
+    // Increment 0 -> 1
+    const txid1 = try contract.call(
+        "increment",
+        &.{},
+        rpc_provider.provider(),
+        local_signer.signer(),
+        .{ .new_state = &[_]runar.StateValue{.{ .int = 1 }} },
+    );
+    defer allocator.free(txid1);
+    std.log.info("count->1 TX: {s}", .{txid1});
+
+    // Decrement 1 -> 0
+    const txid2 = try contract.call(
+        "decrement",
+        &.{},
+        rpc_provider.provider(),
+        local_signer.signer(),
+        .{ .new_state = &[_]runar.StateValue{.{ .int = 0 }} },
+    );
+    defer allocator.free(txid2);
+    std.log.info("count->0 TX: {s}", .{txid2});
+
+    std.log.info("chain: 0->1->0 succeeded", .{});
+}

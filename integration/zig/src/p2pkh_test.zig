@@ -81,6 +81,62 @@ test "P2PKH_ValidUnlock" {
     try std.testing.expectEqual(@as(i64, 5000), utxo.?.satoshis);
 }
 
+test "P2PKH_Call_ValidUnlock" {
+    const allocator = std.testing.allocator;
+
+    if (!helpers.isNodeAvailable(allocator)) {
+        std.log.warn("Regtest node not available, skipping test", .{});
+        return;
+    }
+
+    var owner = try helpers.newWallet(allocator);
+    defer owner.deinit();
+
+    var artifact = compile.compileContract(allocator, "examples/zig/p2pkh/P2PKH.runar.zig") catch |err| {
+        std.log.warn("Could not compile P2PKH contract: {any}, skipping test", .{err});
+        return;
+    };
+    defer artifact.deinit();
+
+    const pkh_hex = try owner.pubKeyHashHex(allocator);
+    defer allocator.free(pkh_hex);
+
+    var contract = try runar.RunarContract.init(allocator, &artifact, &[_]runar.StateValue{
+        .{ .bytes = pkh_hex },
+    });
+    defer contract.deinit();
+
+    const fund_txid = try helpers.fundWallet(allocator, &owner, 1.0);
+    defer allocator.free(fund_txid);
+
+    var rpc_provider = helpers.RPCProvider.init(allocator);
+    var local_signer = try owner.localSigner();
+
+    // Deploy
+    const deploy_txid = try contract.deploy(rpc_provider.provider(), local_signer.signer(), .{ .satoshis = 5000 });
+    defer allocator.free(deploy_txid);
+    std.log.info("P2PKH deployed: {s}", .{deploy_txid});
+
+    // Call unlock with auto-resolved Sig and PubKey (pass .int=0 as nil sentinel)
+    const call_txid = try contract.call(
+        "unlock",
+        &[_]runar.StateValue{
+            .{ .int = 0 }, // Sig: auto-sign
+            .{ .int = 0 }, // PubKey: auto-fill from signer
+        },
+        rpc_provider.provider(),
+        local_signer.signer(),
+        null,
+    );
+    defer allocator.free(call_txid);
+
+    std.log.info("P2PKH unlock TX: {s}", .{call_txid});
+    try std.testing.expectEqual(@as(usize, 64), call_txid.len);
+
+    // Stateless contract should have null UTXO after call
+    try std.testing.expect(contract.getCurrentUtxo() == null);
+}
+
 test "P2PKH_DeployDifferentPubKeyHash" {
     const allocator = std.testing.allocator;
 

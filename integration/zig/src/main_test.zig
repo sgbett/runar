@@ -6,6 +6,9 @@ comptime {
     _ = @import("p2pkh_test.zig");
     _ = @import("counter_test.zig");
     _ = @import("escrow_test.zig");
+    _ = @import("math_demo_test.zig");
+    _ = @import("function_patterns_test.zig");
+    _ = @import("compile_all_test.zig");
     _ = @import("compile.zig");
 }
 
