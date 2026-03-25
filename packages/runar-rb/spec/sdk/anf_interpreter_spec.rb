@@ -639,6 +639,35 @@ RSpec.describe 'Runar::SDK::ANFInterpreter' do
     it '"false" string is falsy' do
       expect(mod.is_truthy('false')).to be false
     end
+
+    # Bitcoin Script semantics for hex-encoded byte strings
+    it 'hex "00" (single zero byte) is falsy' do
+      expect(mod.is_truthy('00')).to be false
+    end
+
+    it 'hex "0000" (two zero bytes) is falsy' do
+      expect(mod.is_truthy('0000')).to be false
+    end
+
+    it 'hex "80" (negative zero) is falsy' do
+      expect(mod.is_truthy('80')).to be false
+    end
+
+    it 'hex "0080" (negative zero, 2 bytes) is falsy' do
+      expect(mod.is_truthy('0080')).to be false
+    end
+
+    it 'hex "01" (non-zero byte) is truthy' do
+      expect(mod.is_truthy('01')).to be true
+    end
+
+    it 'hex "0001" (non-zero somewhere) is truthy' do
+      expect(mod.is_truthy('0001')).to be true
+    end
+
+    it 'hex "ff" (non-zero byte) is truthy' do
+      expect(mod.is_truthy('ff')).to be true
+    end
   end
 
   # ---------------------------------------------------------------------------

@@ -42,7 +42,7 @@ pub const CompilerDiagnostic = struct {
 pub const RunarType = enum {
     bigint, boolean, byte_string, pub_key, sig, addr, sha256, ripemd160,
     sig_hash_type, sig_hash_preimage, rabin_sig, rabin_pub_key, point,
-    op_code_type, void, unknown,
+    op_code_type, fixed_array, void, unknown,
 };
 
 pub const PrimitiveTypeName = enum {
@@ -97,7 +97,7 @@ pub fn typeNodeToRunarType(tn: TypeNode) RunarType {
             .point => .point,
             .void => .void,
         },
-        .fixed_array_type => .unknown,
+        .fixed_array_type => .fixed_array,
         .custom_type => .unknown,
     };
 }
@@ -118,18 +118,18 @@ pub const ParentClass = enum {
 pub const ContractNode = struct { name: []const u8, parent_class: ParentClass, properties: []PropertyNode, constructor: ConstructorNode, methods: []MethodNode };
 pub const PropertyNode = struct { name: []const u8, type_info: RunarType, readonly: bool, initializer: ?Expression = null };
 pub const ConstructorNode = struct { params: []ParamNode, super_args: []Expression, assignments: []AssignmentNode };
-pub const MethodNode = struct { name: []const u8, is_public: bool, params: []ParamNode, body: []Statement };
+pub const MethodNode = struct { name: []const u8, is_public: bool, params: []ParamNode, body: []Statement, source_loc: ?SourceLocation = null };
 pub const ParamNode = struct { name: []const u8, type_info: RunarType = .unknown, type_name: []const u8 = "" };
 pub const ANFParam = ParamNode;
 pub const AssignmentNode = struct { target: []const u8, value: Expression };
 
 pub const Statement = union(enum) { const_decl: ConstDecl, let_decl: LetDecl, assign: Assign, if_stmt: IfStmt, for_stmt: ForStmt, expr_stmt: Expression, assert_stmt: AssertStmt, return_stmt: ?Expression };
-pub const ConstDecl = struct { name: []const u8, type_info: ?RunarType = null, value: Expression };
-pub const LetDecl = struct { name: []const u8, type_info: ?RunarType = null, value: ?Expression = null };
-pub const Assign = struct { target: []const u8, value: Expression };
-pub const IfStmt = struct { condition: Expression, then_body: []Statement, else_body: ?[]Statement = null };
-pub const ForStmt = struct { var_name: []const u8, init_value: i64, bound: i64, body: []Statement };
-pub const AssertStmt = struct { condition: Expression, message: ?[]const u8 = null };
+pub const ConstDecl = struct { name: []const u8, type_info: ?RunarType = null, value: Expression, source_loc: ?SourceLocation = null };
+pub const LetDecl = struct { name: []const u8, type_info: ?RunarType = null, value: ?Expression = null, source_loc: ?SourceLocation = null };
+pub const Assign = struct { target: []const u8, value: Expression, source_loc: ?SourceLocation = null };
+pub const IfStmt = struct { condition: Expression, then_body: []Statement, else_body: ?[]Statement = null, source_loc: ?SourceLocation = null };
+pub const ForStmt = struct { var_name: []const u8, init_value: i64, bound: i64, body: []Statement, source_loc: ?SourceLocation = null };
+pub const AssertStmt = struct { condition: Expression, message: ?[]const u8 = null, source_loc: ?SourceLocation = null };
 
 pub const Expression = union(enum) {
     literal_int: i64, literal_bool: bool, literal_bytes: []const u8, identifier: []const u8,
@@ -314,6 +314,7 @@ pub const StackProgram = struct {
     pub fn deinit(self: *const StackProgram, allocator: std.mem.Allocator) void {
         for (self.methods) |method| {
             if (method.instructions.len > 0) allocator.free(method.instructions);
+            if (method.instruction_source_locs.len > 0) allocator.free(method.instruction_source_locs);
         }
         if (self.methods.len > 0) allocator.free(self.methods);
         for (self.owned_push_data) |data| allocator.free(data);
@@ -329,6 +330,8 @@ pub const StackMethod = struct {
     /// High-level stack operations (used by emitDispatchTable, may contain nested if).
     ops: []StackOp = &.{},
     max_stack_depth: u32 = 0,
+    /// Parallel array to `instructions`: source location for each instruction (for source maps).
+    instruction_source_locs: []?SourceLocation = &.{},
 };
 
 pub const StackOp = union(enum) {
@@ -383,6 +386,7 @@ const runar_type_map = std.StaticStringMap(RunarType).initComptime(.{
     .{ "RabinPubKey", .rabin_pub_key },
     .{ "Point", .point },
     .{ "OpCodeType", .op_code_type },
+    .{ "FixedArray", .fixed_array },
     .{ "void", .void },
     // Aliases
     .{ "int", .bigint },
@@ -401,7 +405,7 @@ pub fn runarTypeToString(t: RunarType) []const u8 {
         .ripemd160 => "Ripemd160", .sig_hash_type => "SigHashType",
         .sig_hash_preimage => "SigHashPreimage", .rabin_sig => "RabinSig",
         .rabin_pub_key => "RabinPubKey", .point => "Point", .op_code_type => "OpCodeType",
-        .void => "void", .unknown => "unknown",
+        .fixed_array => "FixedArray", .void => "void", .unknown => "unknown",
     };
 }
 
@@ -535,6 +539,8 @@ test "typeNodeToRunarType" {
     try std.testing.expectEqual(RunarType.pub_key, typeNodeToRunarType(.{ .primitive_type = .pub_key }));
     try std.testing.expectEqual(RunarType.void, typeNodeToRunarType(.{ .primitive_type = .void }));
     try std.testing.expectEqual(RunarType.unknown, typeNodeToRunarType(.{ .custom_type = "MyType" }));
+    const elem_node = TypeNode{ .primitive_type = .bigint };
+    try std.testing.expectEqual(RunarType.fixed_array, typeNodeToRunarType(.{ .fixed_array_type = .{ .element = &elem_node, .length = 4 } }));
 }
 
 test "StateField with initial_value" {

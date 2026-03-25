@@ -97,14 +97,32 @@ module Runar
         end
       end
 
-      # Script-hash UTXO lookup is not available via standard JSON-RPC.
+      # Script-hash UTXO lookup via scantxoutset (best-effort).
       #
-      # Raises NotImplementedError with a suggestion to use an indexer or
-      # track the UTXO manually after deployment.
-      def get_contract_utxo(_script_hash)
+      # Uses the scantxoutset RPC to scan the UTXO set for outputs matching
+      # the given script hash. This is functional for regtest/testnet but slow
+      # on mainnet. For production use, consider an electrum-style indexer or
+      # track the UTXO manually with RunarContract#from_txid after deployment.
+      #
+      # @param script_hash [String] hex-encoded script hash to search for
+      # @return [Hash, nil] UTXO hash with :txid, :output_index, :satoshis, :script keys, or nil
+      def get_contract_utxo(script_hash)
+        result = rpc_call('scantxoutset', 'start', ["raw(#{script_hash})"])
+        unspents = Array(result['unspents'])
+        return nil if unspents.empty?
+
+        u = unspents.first
+        {
+          txid: u['txid'],
+          output_index: u['vout'].to_i,
+          satoshis: (u['amount'].to_f * 1e8).round,
+          script: u['scriptPubKey']
+        }
+      rescue StandardError
         raise NotImplementedError,
-              'RPCProvider#get_contract_utxo is not supported via standard JSON-RPC. ' \
-              'Use an electrum-style indexer, or track the UTXO manually with ' \
+              'RPCProvider#get_contract_utxo: scantxoutset RPC failed. ' \
+              'Your node may not support this command. Alternatives: ' \
+              'use an electrum-style indexer, or track the UTXO manually with ' \
               'RunarContract#from_txid after deployment.'
       end
 

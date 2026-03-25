@@ -1,0 +1,22 @@
+require 'rake/testtask'
+
+# Run each test file in its own subprocess to avoid constant collisions
+# between the TS and Ruby parsers (they share a namespace for token constants).
+task :test do
+  test_files = FileList['test/test_*.rb']
+  failures = 0
+
+  test_files.each do |f|
+    puts "Running #{f}..."
+    system("ruby -Ilib -Itest #{f}")
+    failures += 1 unless $?.success?
+  end
+
+  if failures > 0
+    abort "#{failures} test file(s) failed"
+  else
+    puts "\nAll #{test_files.size} test files passed."
+  end
+end
+
+task default: :test

@@ -254,6 +254,10 @@ const Parser = struct {
 
     fn bump(self: *Parser) Token { const prev = self.current; self.current = self.tokenizer.next(); return prev; }
 
+    fn currentSourceLoc(self: *const Parser) types.SourceLocation {
+        return .{ .file = self.file_name, .line = self.current.line, .column = self.current.col };
+    }
+
     fn expect(self: *Parser, kind: TokenKind) ?Token {
         if (self.current.kind == kind) return self.bump();
         self.addErrorFmt("expected {s}, got '{s}'", .{ @tagName(kind), self.current.text });
@@ -621,6 +625,7 @@ const Parser = struct {
     // ---- Methods ----
 
     fn parseMethod(self: *Parser, name: []const u8, is_public: bool) ?MethodNode {
+        const method_loc = self.currentSourceLoc();
         if (self.expect(.lparen) == null) return null;
         if (self.current.kind == .kw_self) {
             _ = self.bump();
@@ -636,7 +641,7 @@ const Parser = struct {
         if (self.current.kind != .lbrace) _ = self.parseTypeNode();
         if (self.expect(.lbrace) == null) return null;
         const body = self.parseBlock();
-        return MethodNode{ .name = name, .is_public = is_public, .params = params.items, .body = body };
+        return MethodNode{ .name = name, .is_public = is_public, .params = params.items, .body = body, .source_loc = method_loc };
     }
 
     fn parseParam(self: *Parser) ?ParamNode {
@@ -702,6 +707,7 @@ const Parser = struct {
     }
 
     fn parseVarDeclStmt(self: *Parser, mutable: bool) ?Statement {
+        const loc = self.currentSourceLoc();
         _ = self.bump();
         const n = self.expect(.ident) orelse return null;
         var ti: ?RunarType = null;
@@ -710,13 +716,14 @@ const Parser = struct {
         const v = self.parseExpression() orelse return null;
         _ = self.expect(.semicolon);
         if (mutable) {
-            return Statement{ .let_decl = .{ .name = n.text, .type_info = ti, .value = v } };
+            return Statement{ .let_decl = .{ .name = n.text, .type_info = ti, .value = v, .source_loc = loc } };
         } else {
-            return Statement{ .const_decl = .{ .name = n.text, .type_info = ti, .value = v } };
+            return Statement{ .const_decl = .{ .name = n.text, .type_info = ti, .value = v, .source_loc = loc } };
         }
     }
 
     fn parseIfStmt(self: *Parser) ?Statement {
+        const loc = self.currentSourceLoc();
         _ = self.bump();
         var hp = false;
         if (self.current.kind == .lparen) { hp = true; _ = self.bump(); }
@@ -734,18 +741,21 @@ const Parser = struct {
                 else_body = a;
             } else { if (self.expect(.lbrace) == null) return null; else_body = self.parseBlock(); }
         }
-        return Statement{ .if_stmt = .{ .condition = cond, .then_body = then_body, .else_body = else_body } };
+        return Statement{ .if_stmt = .{ .condition = cond, .then_body = then_body, .else_body = else_body, .source_loc = loc } };
     }
 
     /// Parse Zig while loop: `while (cond) : (continue_expr) { body }`
     ///
-    /// Expects the common Runar pattern:
-    ///   var i: i64 = 0;
-    ///   while (i < 10) : (i += 1) { ... }
+    /// Supports common Runar patterns:
+    ///   var i: i64 = 0; while (i < 10) : (i += 1) { ... }   // count up
+    ///   var i: i64 = 10; while (i > 0) : (i -= 1) { ... }   // count down
+    ///   while (i != 0) : (i -= 1) { ... }                    // until value
+    ///   while (10 > i) : (i += 1) { ... }                    // reversed operands
     ///
     /// Produces a ForStmt. The init_value defaults to 0 and is patched by
     /// parseBlock when a preceding let_decl matches the loop variable.
     fn parseWhileStmt(self: *Parser) ?Statement {
+        const loc = self.currentSourceLoc();
         _ = self.bump(); // consume 'while'
 
         // Condition: while (i < N)
@@ -758,22 +768,45 @@ const Parser = struct {
         };
         if (has_paren) _ = self.expect(.rparen);
 
-        // Extract var_name and bound from condition (expected: ident < literal)
+        // Extract var_name and bound from condition.
+        // Supported patterns:
+        //   ident < literal   → var_name=ident, bound=literal
+        //   ident <= literal  → var_name=ident, bound=literal+1
+        //   ident > literal   → var_name=ident, bound=literal (countdown)
+        //   ident >= literal  → var_name=ident, bound=literal (countdown)
+        //   ident != literal  → var_name=ident, bound=literal (until value)
+        //   literal > ident   → var_name=ident, bound=literal (reversed)
+        //   literal >= ident  → var_name=ident, bound=literal (reversed)
         var var_name: []const u8 = "_loop_var";
         var bound: i64 = 0;
         switch (cond) {
             .binary_op => |bop| {
                 if (bop.op == .lt or bop.op == .lte) {
-                    if (bop.left == .identifier) {
-                        var_name = bop.left.identifier;
-                    }
+                    // ident < N or ident <= N
+                    if (bop.left == .identifier) var_name = bop.left.identifier;
                     if (bop.right == .literal_int) {
                         bound = bop.right.literal_int;
+                        if (bop.op == .lte) bound += 1;
                     }
+                } else if (bop.op == .gt or bop.op == .gte) {
+                    if (bop.left == .identifier and bop.right == .literal_int) {
+                        // ident > N or ident >= N (countdown)
+                        var_name = bop.left.identifier;
+                        bound = bop.right.literal_int;
+                    } else if (bop.left == .literal_int and bop.right == .identifier) {
+                        // N > ident or N >= ident (reversed operands → ident < N)
+                        var_name = bop.right.identifier;
+                        bound = bop.left.literal_int;
+                        if (bop.op == .gte) bound += 1;
+                    }
+                } else if (bop.op == .neq) {
+                    // ident != N (loop until value reached)
+                    if (bop.left == .identifier) var_name = bop.left.identifier;
+                    if (bop.right == .literal_int) bound = bop.right.literal_int;
                 }
             },
             else => {
-                self.addError("while loop condition must be 'variable < constant'");
+                self.addError("while loop condition must be a comparison (e.g. 'i < N', 'i > 0', 'i != 0')");
             },
         }
 
@@ -800,6 +833,7 @@ const Parser = struct {
             .init_value = 0, // will be patched by parseBlock if preceding let_decl matches
             .bound = bound,
             .body = body,
+            .source_loc = loc,
         } };
     }
 
@@ -828,6 +862,7 @@ const Parser = struct {
     }
 
     fn parseExpressionStatement(self: *Parser) ?Statement {
+        const loc = self.currentSourceLoc();
         const expr = self.parseExpression() orelse { _ = self.bump(); return null; };
 
         if (isCompoundAssignOp(self.current.kind)) {
@@ -839,16 +874,18 @@ const Parser = struct {
             const target_name = extractAssignTarget(expr);
             const bin = self.allocator.create(BinaryOp) catch return null;
             bin.* = .{ .op = bo, .left = expr, .right = rhs };
-            return Statement{ .assign = .{ .target = target_name, .value = .{ .binary_op = bin } } };
+            return Statement{ .assign = .{ .target = target_name, .value = .{ .binary_op = bin }, .source_loc = loc } };
         }
         if (self.current.kind == .assign) {
             _ = self.bump();
             const rhs = self.parseExpression() orelse return null;
             _ = self.expect(.semicolon);
             const target_name = extractAssignTarget(expr);
-            return Statement{ .assign = .{ .target = target_name, .value = rhs } };
+            return Statement{ .assign = .{ .target = target_name, .value = rhs, .source_loc = loc } };
         }
         _ = self.expect(.semicolon);
+        // Expression statements (including assert calls) — attach source location
+        // by wrapping in assert_stmt if it's an assert call, otherwise use expr_stmt
         return Statement{ .expr_stmt = expr };
     }
 

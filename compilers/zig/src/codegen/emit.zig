@@ -32,6 +32,12 @@ pub const EmitContext = struct {
     constructor_slots: std.ArrayListUnmanaged(types.ConstructorSlot) = .empty,
     /// Byte offsets of OP_CODESEPARATOR instructions.
     code_separator_indices: std.ArrayListUnmanaged(u32) = .empty,
+    /// Source map: records which opcode corresponds to which source location.
+    source_map: std.ArrayListUnmanaged(types.SourceMapping) = .empty,
+    /// Pending source location to record on the next emitted opcode.
+    pending_source_loc: ?types.SourceLocation = null,
+    /// Current opcode index (incremented per emitted instruction).
+    opcode_index: u32 = 0,
     /// Allocator for all dynamic allocation.
     allocator: std.mem.Allocator,
 
@@ -48,13 +54,29 @@ pub const EmitContext = struct {
         self.asm_parts.deinit(self.allocator);
         self.constructor_slots.deinit(self.allocator);
         self.code_separator_indices.deinit(self.allocator);
+        self.source_map.deinit(self.allocator);
+    }
+
+    /// Record a source mapping for the current opcode if a source location is pending.
+    fn recordSourceMapping(self: *EmitContext) !void {
+        if (self.pending_source_loc) |loc| {
+            try self.source_map.append(self.allocator, .{
+                .opcode_index = self.opcode_index,
+                .source_file = loc.file,
+                .line = loc.line,
+                .column = loc.column,
+            });
+            self.pending_source_loc = null;
+        }
     }
 
     /// Emit a single opcode byte and its ASM name.
     pub fn emitOpcode(self: *EmitContext, op: Opcode) !void {
+        try self.recordSourceMapping();
         try self.script_bytes.append(self.allocator, op.toByte());
         try self.asm_parts.append(self.allocator, opcodes.toName(op));
         self.byte_offset += 1;
+        self.opcode_index += 1;
         if (op == .op_codeseparator) {
             try self.code_separator_indices.append(self.allocator, self.byte_offset - 1);
         }
@@ -85,10 +107,12 @@ pub const EmitContext = struct {
             }
         }
 
+        try self.recordSourceMapping();
         const start = self.script_bytes.items.len;
         try opcodes.encodePushData(self.script_bytes.writer(self.allocator), data);
         const bytes_written: u32 = @intCast(self.script_bytes.items.len - start);
         self.byte_offset += bytes_written;
+        self.opcode_index += 1;
 
         const hex = try opcodes.bytesToHex(self.allocator, data);
         try self.owned_asm_parts.append(self.allocator, hex);
@@ -97,10 +121,12 @@ pub const EmitContext = struct {
 
     /// Emit a script number with proper encoding and ASM representation.
     pub fn emitScriptNumber(self: *EmitContext, n: i64) !void {
+        try self.recordSourceMapping();
         const start = self.script_bytes.items.len;
         try opcodes.encodeScriptNumber(self.script_bytes.writer(self.allocator), n);
         const bytes_written: u32 = @intCast(self.script_bytes.items.len - start);
         self.byte_offset += bytes_written;
+        self.opcode_index += 1;
 
         // ASM representation
         if (n == 0) {
@@ -119,6 +145,7 @@ pub const EmitContext = struct {
     }
 
     /// Emit a push bool: true -> OP_TRUE (OP_1), false -> OP_FALSE (OP_0).
+    /// Note: delegates to emitOpcode which handles recordSourceMapping + opcode_index.
     pub fn emitPushBool(self: *EmitContext, b: bool) !void {
         if (b) {
             try self.emitOpcode(.op_1);
@@ -267,7 +294,14 @@ pub fn emitMethodOps(allocator: std.mem.Allocator, ops: []const types.StackOp) !
 
 fn emitMethodBody(ctx: *EmitContext, method: types.StackMethod) !void {
     if (method.instructions.len > 0) {
-        for (method.instructions) |inst| {
+        for (method.instructions, 0..) |inst, i| {
+            // Set pending source location from the parallel array (if available).
+            // After peephole optimization the array may be shorter or absent.
+            if (i < method.instruction_source_locs.len) {
+                if (method.instruction_source_locs[i]) |loc| {
+                    ctx.pending_source_loc = loc;
+                }
+            }
             try emitStackInstruction(ctx, inst);
         }
         return;
@@ -278,9 +312,61 @@ fn emitMethodBody(ctx: *EmitContext, method: types.StackMethod) !void {
     }
 }
 
+/// Emit a method body with a given source location applied to the first instruction.
+/// Used when per-instruction source locs are not available (e.g. after peephole).
+fn emitMethodBodyWithLoc(ctx: *EmitContext, method: types.StackMethod, loc: ?types.SourceLocation) !void {
+    if (loc) |l| ctx.pending_source_loc = l;
+    try emitMethodBody(ctx, method);
+}
+
 // ============================================================================
 // Multi-Method Dispatch Table
 // ============================================================================
+
+/// Find the first non-null source_loc from a method's ANF bindings.
+fn findMethodSourceLoc(anf_methods: []const types.ANFMethod, method_name: []const u8) ?types.SourceLocation {
+    for (anf_methods) |m| {
+        if (std.mem.eql(u8, m.name, method_name)) {
+            for (m.body) |binding| {
+                if (binding.source_loc) |loc| return loc;
+            }
+        }
+    }
+    return null;
+}
+
+/// Emit dispatch table with source map support (looks up source locs from ANF methods).
+fn emitDispatchTableWithSourceMap(ctx: *EmitContext, methods: []const types.StackMethod, anf_methods: []const types.ANFMethod) !void {
+    if (methods.len == 0) return;
+
+    if (methods.len == 1) {
+        ctx.pending_source_loc = findMethodSourceLoc(anf_methods, methods[0].name);
+        try emitMethodBody(ctx, methods[0]);
+        return;
+    }
+
+    for (methods, 0..) |method, i| {
+        try ctx.emitOpcode(.op_dup);
+        try ctx.emitScriptNumber(@intCast(i));
+        try ctx.emitOpcode(.op_numequal);
+        try ctx.emitOpcode(.op_if);
+        try ctx.emitOpcode(.op_drop);
+        ctx.pending_source_loc = findMethodSourceLoc(anf_methods, method.name);
+        try emitMethodBody(ctx, method);
+        if (i < methods.len - 1) {
+            try ctx.emitOpcode(.op_else);
+        } else {
+            try ctx.emitOpcode(.op_else);
+            try ctx.emitOpcode(.op_return);
+            try ctx.emitOpcode(.op_endif);
+        }
+    }
+
+    var closes: usize = methods.len - 1;
+    while (closes > 0) : (closes -= 1) {
+        try ctx.emitOpcode(.op_endif);
+    }
+}
 
 /// Emit the dispatch table for a multi-method contract.
 /// Pattern: OP_DUP <idx> OP_NUMEQUAL OP_IF OP_DROP <body> OP_ELSE ... OP_ENDIF
@@ -369,8 +455,9 @@ pub fn emitArtifact(
     var ctx = EmitContext.init(allocator);
     defer ctx.deinit();
 
-    // Emit multi-method dispatch (each method body starts with its own OP_CODESEPARATOR)
-    try emitDispatchTable(&ctx, stack_program.methods);
+    // Emit multi-method dispatch with source map support.
+    // Pass ANF methods so we can look up source locations per-method.
+    try emitDispatchTableWithSourceMap(&ctx, stack_program.methods, anf_program.methods);
 
     const script_hex = try ctx.getHex();
     defer allocator.free(script_hex);
@@ -496,6 +583,24 @@ pub fn emitArtifact(
         for (ctx.code_separator_indices.items, 0..) |idx, i| {
             if (i > 0) try w.writeByte(',');
             try w.print("{d}", .{idx});
+        }
+        try w.writeAll("]");
+    }
+
+    // sourceMap — opcode-to-source-location mappings
+    if (ctx.source_map.items.len > 0) {
+        try w.writeAll(",\"sourceMap\":[");
+        for (ctx.source_map.items, 0..) |mapping, i| {
+            if (i > 0) try w.writeByte(',');
+            try w.writeAll("{\"opcodeIndex\":");
+            try w.print("{d}", .{mapping.opcode_index});
+            try w.writeAll(",\"sourceFile\":");
+            try writeJsonString(w, mapping.source_file);
+            try w.writeAll(",\"line\":");
+            try w.print("{d}", .{mapping.line});
+            try w.writeAll(",\"column\":");
+            try w.print("{d}", .{mapping.column});
+            try w.writeByte('}');
         }
         try w.writeAll("]");
     }

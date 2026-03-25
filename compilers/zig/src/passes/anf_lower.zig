@@ -203,6 +203,8 @@ fn lowerMethods(allocator: Allocator, contract: ContractNode) LowerError![]ANFMe
     for (contract.methods) |method| {
         var method_ctx = LowerCtx.init(allocator, contract);
         defer method_ctx.deinit();
+        // Use the method's source location as default for all bindings in the method.
+        method_ctx.current_source_loc = method.source_loc;
         for (method.params) |param| {
             method_ctx.addParam(param.name);
             if (isByteType(param.type_info)) method_ctx.markByteTyped(param.name);
@@ -408,6 +410,8 @@ const LowerCtx = struct {
     local_aliases: std.StringHashMapUnmanaged([]const u8),
     local_byte_vars: std.StringHashMapUnmanaged(void),
     add_output_refs: std.ArrayListUnmanaged([]const u8),
+    /// Current source location — set before lowering each statement, stamped on bindings.
+    current_source_loc: ?types.SourceLocation = null,
 
     fn init(allocator: Allocator, contract: ContractNode) LowerCtx {
         return .{
@@ -431,12 +435,12 @@ const LowerCtx = struct {
 
     fn emit(self: *LowerCtx, value: ANFValue) LowerError![]const u8 {
         const name = try self.freshTemp();
-        try self.bindings.append(self.allocator, ANFBinding{ .name = name, .value = value });
+        try self.bindings.append(self.allocator, ANFBinding{ .name = name, .value = value, .source_loc = self.current_source_loc });
         return name;
     }
 
     fn emitNamed(self: *LowerCtx, name: []const u8, value: ANFValue) LowerError!void {
-        try self.bindings.append(self.allocator, ANFBinding{ .name = name, .value = value });
+        try self.bindings.append(self.allocator, ANFBinding{ .name = name, .value = value, .source_loc = self.current_source_loc });
     }
 
     fn addLocal(self: *LowerCtx, name: []const u8) void {
@@ -551,6 +555,20 @@ fn lowerStatements(ctx: *LowerCtx, stmts: []const Statement) LowerError!void {
 }
 
 fn lowerStatement(ctx: *LowerCtx, stmt: Statement) LowerError!void {
+    // Extract source_loc from the statement variant and set it on the context.
+    // All bindings emitted while processing this statement will inherit it.
+    const prev_loc = ctx.current_source_loc;
+    defer ctx.current_source_loc = prev_loc;
+    ctx.current_source_loc = switch (stmt) {
+        .const_decl => |d| d.source_loc,
+        .let_decl => |d| d.source_loc,
+        .assign => |a| a.source_loc,
+        .if_stmt => |i| i.source_loc,
+        .for_stmt => |f| f.source_loc,
+        .assert_stmt => |a| a.source_loc,
+        .expr_stmt, .return_stmt => null,
+    } orelse ctx.current_source_loc;
+
     switch (stmt) {
         .const_decl => |decl| {
             const value_ref = try lowerExprToRef(ctx, decl.value);

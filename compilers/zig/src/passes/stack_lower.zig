@@ -145,6 +145,8 @@ const LowerError = error{
 const LowerCtx = struct {
     allocator: Allocator,
     instructions: std.ArrayListUnmanaged(types.StackInstruction),
+    /// Parallel to `instructions`: source location for each emitted instruction.
+    instruction_source_locs: std.ArrayListUnmanaged(?types.SourceLocation),
     stack: StackMap,
     program: types.ANFProgram,
     last_uses: std.StringHashMapUnmanaged(usize),
@@ -157,11 +159,14 @@ const LowerCtx = struct {
     in_branch: bool,
     updated_props: std.StringHashMapUnmanaged(void),
     max_depth: u32,
+    /// Current ANF binding's source location — set before processing each binding.
+    current_source_loc: ?types.SourceLocation = null,
 
     fn init(allocator: Allocator, program: types.ANFProgram) LowerCtx {
         return .{
             .allocator = allocator,
             .instructions = .empty,
+            .instruction_source_locs = .empty,
             .stack = .{},
             .program = program,
             .last_uses = .empty,
@@ -179,6 +184,7 @@ const LowerCtx = struct {
 
     fn deinit(self: *LowerCtx) void {
         self.instructions.deinit(self.allocator);
+        self.instruction_source_locs.deinit(self.allocator);
         self.stack.deinit(self.allocator);
         self.last_uses.deinit(self.allocator);
         self.local_bindings.deinit(self.allocator);
@@ -209,6 +215,7 @@ const LowerCtx = struct {
 
     fn emit(self: *LowerCtx, inst: types.StackInstruction) !void {
         try self.instructions.append(self.allocator, inst);
+        try self.instruction_source_locs.append(self.allocator, self.current_source_loc);
     }
 
     fn emitOp(self: *LowerCtx, op: Opcode) !void {
@@ -545,6 +552,7 @@ const LowerCtx = struct {
 
         for (bindings, 0..) |binding, idx| {
             self.current_idx = idx;
+            self.current_source_loc = binding.source_loc;
             if (terminal_assert_idx != null and idx == terminal_assert_idx.?) {
                 switch (binding.value) {
                     .assert => |a| try self.lowerAssertOp(binding.name, .{ .condition = a.value }, true),
@@ -554,6 +562,7 @@ const LowerCtx = struct {
             } else {
                 try self.lowerBinding(binding);
             }
+            self.current_source_loc = null;
         }
     }
 
@@ -3359,10 +3368,12 @@ pub fn lower(allocator: Allocator, program: types.ANFProgram) !types.StackProgra
         try emitDispatchTable(&ctx, program);
 
         const instructions = try allocator.dupe(types.StackInstruction, ctx.instructions.items);
+        const src_locs = try allocator.dupe(?types.SourceLocation, ctx.instruction_source_locs.items);
         try methods.append(allocator, .{
             .name = "__dispatch",
             .instructions = instructions,
             .max_stack_depth = ctx.max_depth,
+            .instruction_source_locs = src_locs,
         });
         try owned_push_data.appendSlice(allocator, ctx.owned_push_data.items);
         ctx.owned_push_data.deinit(allocator);
@@ -3388,10 +3399,12 @@ pub fn lower(allocator: Allocator, program: types.ANFProgram) !types.StackProgra
             }
 
             const instructions = try allocator.dupe(types.StackInstruction, ctx.instructions.items);
+            const src_locs = try allocator.dupe(?types.SourceLocation, ctx.instruction_source_locs.items);
             try methods.append(allocator, .{
                 .name = method.name,
                 .instructions = instructions,
                 .max_stack_depth = ctx.max_depth,
+                .instruction_source_locs = src_locs,
             });
             try owned_push_data.appendSlice(allocator, ctx.owned_push_data.items);
             ctx.owned_push_data.deinit(allocator);
@@ -3917,6 +3930,7 @@ test "lower simple P2PKH contract" {
     defer {
         for (result.methods) |m| {
             allocator.free(m.instructions);
+            if (m.instruction_source_locs.len > 0) allocator.free(m.instruction_source_locs);
         }
         allocator.free(result.methods);
     }
@@ -3976,6 +3990,7 @@ test "lower arithmetic bindings" {
     defer {
         for (result.methods) |m| {
             allocator.free(m.instructions);
+            if (m.instruction_source_locs.len > 0) allocator.free(m.instruction_source_locs);
         }
         allocator.free(result.methods);
     }
@@ -4018,6 +4033,7 @@ test "lower literal push" {
     defer {
         for (result.methods) |m| {
             allocator.free(m.instructions);
+            if (m.instruction_source_locs.len > 0) allocator.free(m.instruction_source_locs);
         }
         allocator.free(result.methods);
     }
@@ -4060,6 +4076,7 @@ test "lower hash builtin" {
     defer {
         for (result.methods) |m| {
             allocator.free(m.instructions);
+            if (m.instruction_source_locs.len > 0) allocator.free(m.instruction_source_locs);
         }
         allocator.free(result.methods);
     }
@@ -4109,6 +4126,7 @@ test "lower sha256Compress builtin" {
     defer {
         for (result.methods) |m| {
             allocator.free(m.instructions);
+            if (m.instruction_source_locs.len > 0) allocator.free(m.instruction_source_locs);
         }
         allocator.free(result.methods);
     }
@@ -4165,6 +4183,7 @@ test "lower sha256Finalize builtin" {
     defer {
         for (result.methods) |m| {
             allocator.free(m.instructions);
+            if (m.instruction_source_locs.len > 0) allocator.free(m.instruction_source_locs);
         }
         allocator.free(result.methods);
     }
@@ -4229,6 +4248,7 @@ test "lower if expression" {
     defer {
         for (result.methods) |m| {
             allocator.free(m.instructions);
+            if (m.instruction_source_locs.len > 0) allocator.free(m.instruction_source_locs);
         }
         allocator.free(result.methods);
     }
@@ -4286,6 +4306,7 @@ test "lower for loop unrolling" {
     defer {
         for (result.methods) |m| {
             allocator.free(m.instructions);
+            if (m.instruction_source_locs.len > 0) allocator.free(m.instruction_source_locs);
         }
         allocator.free(result.methods);
     }
@@ -4326,6 +4347,7 @@ test "lower multi-method dispatch" {
     defer {
         for (result.methods) |m| {
             allocator.free(m.instructions);
+            if (m.instruction_source_locs.len > 0) allocator.free(m.instruction_source_locs);
         }
         allocator.free(result.methods);
     }

@@ -179,26 +179,13 @@ pub fn appendEcNegate(builder: *Builder) !void {
 }
 
 pub fn builtinTodoNote(builtin: registry.CryptoBuiltin) ?[]const u8 {
-    return switch (builtin) {
-        .verify_wots => "verifyWOTS emitter is not implemented",
-        .verify_slhdsa_sha2_128s,
-        .verify_slhdsa_sha2_128f,
-        .verify_slhdsa_sha2_192s,
-        .verify_slhdsa_sha2_192f,
-        .verify_slhdsa_sha2_256s,
-        .verify_slhdsa_sha2_256f,
-        => "SLH-DSA emitter is not implemented",
-        .blake3_compress,
-        .blake3_hash,
-        .blake3,
-        => "BLAKE3 emitter is not implemented",
-        .ec_add,
-        .ec_mul,
-        .ec_mul_gen,
-        .ec_on_curve,
-        => "EC emitter is not implemented",
-        else => null,
-    };
+    // All crypto builtins are fully implemented. Operations not handled by
+    // this module (crypto_emitters) are dispatched to dedicated emitters:
+    //   - ec_add, ec_mul, ec_mul_gen, ec_on_curve → ec_emitters
+    //   - blake3, blake3_compress, blake3_hash → blake3_emitters
+    //   - verify_wots, verify_slhdsa_* → pq_emitters
+    _ = builtin;
+    return null;
 }
 
 test "implemented crypto emitters append instructions" {
@@ -219,17 +206,20 @@ test "implemented crypto emitters append instructions" {
     try std.testing.expectEqualDeep(CryptoInstruction{ .op_name = "OP_CAT" }, negate_list.items[negate_list.items.len - 1]);
 }
 
-test "scaffolded crypto emitters are explicit" {
+test "non-local crypto emitters return NotImplemented from this module" {
     const allocator = std.testing.allocator;
     var list: std.ArrayListUnmanaged(CryptoInstruction) = .empty;
     defer list.deinit(allocator);
 
+    // verify_wots is implemented via pq_emitters, not crypto_emitters,
+    // so appendBuiltinInstructions correctly returns NotImplemented here.
+    // The actual dispatch in stack_lower.zig routes it to lowerPqBuiltin.
     try std.testing.expectError(error.NotImplemented, appendBuiltinInstructions(&list, allocator, .verify_wots));
-    try std.testing.expectEqualStrings(
-        "verifyWOTS emitter is not implemented",
-        builtinTodoNote(.verify_wots).?,
-    );
+    // All builtins are fully implemented (via their respective emitter modules)
+    try std.testing.expectEqual(@as(?[]const u8, null), builtinTodoNote(.verify_wots));
     try std.testing.expectEqual(@as(?[]const u8, null), builtinTodoNote(.ec_negate));
+    try std.testing.expectEqual(@as(?[]const u8, null), builtinTodoNote(.ec_add));
+    try std.testing.expectEqual(@as(?[]const u8, null), builtinTodoNote(.blake3));
 }
 
 test "ec point helpers include numeric conversion steps" {

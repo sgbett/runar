@@ -5,6 +5,7 @@ const validate_pass = @import("passes/validate.zig");
 const typecheck_pass = @import("passes/typecheck.zig");
 const anf_lower = @import("passes/anf_lower.zig");
 const constant_fold = @import("passes/constant_fold.zig");
+const dce = @import("passes/dce.zig");
 const ec_optimizer = @import("passes/ec_optimizer.zig");
 const stack_lower = @import("passes/stack_lower.zig");
 const peephole = @import("passes/peephole.zig");
@@ -59,6 +60,9 @@ pub fn compileSource(
 
     // Pass 4.25: Constant Fold
     program = constant_fold.foldConstants(work, program) catch return error.ANFLowerFailed;
+
+    // Pass 4.3: Dead Code Elimination
+    program = dce.eliminateDeadCode(work, program) catch return error.ANFLowerFailed;
 
     // Pass 4.5: EC Optimize
     program = ec_optimizer.optimize(work, program) catch return error.ANFLowerFailed;
@@ -140,6 +144,37 @@ test "compile P2PKH contract to hex" {
     try std.testing.expect(std.mem.indexOf(u8, hex, "76") != null);
     try std.testing.expect(std.mem.indexOf(u8, hex, "a9") != null);
     try std.testing.expect(std.mem.indexOf(u8, hex, "ac") != null);
+}
+
+test "artifact contains source map entries" {
+    const source =
+        \\const runar = @import("runar");
+        \\
+        \\pub const P2PKH = struct {
+        \\    pub const Contract = runar.SmartContract;
+        \\
+        \\    pubKeyHash: runar.Addr,
+        \\
+        \\    pub fn init(pubKeyHash: runar.Addr) P2PKH {
+        \\        return .{ .pubKeyHash = pubKeyHash };
+        \\    }
+        \\
+        \\    pub fn unlock(self: *const P2PKH, sig: runar.Sig, pubKey: runar.PubKey) void {
+        \\        runar.assert(runar.hash160(pubKey) == self.pubKeyHash);
+        \\        runar.assert(runar.checkSig(sig, pubKey));
+        \\    }
+        \\};
+    ;
+
+    const result = try compileSource(std.testing.allocator, source, "P2PKH.runar.zig");
+    defer result.deinit(std.testing.allocator);
+
+    // Artifact JSON should contain sourceMap
+    try std.testing.expect(result.artifact_json != null);
+    const json = result.artifact_json.?;
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"sourceMap\":[") != null);
+    // sourceMap should reference the source file
+    try std.testing.expect(std.mem.indexOf(u8, json, "P2PKH.runar.zig") != null);
 }
 
 test "compile returns error for invalid contract" {

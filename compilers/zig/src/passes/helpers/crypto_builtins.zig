@@ -162,17 +162,11 @@ pub fn requiredArgCount(builtin: CryptoBuiltin) usize {
 }
 
 pub fn statusOf(builtin: CryptoBuiltin) CryptoBuiltinStatus {
-    return switch (builtin) {
-        .verify_rabin_sig,
-        .ec_negate,
-        .ec_mod_reduce,
-        .ec_encode_compressed,
-        .ec_make_point,
-        .ec_point_x,
-        .ec_point_y,
-        => .implemented,
-        else => .scaffolded,
-    };
+    _ = builtin;
+    // All crypto builtins are implemented: basic EC helpers and Rabin via
+    // crypto_emitters, full EC via ec_emitters, BLAKE3 via blake3_emitters,
+    // WOTS and SLH-DSA via pq_emitters.
+    return .implemented;
 }
 
 test "crypto builtin classification covers exact names" {
@@ -191,5 +185,8 @@ test "crypto builtin metadata stays consistent" {
     try std.testing.expectEqual(@as(?[]const u8, null), slhDsaParamKey(.ec_on_curve));
     try std.testing.expectEqual(@as(usize, 4), requiredArgCount(.verify_rabin_sig));
     try std.testing.expectEqual(CryptoBuiltinStatus.implemented, statusOf(.ec_negate));
-    try std.testing.expectEqual(CryptoBuiltinStatus.scaffolded, statusOf(.verify_wots));
+    try std.testing.expectEqual(CryptoBuiltinStatus.implemented, statusOf(.verify_wots));
+    try std.testing.expectEqual(CryptoBuiltinStatus.implemented, statusOf(.ec_add));
+    try std.testing.expectEqual(CryptoBuiltinStatus.implemented, statusOf(.blake3));
+    try std.testing.expectEqual(CryptoBuiltinStatus.implemented, statusOf(.verify_slhdsa_sha2_256f));
 }

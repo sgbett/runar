@@ -42,15 +42,19 @@ module Runar
       # @param method_name  [String] the method to execute (must be a public method)
       # @param current_state [Hash]  current contract state (property name → value)
       # @param args         [Hash]   method arguments (param name → value)
+      # @param max_loop_iterations [Integer] optional override for the loop iteration limit
       # @return [Hash] the updated state (merged with current_state)
       # @raise [ArgumentError] when method_name is not found as a public method in the ANF IR
-      def compute_new_state(anf, method_name, current_state, args)
+      def compute_new_state(anf, method_name, current_state, args, max_loop_iterations: MAX_LOOP_ITERATIONS)
         method = find_public_method(anf, method_name)
 
         unless method
           raise ArgumentError,
                 "computeNewState: method '#{method_name}' not found in ANF IR"
         end
+
+        # Store the configurable loop limit for use in eval_value.
+        Thread.current[:runar_max_loop_iterations] = max_loop_iterations
 
         # Initialize environment with property values.
         env = {}
@@ -72,6 +76,8 @@ module Runar
         eval_bindings(Array(method['body']), env, state_delta, anf)
 
         current_state.merge(state_delta)
+      ensure
+        Thread.current[:runar_max_loop_iterations] = nil
       end
 
       # Walk a list of ANF bindings, updating env with each result.
@@ -140,8 +146,9 @@ module Runar
 
         when 'loop'
           count    = (value['count'] || 0).to_i
-          if count > MAX_LOOP_ITERATIONS
-            raise "ANF interpreter: loop count #{count} exceeds maximum of #{MAX_LOOP_ITERATIONS}"
+          limit = Thread.current[:runar_max_loop_iterations] || MAX_LOOP_ITERATIONS
+          if count > limit
+            raise "ANF interpreter: loop count #{count} exceeds maximum of #{limit}"
           end
 
           body     = Array(value['body'])
@@ -556,27 +563,27 @@ module Runar
       # @param v [Object]
       # @return [Boolean]
       #
-      # --- Divergence from on-chain Bitcoin Script semantics ---
-      #
-      # Bitcoin Script treats a ByteString as falsy if it is empty OR if it
-      # consists entirely of zero bytes (e.g. "00", "0000", "80" — the negative
-      # zero encoding). In this interpreter, ByteStrings are represented as
-      # hex-encoded Ruby Strings. The string "00" is non-empty and does not
-      # match the special-cased values ('', '0', 'false'), so it evaluates as
-      # TRUTHY here even though the single zero byte 0x00 is FALSY on-chain.
-      #
-      # Consequence: simulation may diverge from on-chain behavior for contracts
-      # whose control flow depends on zero-valued ByteString conditions (e.g. a
-      # branch on the result of num2bin(0, 1) == "00"). Numeric zero (Integer 0)
-      # is handled correctly. This divergence affects only hex-encoded zero-byte
-      # strings passed through the 'if' or boolean operator paths.
+      # Matches on-chain Bitcoin Script OP_IF semantics for truthiness.
+      # A value is falsy if it is empty, all-zero bytes, or negative zero (0x80).
       def is_truthy(v) # rubocop:disable Naming/PredicateName
         case v
         when TrueClass  then true
         when FalseClass then false
         when Integer    then v != 0
         when Float      then v != 0.0
-        when String     then v != '' && v != '0' && v != 'false'
+        when String
+          return false if v.empty?
+          return false if v == '0' || v == 'false'
+          # Hex-encoded byte string: apply Bitcoin Script semantics
+          if v.length.even? && v.match?(/\A[0-9a-fA-F]*\z/)
+            bytes = [v].pack('H*').bytes
+            return false if bytes.empty?
+            # All-zero bytes: falsy (e.g. "00", "0000")
+            return false if bytes.all?(&:zero?)
+            # Negative zero: all zeros except last byte is 0x80 (e.g. "80", "0080")
+            return false if bytes[0...-1].all?(&:zero?) && bytes[-1] == 0x80
+          end
+          true
         else false
         end
       end
