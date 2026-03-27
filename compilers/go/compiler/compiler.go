@@ -85,8 +85,8 @@ type Artifact struct {
 }
 
 const (
-	schemaVersion   = "runar-v0.4.2"
-	compilerVersion = "0.4.2-go"
+	schemaVersion   = "runar-v0.4.3"
+	compilerVersion = "0.4.3-go"
 )
 
 // ---------------------------------------------------------------------------
