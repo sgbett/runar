@@ -263,6 +263,16 @@ bump_version() {
   echo ""
   echo "Done. Verify with:  git diff"
   echo "Or run:             ./scripts/bump-version.sh --check"
+  echo ""
+
+  # Commit and tag
+  echo "Committing and tagging..."
+  git add -A
+  git commit -m "chore: bump all compiler and package versions to $NEW"
+  git tag "v$NEW"
+  echo "  ✓ committed and tagged v$NEW"
+  echo ""
+  echo "Push with:  git push origin main --tags"
 }
 
 # --- Entry point ---
