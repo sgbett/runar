@@ -227,6 +227,13 @@ bump_version() {
     "$ROOT/packages/runar-compiler/src/artifact/assembler.ts"
   echo "  ✓ TS compiler version strings"
 
+  # TS assembler tests (hardcoded version expectations)
+  sed -i '' "s/toBe('runar-v$OLD')/toBe('runar-v$NEW')/" \
+    "$ROOT/packages/runar-compiler/src/__tests__/assembler.test.ts"
+  sed -i '' "s/toBe('$OLD')/toBe('$NEW')/" \
+    "$ROOT/packages/runar-compiler/src/__tests__/assembler.test.ts"
+  echo "  ✓ TS assembler test version expectations"
+
   # Go
   sed -i '' "s/schemaVersion   = \"runar-v$OLD\"/schemaVersion   = \"runar-v$NEW\"/" \
     "$ROOT/compilers/go/compiler/compiler.go"

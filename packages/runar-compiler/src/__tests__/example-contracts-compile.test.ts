@@ -76,21 +76,9 @@ describe('Rust examples: full pipeline (parse + validate + typecheck)', () => {
 // Python example contracts: full pipeline
 // -------------------------------------------------------------------------
 
-// Known pre-existing issues: Python token-ft and token-nft use self.add_output()
-// which maps to this.addOutput(), but the type checker doesn't recognise addOutput
-// as a method call on self. This is a type checker limitation, not a parser bug.
-const PYTHON_KNOWN_ISSUES = new Set([
-  'token-ft/FungibleTokenExample.runar.py',
-  'token-nft/NFTExample.runar.py',
-]);
-
 describe('Python examples: full pipeline (parse + validate + typecheck)', () => {
   const contracts = findContracts('python', '.runar.py');
   for (const { name, path } of contracts) {
-    if (PYTHON_KNOWN_ISSUES.has(name)) {
-      it.skip(`compiles ${name} (known addOutput type checker issue)`, () => {});
-      continue;
-    }
     it(`compiles ${name}`, () => {
       const result = compileContract(path);
       expect(result.errors, `${result.stage} errors`).toEqual([]);

@@ -1070,6 +1070,94 @@ class TypeChecker {
           return BYTESTRING;
         }
 
+        // addOutput / addRawOutput — delegate to the property_access handler
+        // by treating this.addOutput(...) the same as this.addOutput(...) via property_access.
+        // This handles formats (Python, Move, etc.) that produce member_expr instead of property_access.
+        if (methodName === 'addOutput') {
+          const normalizedArgs = flattenAddOutputArgs(args);
+          if (this.contract.parentClass !== 'StatefulSmartContract') {
+            this.errors.push(makeDiagnostic(
+              `addOutput() is only available in StatefulSmartContract`,
+              'error',
+              expr.sourceLocation,
+            ));
+            return VOID;
+          }
+          const mutableProps = this.contract.properties.filter(p => !p.readonly);
+          const expectedArgCount = 1 + mutableProps.length;
+          if (normalizedArgs.length !== expectedArgCount) {
+            this.errors.push(makeDiagnostic(
+              `addOutput() expects ${expectedArgCount} argument(s): satoshis + ${mutableProps.length} state value(s), got ${normalizedArgs.length}`,
+              'error',
+              expr.sourceLocation,
+            ));
+          }
+          if (normalizedArgs.length >= 1) {
+            const satoshisType = this.inferExprType(normalizedArgs[0]!, env);
+            if (!isBigintFamily(satoshisType) && satoshisType !== '<unknown>') {
+              this.errors.push(makeDiagnostic(
+                `addOutput() first argument (satoshis) must be bigint, got '${satoshisType}'`,
+                'error',
+                args[0]!.sourceLocation,
+              ));
+            }
+          }
+          for (let i = 0; i < mutableProps.length && i + 1 < normalizedArgs.length; i++) {
+            const argType = this.inferExprType(normalizedArgs[i + 1]!, env);
+            const propType = typeNodeToTType(mutableProps[i]!.type);
+            if (!isSubtype(argType, propType) && argType !== '<unknown>') {
+              this.errors.push(makeDiagnostic(
+                `addOutput() argument ${i + 2} (${mutableProps[i]!.name}) must be '${propType}', got '${argType}'`,
+                'error',
+                args[i + 1]!.sourceLocation,
+              ));
+            }
+          }
+          for (let i = expectedArgCount; i < normalizedArgs.length; i++) {
+            this.inferExprType(normalizedArgs[i]!, env);
+          }
+          return VOID;
+        }
+
+        if (methodName === 'addRawOutput') {
+          if (this.contract.parentClass !== 'StatefulSmartContract') {
+            this.errors.push(makeDiagnostic(
+              `addRawOutput() is only available in StatefulSmartContract`,
+              'error',
+              expr.sourceLocation,
+            ));
+            return VOID;
+          }
+          if (args.length !== 2) {
+            this.errors.push(makeDiagnostic(
+              `addRawOutput() expects 2 arguments (satoshis, scriptBytes), got ${args.length}`,
+              'error',
+              expr.sourceLocation,
+            ));
+          }
+          if (args.length >= 1) {
+            const satoshisType = this.inferExprType(args[0]!, env);
+            if (!isBigintFamily(satoshisType) && satoshisType !== '<unknown>') {
+              this.errors.push(makeDiagnostic(
+                `addRawOutput() first argument (satoshis) must be bigint, got '${satoshisType}'`,
+                'error',
+                args[0]!.sourceLocation,
+              ));
+            }
+          }
+          if (args.length >= 2) {
+            const scriptType = this.inferExprType(args[1]!, env);
+            if (!isSubtype(scriptType, BYTESTRING) && scriptType !== '<unknown>') {
+              this.errors.push(makeDiagnostic(
+                `addRawOutput() second argument (scriptBytes) must be ByteString, got '${scriptType}'`,
+                'error',
+                args[1]!.sourceLocation,
+              ));
+            }
+          }
+          return VOID;
+        }
+
         const methodSig = this.methodSigs.get(methodName);
         if (methodSig) {
           return this.checkCallArgs(methodName, methodSig, args, env);
