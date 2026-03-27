@@ -316,6 +316,11 @@ class LoweringContext {
     return this.contract.properties.some(p => p.name === name);
   }
 
+  /** Check if name matches a private method on the contract. */
+  isPrivateMethod(name: string): boolean {
+    return this.contract.methods.some(m => m.name === name && m.visibility === 'private');
+  }
+
   /** Track an addOutput binding ref for multi-output continuation. */
   addOutputRef(ref: string): void {
     this._addOutputRefs.push(ref);
@@ -858,9 +863,12 @@ function lowerCallExpr(
   if (callee.kind === 'property_access' && callee.property === 'getStateScript') {
     return ctx.emit({ kind: 'get_state_script' });
   }
+  // member_expr handlers for addOutput/addRawOutput/getStateScript.
+  // Matches both StatefulContext param style (Go/Move: `ctx.addOutput(...)`) and
+  // this-style (Python/Ruby: `this.addOutput(...)` after snake_case conversion).
   if (callee.kind === 'member_expr' &&
       callee.object.kind === 'identifier' &&
-      ctx.isStatefulContextParam(callee.object.name) &&
+      (callee.object.name === 'this' || ctx.isStatefulContextParam(callee.object.name)) &&
       callee.property === 'addOutput') {
     const argRefs = normalizedAddOutputArgs.map(arg => lowerExprToRef(arg, ctx));
     const satoshis = argRefs[0]!;
@@ -871,7 +879,7 @@ function lowerCallExpr(
   }
   if (callee.kind === 'member_expr' &&
       callee.object.kind === 'identifier' &&
-      ctx.isStatefulContextParam(callee.object.name) &&
+      (callee.object.name === 'this' || ctx.isStatefulContextParam(callee.object.name)) &&
       callee.property === 'addRawOutput') {
     const argRefs = expr.args.map(arg => lowerExprToRef(arg, ctx));
     const satoshis = argRefs[0]!;
@@ -882,13 +890,7 @@ function lowerCallExpr(
   }
   if (callee.kind === 'member_expr' &&
       callee.object.kind === 'identifier' &&
-      ctx.isStatefulContextParam(callee.object.name) &&
-      callee.property === 'getStateScript') {
-    return ctx.emit({ kind: 'get_state_script' });
-  }
-  if (callee.kind === 'member_expr' &&
-      callee.object.kind === 'identifier' &&
-      callee.object.name === 'this' &&
+      (callee.object.name === 'this' || ctx.isStatefulContextParam(callee.object.name)) &&
       callee.property === 'getStateScript') {
     return ctx.emit({ kind: 'get_state_script' });
   }
@@ -916,8 +918,16 @@ function lowerCallExpr(
   }
 
   // Direct function call: sha256(x), checkSig(sig, pk), etc.
+  // Standalone private functions (e.g., Go package-level helpers) that match a
+  // contract method name are emitted as method_call so they get inlined by
+  // the stack lowering pass instead of being treated as unknown builtins.
   if (callee.kind === 'identifier') {
     const argRefs = expr.args.map(arg => lowerExprToRef(arg, ctx));
+    const isPrivateMethod = ctx.isPrivateMethod(callee.name);
+    if (isPrivateMethod) {
+      const thisRef = ctx.emit({ kind: 'load_const', value: 'this' });
+      return ctx.emit({ kind: 'method_call', object: thisRef, method: callee.name, args: argRefs });
+    }
     return ctx.emit({ kind: 'call', func: callee.name, args: argRefs });
   }
 
@@ -1177,9 +1187,16 @@ function stmtHasAddOutput(stmt: Statement): boolean {
 }
 
 function exprHasAddOutput(expr: Expression): boolean {
-  if (expr.kind === 'call_expr' && expr.callee.kind === 'property_access' &&
-      (expr.callee.property === 'addOutput' || expr.callee.property === 'addRawOutput')) {
-    return true;
+  if (expr.kind === 'call_expr') {
+    const callee = expr.callee;
+    if (callee.kind === 'property_access' &&
+        (callee.property === 'addOutput' || callee.property === 'addRawOutput')) {
+      return true;
+    }
+    if (callee.kind === 'member_expr' &&
+        (callee.property === 'addOutput' || callee.property === 'addRawOutput')) {
+      return true;
+    }
   }
   return false;
 }

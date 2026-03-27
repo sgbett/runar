@@ -52,7 +52,7 @@ module TicTacToe {
         assert!(self.status == 1, 0);
         assert!(check_sig(sig, player), 0);
         self.assert_correct_player(player);
-        place_move(position);
+        self.place_move(position);
         if (self.turn == 1) {
             self.turn = 2;
         } else {
@@ -65,8 +65,8 @@ module TicTacToe {
         assert!(self.status == 1, 0);
         assert!(check_sig(sig, player), 0);
         self.assert_correct_player(player);
-        assert_cell_empty(position);
-        assert!(check_win_after_move(position, self.turn), 0);
+        self.assert_cell_empty(position);
+        assert!(self.check_win_after_move(position, self.turn), 0);
 
         let total_payout: bigint = self.bet_amount * 2;
         let payout: ByteString = cat(cat(num2bin(total_payout, 8), self.p2pkh_prefix), cat(hash160(player), self.p2pkh_suffix));
@@ -83,9 +83,9 @@ module TicTacToe {
         assert!(self.status == 1, 0);
         assert!(check_sig(sig, player), 0);
         self.assert_correct_player(player);
-        assert_cell_empty(position);
-        assert!(count_occupied() == 8, 0);
-        assert!(!check_win_after_move(position, self.turn), 0);
+        self.assert_cell_empty(position);
+        assert!(self.count_occupied() == 8, 0);
+        assert!(!self.check_win_after_move(position, self.turn), 0);
 
         let out1: ByteString = cat(cat(num2bin(self.bet_amount, 8), self.p2pkh_prefix), cat(hash160(self.player_x), self.p2pkh_suffix));
         let out2: ByteString = cat(cat(num2bin(self.bet_amount, 8), self.p2pkh_prefix), cat(hash160(self.player_o), self.p2pkh_suffix));
@@ -175,7 +175,7 @@ module TicTacToe {
     }
 
     fun place_move(position: bigint) {
-        assert_cell_empty(position);
+        self.assert_cell_empty(position);
         if (position == 0) {
             self.c0 = self.turn;
         } else {

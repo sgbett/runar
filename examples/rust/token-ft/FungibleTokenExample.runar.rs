@@ -75,9 +75,7 @@ impl FungibleToken {
         self.add_output(output_satoshis, to, amount, 0);
         // Second output: sender keeps the remaining balance as change (skip if fully spent)
         if amount < total_balance {
-            let change_owner = self.owner.clone();
-            let change_balance = total_balance - amount;
-            self.add_output(output_satoshis, change_owner, change_balance, 0);
+            self.add_output(output_satoshis, self.owner.clone(), total_balance - amount, 0);
         }
     }
 
@@ -142,14 +140,13 @@ impl FungibleToken {
         let my_outpoint = extract_outpoint(&self.tx_preimage);
         let first_outpoint = substr(&all_prevouts, 0, 36);
         let my_balance = self.balance + self.merge_balance;
-        let owner = self.owner.clone();
 
         if my_outpoint == first_outpoint {
             // I'm input 0: my verified balance goes to slot 0
-            self.add_output(output_satoshis, owner, my_balance, other_balance);
+            self.add_output(output_satoshis, self.owner.clone(), my_balance, other_balance);
         } else {
             // I'm input 1: my verified balance goes to slot 1
-            self.add_output(output_satoshis, owner, other_balance, my_balance);
+            self.add_output(output_satoshis, self.owner.clone(), other_balance, my_balance);
         }
     }
 }
