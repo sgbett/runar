@@ -4,6 +4,8 @@
 
 import { describe, it, expect } from 'vitest';
 import { parse } from '../passes/01-parse.js';
+import { validate } from '../passes/02-validate.js';
+import { typecheck } from '../passes/03-typecheck.js';
 import { parseRustSource } from '../passes/01-parse-rust.js';
 import { readFileSync, existsSync, readdirSync } from 'fs';
 import { join } from 'path';
@@ -314,5 +316,94 @@ struct Test { x: Bigint, }
 impl Test { #[public] fn set(&mut self) { self.x = 1; } }
 `, 'Test.runar.rs');
     expect(stateful.contract!.parentClass).toBe('StatefulSmartContract');
+  });
+
+  it('converts trailing expression without semicolon to return_statement', () => {
+    const source = `
+use runar::prelude::*;
+
+#[runar::contract]
+pub struct Test {
+    #[readonly]
+    pub x: Bigint,
+}
+
+#[runar::methods(Test)]
+impl Test {
+    fn helper(&self, a: Bigint, b: Bigint) -> Bigint {
+        a + b
+    }
+
+    #[public]
+    pub fn check(&self, v: Bigint) {
+        assert!(self.helper(v, 1) > 0);
+    }
+}
+`;
+    const result = parseRustSource(source, 'Test.runar.rs');
+    expect(result.errors.filter(e => e.severity === 'error')).toEqual([]);
+    const helper = result.contract!.methods.find(m => m.name === 'helper');
+    expect(helper).toBeDefined();
+    // The trailing expression should be a return_statement, not an expression_statement
+    const lastStmt = helper!.body[helper!.body.length - 1]!;
+    expect(lastStmt.kind).toBe('return_statement');
+  });
+
+  it('strips txPreimage property from stateful Rust contracts', () => {
+    const source = `
+use runar::prelude::*;
+
+#[runar::contract]
+pub struct Counter {
+    pub count: Bigint,
+    pub tx_preimage: SigHashPreimage,
+}
+
+#[runar::methods(Counter)]
+impl Counter {
+    #[public]
+    pub fn increment(&mut self) {
+        self.count = self.count + 1;
+    }
+}
+`;
+    const result = parseRustSource(source, 'Counter.runar.rs');
+    expect(result.errors.filter(e => e.severity === 'error')).toEqual([]);
+    // txPreimage should be stripped — it's implicit for StatefulSmartContract
+    const propNames = result.contract!.properties.map(p => p.name);
+    expect(propNames).not.toContain('txPreimage');
+    expect(propNames).toContain('count');
+  });
+
+  it('private methods with return types pass full pipeline', () => {
+    const source = `
+use runar::prelude::*;
+
+#[runar::contract]
+pub struct Calc {
+    #[readonly]
+    pub x: Bigint,
+}
+
+#[runar::methods(Calc)]
+impl Calc {
+    fn double(&self, n: Bigint) -> Bigint {
+        n + n
+    }
+
+    #[public]
+    pub fn check(&self, v: Bigint) {
+        assert!(self.double(v) == self.x);
+    }
+}
+`;
+    const result = parse(source, 'Calc.runar.rs');
+    expect(result.errors.filter(e => e.severity === 'error')).toEqual([]);
+
+    const valResult = validate(result.contract!);
+    expect(valResult.errors.filter(e => e.severity === 'error')).toEqual([]);
+
+    const tcResult = typecheck(result.contract!);
+    expect(tcResult.errors.filter(e => e.severity === 'error')).toEqual([]);
   });
 });

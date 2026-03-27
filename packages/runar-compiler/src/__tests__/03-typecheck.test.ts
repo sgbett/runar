@@ -8,8 +8,8 @@ import type { ContractNode } from '../ir/index.js';
 // Helpers
 // ---------------------------------------------------------------------------
 
-function parseContract(source: string): ContractNode {
-  const result = parse(source);
+function parseContract(source: string, fileName?: string): ContractNode {
+  const result = parse(source, fileName);
   if (!result.contract) {
     throw new Error(`Parse failed: ${result.errors.map(e => e.message).join(', ')}`);
   }
@@ -1159,6 +1159,80 @@ describe('Pass 3: Type-Check', () => {
       `;
       const result = typecheckSource(source);
       expect(result.errors).toEqual([]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // addOutput via member_expr (Python/Move/Go format parsers)
+  // -------------------------------------------------------------------------
+
+  describe('addOutput via member_expr callee', () => {
+    it('accepts this.addOutput() in stateful Python contract', () => {
+      const py = `
+from runar import StatefulSmartContract, PubKey, Sig, Bigint, Readonly, ByteString, public, assert_, check_sig
+
+class Token(StatefulSmartContract):
+    owner: PubKey
+    balance: Bigint
+    token_id: Readonly[ByteString]
+
+    def __init__(self, owner: PubKey, balance: Bigint, token_id: ByteString):
+        super().__init__(owner, balance, token_id)
+        self.owner = owner
+        self.balance = balance
+        self.token_id = token_id
+
+    @public
+    def send(self, sig: Sig, to: PubKey, output_satoshis: Bigint):
+        assert_(check_sig(sig, self.owner))
+        self.add_output(output_satoshis, to, self.balance)
+`;
+      const contract = parseContract(py, 'Token.runar.py');
+      const result = typecheck(contract);
+      expect(result.errors).toEqual([]);
+    });
+
+    it('accepts this.addRawOutput() in stateful Python contract', () => {
+      const py = `
+from runar import StatefulSmartContract, PubKey, Sig, Bigint, ByteString, public, assert_, check_sig
+
+class Vault(StatefulSmartContract):
+    owner: PubKey
+    balance: Bigint
+
+    def __init__(self, owner: PubKey, balance: Bigint):
+        super().__init__(owner, balance)
+        self.owner = owner
+        self.balance = balance
+
+    @public
+    def withdraw(self, sig: Sig, script: ByteString, sats: Bigint):
+        assert_(check_sig(sig, self.owner))
+        self.add_raw_output(sats, script)
+`;
+      const contract = parseContract(py, 'Vault.runar.py');
+      const result = typecheck(contract);
+      expect(result.errors).toEqual([]);
+    });
+
+    it('rejects addOutput in stateless Python contract', () => {
+      const py = `
+from runar import SmartContract, Bigint, public, assert_
+
+class Bad(SmartContract):
+    x: Bigint
+
+    def __init__(self, x: Bigint):
+        super().__init__(x)
+        self.x = x
+
+    @public
+    def check(self, sats: Bigint):
+        self.add_output(sats, 0)
+`;
+      const contract = parseContract(py, 'Bad.runar.py');
+      const result = typecheck(contract);
+      expect(hasError(result, 'addOutput() is only available in StatefulSmartContract')).toBe(true);
     });
   });
 });

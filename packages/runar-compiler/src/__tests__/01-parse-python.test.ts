@@ -819,4 +819,107 @@ class Arithmetic(SmartContract):
       expect(contract.methods[0]!.body.length).toBeGreaterThanOrEqual(6);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Docstring handling — triple-quoted strings must be skipped
+  // -------------------------------------------------------------------------
+
+  describe('docstrings', () => {
+    it('handles class-level single-line docstring', () => {
+      const py = `
+from runar import SmartContract, Addr, Sig, PubKey, public, assert_, hash160, check_sig
+
+class P2PKH(SmartContract):
+    """Pay-to-Public-Key-Hash contract."""
+    pub_key_hash: Addr
+
+    def __init__(self, pub_key_hash: Addr):
+        super().__init__(pub_key_hash)
+        self.pub_key_hash = pub_key_hash
+
+    @public
+    def unlock(self, sig: Sig, pub_key: PubKey):
+        assert_(hash160(pub_key) == self.pub_key_hash)
+        assert_(check_sig(sig, pub_key))
+`;
+      const result = parsePythonSource(py, 'P2PKH.runar.py');
+      expect(result.errors.filter(e => e.severity === 'error')).toEqual([]);
+      expect(result.contract).not.toBeNull();
+      expect(result.contract!.name).toBe('P2PKH');
+    });
+
+    it('handles multi-line class docstring', () => {
+      const py = `
+from runar import SmartContract, Addr, Sig, PubKey, public, assert_, hash160, check_sig
+
+class P2PKH(SmartContract):
+    """P2PKH — Pay-to-Public-Key-Hash.
+
+    The most fundamental Bitcoin spending pattern. Funds are locked to the
+    HASH160 of a public key. To spend, the recipient must provide their
+    full public key and a valid ECDSA signature.
+    """
+    pub_key_hash: Addr
+
+    def __init__(self, pub_key_hash: Addr):
+        super().__init__(pub_key_hash)
+        self.pub_key_hash = pub_key_hash
+
+    @public
+    def unlock(self, sig: Sig, pub_key: PubKey):
+        assert_(hash160(pub_key) == self.pub_key_hash)
+        assert_(check_sig(sig, pub_key))
+`;
+      const result = parsePythonSource(py, 'P2PKH.runar.py');
+      expect(result.errors.filter(e => e.severity === 'error')).toEqual([]);
+      expect(result.contract!.name).toBe('P2PKH');
+      expect(result.contract!.properties).toHaveLength(1);
+    });
+
+    it('handles method-level docstrings', () => {
+      const py = `
+from runar import SmartContract, Addr, Sig, PubKey, public, assert_, hash160, check_sig
+
+class P2PKH(SmartContract):
+    pub_key_hash: Addr
+
+    def __init__(self, pub_key_hash: Addr):
+        """Initialize with the hash of the owner public key."""
+        super().__init__(pub_key_hash)
+        self.pub_key_hash = pub_key_hash
+
+    @public
+    def unlock(self, sig: Sig, pub_key: PubKey):
+        """Verify the pub_key hashes to the committed hash, then check the signature."""
+        assert_(hash160(pub_key) == self.pub_key_hash)
+        assert_(check_sig(sig, pub_key))
+`;
+      const result = parsePythonSource(py, 'P2PKH.runar.py');
+      expect(result.errors.filter(e => e.severity === 'error')).toEqual([]);
+      expect(result.contract!.name).toBe('P2PKH');
+      expect(result.contract!.methods).toHaveLength(1);
+    });
+
+    it('handles single-quote triple docstrings', () => {
+      const py = `
+from runar import SmartContract, Bigint, public, assert_
+
+class Test(SmartContract):
+    '''Single-quote docstring.'''
+    x: Bigint
+
+    def __init__(self, x: Bigint):
+        super().__init__(x)
+        self.x = x
+
+    @public
+    def check(self):
+        '''Check that x is positive.'''
+        assert_(self.x > 0)
+`;
+      const result = parsePythonSource(py, 'Test.runar.py');
+      expect(result.errors.filter(e => e.severity === 'error')).toEqual([]);
+      expect(result.contract!.name).toBe('Test');
+    });
+  });
 });
