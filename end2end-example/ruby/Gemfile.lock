@@ -1,7 +1,7 @@
 PATH
   remote: ../../packages/runar-rb
   specs:
-    runar-lang (0.1.0)
+    runar-lang (0.4.4)
 
 GEM
   remote: https://rubygems.org/

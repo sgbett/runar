@@ -220,11 +220,16 @@ bump_version() {
     echo "  ✓ packages/runar-rb/runar.gemspec"
   fi
 
-  # Ruby Gemfile.lock (path gem version)
-  if [ -f "$ROOT/packages/runar-rb/Gemfile.lock" ]; then
-    sed -i '' "s/runar-lang ($OLD)/runar-lang ($NEW)/" "$ROOT/packages/runar-rb/Gemfile.lock"
-    echo "  ✓ packages/runar-rb/Gemfile.lock"
-  fi
+  # Ruby Gemfile.lock files (path gem version)
+  for lockfile in "$ROOT/packages/runar-rb/Gemfile.lock" \
+                  "$ROOT/integration/ruby/Gemfile.lock" \
+                  "$ROOT/examples/ruby/Gemfile.lock" \
+                  "$ROOT/end2end-example/ruby/Gemfile.lock"; do
+    if [ -f "$lockfile" ]; then
+      sed -i '' "s/runar-lang ($OLD)/runar-lang ($NEW)/g" "$lockfile"
+      echo "  ✓ $(echo "$lockfile" | sed "s|$ROOT/||")"
+    fi
+  done
 
   # Compiler version strings (schema + per-language identifiers)
   # TS: ARTIFACT_VERSION and DEFAULT_COMPILER_VERSION
