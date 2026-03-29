@@ -1,0 +1,310 @@
+# frozen_string_literal: true
+
+require_relative "test_helper"
+
+require "runar_compiler/codegen/optimizer"
+
+class TestOptimizer < Minitest::Test
+  # ---------------------------------------------------------------------------
+  # Helpers
+  # ---------------------------------------------------------------------------
+
+  def optimize(ops)
+    RunarCompiler::Codegen.optimize_stack_ops(ops)
+  end
+
+  def push_bigint(n)
+    { op: "push", value: { kind: "bigint", big_int: n } }
+  end
+
+  def opcode(code)
+    { op: "opcode", code: code }
+  end
+
+  # ---------------------------------------------------------------------------
+  # 1. OP_DUP + OP_DROP eliminated
+  # ---------------------------------------------------------------------------
+
+  def test_dup_drop_eliminated
+    ops = [opcode("OP_DUP"), opcode("OP_DROP")]
+    result = optimize(ops)
+    assert_empty result, "OP_DUP + OP_DROP should be eliminated"
+  end
+
+  # ---------------------------------------------------------------------------
+  # 2. Push + drop eliminated
+  # ---------------------------------------------------------------------------
+
+  def test_push_drop_eliminated
+    ops = [push_bigint(42), { op: "drop" }]
+    result = optimize(ops)
+    assert_empty result, "push + drop should be eliminated"
+  end
+
+  # ---------------------------------------------------------------------------
+  # 3. dup + drop eliminated (abstract ops)
+  # ---------------------------------------------------------------------------
+
+  def test_abstract_dup_drop_eliminated
+    ops = [{ op: "dup" }, { op: "drop" }]
+    result = optimize(ops)
+    assert_empty result, "dup + drop should be eliminated"
+  end
+
+  # ---------------------------------------------------------------------------
+  # 4. Push 0 + OP_ADD eliminated
+  # ---------------------------------------------------------------------------
+
+  def test_push_zero_add_eliminated
+    ops = [push_bigint(0), opcode("OP_ADD")]
+    result = optimize(ops)
+    assert_empty result, "push(0) + OP_ADD should be eliminated (identity)"
+  end
+
+  # ---------------------------------------------------------------------------
+  # 5. Push 0 + OP_SUB eliminated
+  # ---------------------------------------------------------------------------
+
+  def test_push_zero_sub_eliminated
+    ops = [push_bigint(0), opcode("OP_SUB")]
+    result = optimize(ops)
+    assert_empty result, "push(0) + OP_SUB should be eliminated (identity)"
+  end
+
+  # ---------------------------------------------------------------------------
+  # 6. Push 1 + OP_ADD -> OP_1ADD
+  # ---------------------------------------------------------------------------
+
+  def test_push_one_add_becomes_1add
+    ops = [push_bigint(1), opcode("OP_ADD")]
+    result = optimize(ops)
+    assert_equal 1, result.length
+    assert_equal "OP_1ADD", result[0][:code]
+  end
+
+  # ---------------------------------------------------------------------------
+  # 7. Push 1 + OP_SUB -> OP_1SUB
+  # ---------------------------------------------------------------------------
+
+  def test_push_one_sub_becomes_1sub
+    ops = [push_bigint(1), opcode("OP_SUB")]
+    result = optimize(ops)
+    assert_equal 1, result.length
+    assert_equal "OP_1SUB", result[0][:code]
+  end
+
+  # ---------------------------------------------------------------------------
+  # 8. Double NOT eliminated
+  # ---------------------------------------------------------------------------
+
+  def test_double_not_eliminated
+    ops = [opcode("OP_NOT"), opcode("OP_NOT")]
+    result = optimize(ops)
+    assert_empty result, "double NOT should be eliminated"
+  end
+
+  # ---------------------------------------------------------------------------
+  # 9. Double NEGATE eliminated
+  # ---------------------------------------------------------------------------
+
+  def test_double_negate_eliminated
+    ops = [opcode("OP_NEGATE"), opcode("OP_NEGATE")]
+    result = optimize(ops)
+    assert_empty result, "double NEGATE should be eliminated"
+  end
+
+  # ---------------------------------------------------------------------------
+  # 10. Double SWAP eliminated
+  # ---------------------------------------------------------------------------
+
+  def test_double_swap_eliminated
+    ops = [{ op: "swap" }, { op: "swap" }]
+    result = optimize(ops)
+    assert_empty result, "double swap should be eliminated"
+  end
+
+  # ---------------------------------------------------------------------------
+  # 11. OP_EQUAL + OP_VERIFY -> OP_EQUALVERIFY
+  # ---------------------------------------------------------------------------
+
+  def test_equal_verify_fused
+    ops = [opcode("OP_EQUAL"), opcode("OP_VERIFY")]
+    result = optimize(ops)
+    assert_equal 1, result.length
+    assert_equal "OP_EQUALVERIFY", result[0][:code]
+  end
+
+  # ---------------------------------------------------------------------------
+  # 12. OP_CHECKSIG + OP_VERIFY -> OP_CHECKSIGVERIFY
+  # ---------------------------------------------------------------------------
+
+  def test_checksig_verify_fused
+    ops = [opcode("OP_CHECKSIG"), opcode("OP_VERIFY")]
+    result = optimize(ops)
+    assert_equal 1, result.length
+    assert_equal "OP_CHECKSIGVERIFY", result[0][:code]
+  end
+
+  # ---------------------------------------------------------------------------
+  # 13. OP_NUMEQUAL + OP_VERIFY -> OP_NUMEQUALVERIFY
+  # ---------------------------------------------------------------------------
+
+  def test_numequal_verify_fused
+    ops = [opcode("OP_NUMEQUAL"), opcode("OP_VERIFY")]
+    result = optimize(ops)
+    assert_equal 1, result.length
+    assert_equal "OP_NUMEQUALVERIFY", result[0][:code]
+  end
+
+  # ---------------------------------------------------------------------------
+  # 14. OP_CHECKMULTISIG + OP_VERIFY -> OP_CHECKMULTISIGVERIFY
+  # ---------------------------------------------------------------------------
+
+  def test_checkmultisig_verify_fused
+    ops = [opcode("OP_CHECKMULTISIG"), opcode("OP_VERIFY")]
+    result = optimize(ops)
+    assert_equal 1, result.length
+    assert_equal "OP_CHECKMULTISIGVERIFY", result[0][:code]
+  end
+
+  # ---------------------------------------------------------------------------
+  # 15. Double SHA256 -> OP_HASH256
+  # ---------------------------------------------------------------------------
+
+  def test_double_sha256_becomes_hash256
+    ops = [opcode("OP_SHA256"), opcode("OP_SHA256")]
+    result = optimize(ops)
+    assert_equal 1, result.length
+    assert_equal "OP_HASH256", result[0][:code]
+  end
+
+  # ---------------------------------------------------------------------------
+  # 16. Constant folding in window-3: push(a) push(b) OP_ADD -> push(a+b)
+  # ---------------------------------------------------------------------------
+
+  def test_constant_fold_add
+    ops = [push_bigint(3), push_bigint(5), opcode("OP_ADD")]
+    result = optimize(ops)
+    assert_equal 1, result.length
+    assert_equal "push", result[0][:op]
+    assert_equal 8, result[0][:value][:big_int]
+  end
+
+  # ---------------------------------------------------------------------------
+  # 17. Constant folding: push(a) push(b) OP_SUB -> push(a-b)
+  # ---------------------------------------------------------------------------
+
+  def test_constant_fold_sub
+    ops = [push_bigint(10), push_bigint(3), opcode("OP_SUB")]
+    result = optimize(ops)
+    assert_equal 1, result.length
+    assert_equal 7, result[0][:value][:big_int]
+  end
+
+  # ---------------------------------------------------------------------------
+  # 18. Constant folding: push(a) push(b) OP_MUL -> push(a*b)
+  # ---------------------------------------------------------------------------
+
+  def test_constant_fold_mul
+    ops = [push_bigint(4), push_bigint(7), opcode("OP_MUL")]
+    result = optimize(ops)
+    assert_equal 1, result.length
+    assert_equal 28, result[0][:value][:big_int]
+  end
+
+  # ---------------------------------------------------------------------------
+  # 19. Window-4: push(a) OP_ADD push(c) OP_ADD -> push(a+c) OP_ADD
+  # ---------------------------------------------------------------------------
+
+  def test_window4_add_add_coalesced
+    ops = [push_bigint(2), opcode("OP_ADD"), push_bigint(3), opcode("OP_ADD")]
+    result = optimize(ops)
+    assert_equal 2, result.length
+    assert_equal 5, result[0][:value][:big_int]
+    assert_equal "OP_ADD", result[1][:code]
+  end
+
+  # ---------------------------------------------------------------------------
+  # 20. Multiple passes converge
+  # ---------------------------------------------------------------------------
+
+  def test_multiple_passes_converge
+    # push(0) + OP_ADD first eliminates to nothing,
+    # but we add context around it that benefits from a second pass.
+    # swap swap dup drop push(0) OP_ADD
+    ops = [
+      { op: "swap" }, { op: "swap" },   # eliminate in pass 1
+      { op: "dup" }, { op: "drop" },     # eliminate in pass 1
+      push_bigint(0), opcode("OP_ADD")   # eliminate in pass 1
+    ]
+    result = optimize(ops)
+    assert_empty result, "all ops should be eliminated through multiple passes"
+  end
+
+  # ---------------------------------------------------------------------------
+  # 21. Over + over -> OP_2DUP
+  # ---------------------------------------------------------------------------
+
+  def test_over_over_becomes_2dup
+    ops = [{ op: "over" }, { op: "over" }]
+    result = optimize(ops)
+    assert_equal 1, result.length
+    assert_equal "OP_2DUP", result[0][:code]
+  end
+
+  # ---------------------------------------------------------------------------
+  # 22. Drop + drop -> OP_2DROP
+  # ---------------------------------------------------------------------------
+
+  def test_drop_drop_becomes_2drop
+    ops = [{ op: "drop" }, { op: "drop" }]
+    result = optimize(ops)
+    assert_equal 1, result.length
+    assert_equal "OP_2DROP", result[0][:code]
+  end
+
+  # ---------------------------------------------------------------------------
+  # 23. push(0) + OP_NUMEQUAL -> OP_NOT
+  # ---------------------------------------------------------------------------
+
+  def test_push_zero_numequal_becomes_not
+    ops = [push_bigint(0), opcode("OP_NUMEQUAL")]
+    result = optimize(ops)
+    assert_equal 1, result.length
+    assert_equal "OP_NOT", result[0][:code]
+  end
+
+  # ---------------------------------------------------------------------------
+  # 24. Nested if ops are optimized
+  # ---------------------------------------------------------------------------
+
+  def test_nested_if_optimized
+    ops = [
+      {
+        op: "if",
+        then: [opcode("OP_DUP"), opcode("OP_DROP")],
+        else_ops: [push_bigint(0), opcode("OP_ADD")]
+      }
+    ]
+    result = optimize(ops)
+    assert_equal 1, result.length
+    assert_equal "if", result[0][:op]
+    # then branch: OP_DUP + OP_DROP should be eliminated
+    assert_empty result[0][:then], "then branch should be optimized away"
+    # else branch: push(0) + OP_ADD should be eliminated
+    assert_empty result[0][:else_ops], "else branch should be optimized away"
+  end
+
+  # ---------------------------------------------------------------------------
+  # 25. Unrelated ops are preserved
+  # ---------------------------------------------------------------------------
+
+  def test_unrelated_ops_preserved
+    ops = [opcode("OP_SHA256"), opcode("OP_HASH160"), opcode("OP_VERIFY")]
+    result = optimize(ops)
+    assert_equal 3, result.length
+    assert_equal "OP_SHA256", result[0][:code]
+    assert_equal "OP_HASH160", result[1][:code]
+    assert_equal "OP_VERIFY", result[2][:code]
+  end
+end

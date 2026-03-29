@@ -13,64 +13,66 @@ require_relative "parse_result"
 module RunarCompiler
   module Frontend
     # -----------------------------------------------------------------------
-    # Token types
+    # Token types (namespaced to avoid collision with other parsers)
     # -----------------------------------------------------------------------
 
-    TOK_EOF          = 0
-    TOK_IDENT        = 1
-    TOK_NUMBER       = 2
-    TOK_STRING       = 3
-    TOK_LBRACE       = 4
-    TOK_RBRACE       = 5
-    TOK_LPAREN       = 6
-    TOK_RPAREN       = 7
-    TOK_LBRACKET     = 8
-    TOK_RBRACKET     = 9
-    TOK_SEMICOLON    = 10
-    TOK_COMMA        = 11
-    TOK_DOT          = 12
-    TOK_COLON        = 13
-    TOK_ASSIGN       = 14
-    TOK_EQEQ         = 15  # ==
-    TOK_NOTEQ        = 16  # !=
-    TOK_LT           = 17
-    TOK_LTEQ         = 18
-    TOK_GT           = 19
-    TOK_GTEQ         = 20
-    TOK_PLUS         = 21
-    TOK_MINUS        = 22
-    TOK_STAR         = 23
-    TOK_SLASH        = 24
-    TOK_PERCENT      = 25
-    TOK_BANG         = 26
-    TOK_TILDE        = 27
-    TOK_AMP          = 28
-    TOK_PIPE         = 29
-    TOK_CARET        = 30
-    TOK_AMPAMP       = 31  # &&
-    TOK_PIPEPIPE     = 32  # ||
-    TOK_PLUSEQ       = 33  # +=
-    TOK_MINUSEQ      = 34  # -=
-    TOK_STAREQ       = 35  # *=
-    TOK_SLASHEQ      = 36  # /=
-    TOK_PERCENTEQ    = 37  # %=
-    TOK_QUESTION     = 38  # ?
-    TOK_PLUSPLUS      = 39  # ++
-    TOK_MINUSMINUS   = 40  # --
-    TOK_EQEQEQ       = 41  # ===
-    TOK_NOTEQEQ      = 42  # !==
-    TOK_LSHIFT       = 43  # <<
-    TOK_RSHIFT       = 44  # >>
-    TOK_ARROW        = 45  # =>
+    module TsTokens
+      TOK_EOF          = 0
+      TOK_IDENT        = 1
+      TOK_NUMBER       = 2
+      TOK_STRING       = 3
+      TOK_LBRACE       = 4
+      TOK_RBRACE       = 5
+      TOK_LPAREN       = 6
+      TOK_RPAREN       = 7
+      TOK_LBRACKET     = 8
+      TOK_RBRACKET     = 9
+      TOK_SEMICOLON    = 10
+      TOK_COMMA        = 11
+      TOK_DOT          = 12
+      TOK_COLON        = 13
+      TOK_ASSIGN       = 14
+      TOK_EQEQ         = 15  # ==
+      TOK_NOTEQ        = 16  # !=
+      TOK_LT           = 17
+      TOK_LTEQ         = 18
+      TOK_GT           = 19
+      TOK_GTEQ         = 20
+      TOK_PLUS         = 21
+      TOK_MINUS        = 22
+      TOK_STAR         = 23
+      TOK_SLASH        = 24
+      TOK_PERCENT      = 25
+      TOK_BANG         = 26
+      TOK_TILDE        = 27
+      TOK_AMP          = 28
+      TOK_PIPE         = 29
+      TOK_CARET        = 30
+      TOK_AMPAMP       = 31  # &&
+      TOK_PIPEPIPE     = 32  # ||
+      TOK_PLUSEQ       = 33  # +=
+      TOK_MINUSEQ      = 34  # -=
+      TOK_STAREQ       = 35  # *=
+      TOK_SLASHEQ      = 36  # /=
+      TOK_PERCENTEQ    = 37  # %=
+      TOK_QUESTION     = 38  # ?
+      TOK_PLUSPLUS      = 39  # ++
+      TOK_MINUSMINUS   = 40  # --
+      TOK_EQEQEQ       = 41  # ===
+      TOK_NOTEQEQ      = 42  # !==
+      TOK_LSHIFT       = 43  # <<
+      TOK_RSHIFT       = 44  # >>
+      TOK_ARROW        = 45  # =>
 
-    # A single token produced by the tokenizer.
-    Token = Struct.new(:kind, :value, :line, :col, keyword_init: true)
+      # A single token produced by the tokenizer.
+      Token = Struct.new(:kind, :value, :line, :col, keyword_init: true)
+    end
 
     # -----------------------------------------------------------------------
     # Type mappings
     # -----------------------------------------------------------------------
 
-    TYPE_MAP = {
+    TS_TYPE_MAP = {
       "bigint"          => "bigint",
       "boolean"         => "boolean",
       "ByteString"      => "ByteString",
@@ -88,8 +90,8 @@ module RunarCompiler
 
     # Map a TypeScript type name to a Runar TypeNode.
     def self.parse_ts_type_name(name)
-      if TYPE_MAP.key?(name)
-        return PrimitiveType.new(name: TYPE_MAP[name])
+      if TS_TYPE_MAP.key?(name)
+        return PrimitiveType.new(name: TS_TYPE_MAP[name])
       end
 
       if primitive_type?(name)
@@ -102,87 +104,82 @@ module RunarCompiler
     end
 
     # -----------------------------------------------------------------------
-    # Tokenizer helpers
+    # Tokenizer helpers, operator tables, and tokenizer (namespaced)
     # -----------------------------------------------------------------------
 
-    HEX_CHARS = "0123456789abcdefABCDEF"
+    module TsTokens
+      HEX_CHARS = "0123456789abcdefABCDEF"
 
-    module_function
+      module_function
 
-    def ident_start?(ch)
-      (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || ch == "_" || ch == "$"
-    end
+      def ident_start?(ch)
+        (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || ch == "_" || ch == "$"
+      end
 
-    def ident_part?(ch)
-      ident_start?(ch) || (ch >= "0" && ch <= "9")
-    end
+      def ident_part?(ch)
+        ident_start?(ch) || (ch >= "0" && ch <= "9")
+      end
 
-    def hex_digit?(ch)
-      HEX_CHARS.include?(ch)
-    end
+      def hex_digit?(ch)
+        HEX_CHARS.include?(ch)
+      end
 
-    public
+      THREE_CHAR_OPS = {
+        "===" => TOK_EQEQEQ,
+        "!==" => TOK_NOTEQEQ,
+      }.freeze
 
-    # -----------------------------------------------------------------------
-    # Tokenizer
-    # -----------------------------------------------------------------------
+      TWO_CHAR_OPS = {
+        "==" => TOK_EQEQ,
+        "!=" => TOK_NOTEQ,
+        "<=" => TOK_LTEQ,
+        ">=" => TOK_GTEQ,
+        "+=" => TOK_PLUSEQ,
+        "-=" => TOK_MINUSEQ,
+        "*=" => TOK_STAREQ,
+        "/=" => TOK_SLASHEQ,
+        "%=" => TOK_PERCENTEQ,
+        "&&" => TOK_AMPAMP,
+        "||" => TOK_PIPEPIPE,
+        "++" => TOK_PLUSPLUS,
+        "--" => TOK_MINUSMINUS,
+        "<<" => TOK_LSHIFT,
+        ">>" => TOK_RSHIFT,
+        "=>" => TOK_ARROW,
+      }.freeze
 
-    THREE_CHAR_OPS = {
-      "===" => TOK_EQEQEQ,
-      "!==" => TOK_NOTEQEQ,
-    }.freeze
+      ONE_CHAR_OPS = {
+        "(" => TOK_LPAREN,
+        ")" => TOK_RPAREN,
+        "[" => TOK_LBRACKET,
+        "]" => TOK_RBRACKET,
+        "{" => TOK_LBRACE,
+        "}" => TOK_RBRACE,
+        "," => TOK_COMMA,
+        "." => TOK_DOT,
+        ":" => TOK_COLON,
+        ";" => TOK_SEMICOLON,
+        "=" => TOK_ASSIGN,
+        "<" => TOK_LT,
+        ">" => TOK_GT,
+        "+" => TOK_PLUS,
+        "-" => TOK_MINUS,
+        "*" => TOK_STAR,
+        "/" => TOK_SLASH,
+        "%" => TOK_PERCENT,
+        "!" => TOK_BANG,
+        "~" => TOK_TILDE,
+        "&" => TOK_AMP,
+        "|" => TOK_PIPE,
+        "^" => TOK_CARET,
+        "?" => TOK_QUESTION,
+      }.freeze
 
-    TWO_CHAR_OPS = {
-      "==" => TOK_EQEQ,
-      "!=" => TOK_NOTEQ,
-      "<=" => TOK_LTEQ,
-      ">=" => TOK_GTEQ,
-      "+=" => TOK_PLUSEQ,
-      "-=" => TOK_MINUSEQ,
-      "*=" => TOK_STAREQ,
-      "/=" => TOK_SLASHEQ,
-      "%=" => TOK_PERCENTEQ,
-      "&&" => TOK_AMPAMP,
-      "||" => TOK_PIPEPIPE,
-      "++" => TOK_PLUSPLUS,
-      "--" => TOK_MINUSMINUS,
-      "<<" => TOK_LSHIFT,
-      ">>" => TOK_RSHIFT,
-      "=>" => TOK_ARROW,
-    }.freeze
-
-    ONE_CHAR_OPS = {
-      "(" => TOK_LPAREN,
-      ")" => TOK_RPAREN,
-      "[" => TOK_LBRACKET,
-      "]" => TOK_RBRACKET,
-      "{" => TOK_LBRACE,
-      "}" => TOK_RBRACE,
-      "," => TOK_COMMA,
-      "." => TOK_DOT,
-      ":" => TOK_COLON,
-      ";" => TOK_SEMICOLON,
-      "=" => TOK_ASSIGN,
-      "<" => TOK_LT,
-      ">" => TOK_GT,
-      "+" => TOK_PLUS,
-      "-" => TOK_MINUS,
-      "*" => TOK_STAR,
-      "/" => TOK_SLASH,
-      "%" => TOK_PERCENT,
-      "!" => TOK_BANG,
-      "~" => TOK_TILDE,
-      "&" => TOK_AMP,
-      "|" => TOK_PIPE,
-      "^" => TOK_CARET,
-      "?" => TOK_QUESTION,
-    }.freeze
-
-    # Tokenize a source string into an array of Token structs.
-    #
-    # @param source [String]
-    # @return [Array<Token>]
-    def self.tokenize(source)
+      # Tokenize a source string into an array of Token structs.
+      #
+      # @param source [String]
+      # @return [Array<Token>]
+      def self.tokenize(source)
       tokens = []
       line = 1
       col = 0
@@ -400,12 +397,20 @@ module RunarCompiler
       tokens << Token.new(kind: TOK_EOF, value: "", line: line, col: col)
       tokens
     end
+    end # module TsTokens
 
     # -----------------------------------------------------------------------
     # Parser
     # -----------------------------------------------------------------------
 
     class TsParser
+      include TsTokens
+      # Re-define token constants directly on the class so that Ruby's lexical
+      # constant lookup finds them here instead of identically-named constants
+      # that parser_ruby.rb defines at the Frontend module level.
+      TsTokens.constants.each { |c| const_set(c, TsTokens.const_get(c)) unless c == :Token }
+      Token = TsTokens::Token
+
       def initialize(file_name)
         @file_name = file_name
         @tokens = []
@@ -1498,7 +1503,7 @@ module RunarCompiler
     # @return [ParseResult]
     def self.parse_ts(source, file_name)
       p = TsParser.new(file_name)
-      p.tokens = tokenize(source)
+      p.tokens = TsTokens.tokenize(source)
       p.pos = 0
 
       begin

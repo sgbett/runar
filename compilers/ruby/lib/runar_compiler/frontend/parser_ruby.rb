@@ -26,106 +26,105 @@ require_relative "parse_result"
 module RunarCompiler
   module Frontend
     # -----------------------------------------------------------------------
-    # Token types
+    # Token types (namespaced to avoid collision with other parsers)
     # -----------------------------------------------------------------------
 
-    TOK_EOF        = 0
-    TOK_IDENT      = 1
-    TOK_NUMBER     = 2
-    TOK_HEXSTRING  = 3   # single-quoted string -> hex ByteString
-    TOK_STRING     = 4   # double-quoted string
-    TOK_SYMBOL     = 5   # :name
-    TOK_IVAR       = 6   # @name
-    TOK_LPAREN     = 7   # (
-    TOK_RPAREN     = 8   # )
-    TOK_LBRACKET   = 9   # [
-    TOK_RBRACKET   = 10  # ]
-    TOK_COMMA      = 11  # ,
-    TOK_DOT        = 12  # .
-    TOK_COLON      = 13  # :
-    TOK_COLONCOLON = 14  # ::
-    TOK_ASSIGN     = 15  # =
-    TOK_EQEQ       = 16  # ==
-    TOK_NOTEQ      = 17  # !=
-    TOK_LT         = 18  # <
-    TOK_LTEQ       = 19  # <=
-    TOK_GT         = 20  # >
-    TOK_GTEQ       = 21  # >=
-    TOK_PLUS       = 22  # +
-    TOK_MINUS      = 23  # -
-    TOK_STAR       = 24  # *
-    TOK_SLASH      = 25  # /
-    TOK_PERCENT    = 26  # %
-    TOK_STARSTAR   = 27  # **
-    TOK_BANG       = 28  # !
-    TOK_TILDE      = 29  # ~
-    TOK_AMP        = 30  # &
-    TOK_PIPE       = 31  # |
-    TOK_CARET      = 32  # ^
-    TOK_AMPAMP     = 33  # &&
-    TOK_PIPEPIPE   = 34  # ||
-    TOK_LSHIFT     = 35  # <<
-    TOK_RSHIFT     = 36  # >>
-    TOK_PLUSEQ     = 37  # +=
-    TOK_MINUSEQ    = 38  # -=
-    TOK_STAREQ     = 39  # *=
-    TOK_SLASHEQ    = 40  # /=
-    TOK_PERCENTEQ  = 41  # %=
-    TOK_DOTDOT     = 42  # ..
-    TOK_DOTDOTDOT  = 43  # ...
-    TOK_QUESTION   = 44  # ?
-    TOK_NEWLINE    = 45
+    module RubyTokens
+      TOK_EOF        = 0
+      TOK_IDENT      = 1
+      TOK_NUMBER     = 2
+      TOK_HEXSTRING  = 3   # single-quoted string -> hex ByteString
+      TOK_STRING     = 4   # double-quoted string
+      TOK_SYMBOL     = 5   # :name
+      TOK_IVAR       = 6   # @name
+      TOK_LPAREN     = 7   # (
+      TOK_RPAREN     = 8   # )
+      TOK_LBRACKET   = 9   # [
+      TOK_RBRACKET   = 10  # ]
+      TOK_COMMA      = 11  # ,
+      TOK_DOT        = 12  # .
+      TOK_COLON      = 13  # :
+      TOK_COLONCOLON = 14  # ::
+      TOK_ASSIGN     = 15  # =
+      TOK_EQEQ       = 16  # ==
+      TOK_NOTEQ      = 17  # !=
+      TOK_LT         = 18  # <
+      TOK_LTEQ       = 19  # <=
+      TOK_GT         = 20  # >
+      TOK_GTEQ       = 21  # >=
+      TOK_PLUS       = 22  # +
+      TOK_MINUS      = 23  # -
+      TOK_STAR       = 24  # *
+      TOK_SLASH      = 25  # /
+      TOK_PERCENT    = 26  # %
+      TOK_STARSTAR   = 27  # **
+      TOK_BANG       = 28  # !
+      TOK_TILDE      = 29  # ~
+      TOK_AMP        = 30  # &
+      TOK_PIPE       = 31  # |
+      TOK_CARET      = 32  # ^
+      TOK_AMPAMP     = 33  # &&
+      TOK_PIPEPIPE   = 34  # ||
+      TOK_LSHIFT     = 35  # <<
+      TOK_RSHIFT     = 36  # >>
+      TOK_PLUSEQ     = 37  # +=
+      TOK_MINUSEQ    = 38  # -=
+      TOK_STAREQ     = 39  # *=
+      TOK_SLASHEQ    = 40  # /=
+      TOK_PERCENTEQ  = 41  # %=
+      TOK_DOTDOT     = 42  # ..
+      TOK_DOTDOTDOT  = 43  # ...
+      TOK_QUESTION   = 44  # ?
+      TOK_NEWLINE    = 45
 
-    # Keywords
-    TOK_CLASS   = 50
-    TOK_DEF     = 51
-    TOK_IF      = 52
-    TOK_ELSIF   = 53
-    TOK_ELSE    = 54
-    TOK_UNLESS  = 55
-    TOK_FOR     = 56
-    TOK_IN      = 57
-    TOK_END     = 58
-    TOK_RETURN  = 59
-    TOK_TRUE    = 60
-    TOK_FALSE   = 61
-    TOK_NIL     = 62
-    TOK_AND     = 63
-    TOK_OR      = 64
-    TOK_NOT     = 65
-    TOK_SUPER   = 66
-    TOK_REQUIRE = 67
-    TOK_ASSERT  = 68
-    TOK_DO      = 69
+      # Keywords
+      TOK_CLASS   = 50
+      TOK_DEF     = 51
+      TOK_IF      = 52
+      TOK_ELSIF   = 53
+      TOK_ELSE    = 54
+      TOK_UNLESS  = 55
+      TOK_FOR     = 56
+      TOK_IN      = 57
+      TOK_END     = 58
+      TOK_RETURN  = 59
+      TOK_TRUE    = 60
+      TOK_FALSE   = 61
+      TOK_NIL     = 62
+      TOK_AND     = 63
+      TOK_OR      = 64
+      TOK_NOT     = 65
+      TOK_SUPER   = 66
+      TOK_REQUIRE = 67
+      TOK_ASSERT  = 68
+      TOK_DO      = 69
 
-    KEYWORDS = {
-      "class"   => TOK_CLASS,
-      "def"     => TOK_DEF,
-      "if"      => TOK_IF,
-      "elsif"   => TOK_ELSIF,
-      "else"    => TOK_ELSE,
-      "unless"  => TOK_UNLESS,
-      "for"     => TOK_FOR,
-      "in"      => TOK_IN,
-      "end"     => TOK_END,
-      "return"  => TOK_RETURN,
-      "true"    => TOK_TRUE,
-      "false"   => TOK_FALSE,
-      "nil"     => TOK_NIL,
-      "and"     => TOK_AND,
-      "or"      => TOK_OR,
-      "not"     => TOK_NOT,
-      "super"   => TOK_SUPER,
-      "require" => TOK_REQUIRE,
-      "assert"  => TOK_ASSERT,
-      "do"      => TOK_DO,
-    }.freeze
+      KEYWORDS = {
+        "class"   => TOK_CLASS,
+        "def"     => TOK_DEF,
+        "if"      => TOK_IF,
+        "elsif"   => TOK_ELSIF,
+        "else"    => TOK_ELSE,
+        "unless"  => TOK_UNLESS,
+        "for"     => TOK_FOR,
+        "in"      => TOK_IN,
+        "end"     => TOK_END,
+        "return"  => TOK_RETURN,
+        "true"    => TOK_TRUE,
+        "false"   => TOK_FALSE,
+        "nil"     => TOK_NIL,
+        "and"     => TOK_AND,
+        "or"      => TOK_OR,
+        "not"     => TOK_NOT,
+        "super"   => TOK_SUPER,
+        "require" => TOK_REQUIRE,
+        "assert"  => TOK_ASSERT,
+        "do"      => TOK_DO,
+      }.freeze
 
-    # -----------------------------------------------------------------------
-    # Token
-    # -----------------------------------------------------------------------
-
-    Token = Struct.new(:kind, :value, :line, :col, keyword_init: true)
+      # A single token produced by the tokenizer.
+      Token = Struct.new(:kind, :value, :line, :col, keyword_init: true)
+    end # module RubyTokens (token constants, keywords, Token struct)
 
     # -----------------------------------------------------------------------
     # Special name mappings (snake_case -> camelCase)
@@ -229,7 +228,7 @@ module RunarCompiler
     # Type mapping
     # -----------------------------------------------------------------------
 
-    TYPE_MAP = {
+    RB_TYPE_MAP = {
       "Bigint"          => "bigint",
       "Integer"         => "bigint",
       "Int"             => "bigint",
@@ -248,7 +247,7 @@ module RunarCompiler
 
     # Map a Ruby type name to a Runar TypeNode.
     def self.map_rb_type(name)
-      mapped = TYPE_MAP.fetch(name, name)
+      mapped = RB_TYPE_MAP.fetch(name, name)
       if primitive_type?(mapped)
         PrimitiveType.new(name: mapped)
       else
@@ -257,60 +256,53 @@ module RunarCompiler
     end
 
     # -----------------------------------------------------------------------
-    # Single-character token map
+    # Single-character token map, helpers, and tokenizer (namespaced)
     # -----------------------------------------------------------------------
 
-    SINGLE_CHAR_TOKENS = {
-      "," => TOK_COMMA,
-      "." => TOK_DOT,
-      ":" => TOK_COLON,
-      "+" => TOK_PLUS,
-      "-" => TOK_MINUS,
-      "*" => TOK_STAR,
-      "/" => TOK_SLASH,
-      "%" => TOK_PERCENT,
-      "!" => TOK_BANG,
-      "~" => TOK_TILDE,
-      "&" => TOK_AMP,
-      "|" => TOK_PIPE,
-      "^" => TOK_CARET,
-      "?" => TOK_QUESTION,
-      "<" => TOK_LT,
-      ">" => TOK_GT,
-      "=" => TOK_ASSIGN,
-    }.freeze
+    module RubyTokens
+      SINGLE_CHAR_TOKENS = {
+        "," => TOK_COMMA,
+        "." => TOK_DOT,
+        ":" => TOK_COLON,
+        "+" => TOK_PLUS,
+        "-" => TOK_MINUS,
+        "*" => TOK_STAR,
+        "/" => TOK_SLASH,
+        "%" => TOK_PERCENT,
+        "!" => TOK_BANG,
+        "~" => TOK_TILDE,
+        "&" => TOK_AMP,
+        "|" => TOK_PIPE,
+        "^" => TOK_CARET,
+        "?" => TOK_QUESTION,
+        "<" => TOK_LT,
+        ">" => TOK_GT,
+        "=" => TOK_ASSIGN,
+      }.freeze
 
-    # Compound assignment operators -> binary op string
-    COMPOUND_OPS = {
-      TOK_PLUSEQ    => "+",
-      TOK_MINUSEQ   => "-",
-      TOK_STAREQ    => "*",
-      TOK_SLASHEQ   => "/",
-      TOK_PERCENTEQ => "%",
-    }.freeze
+      # Compound assignment operators -> binary op string
+      COMPOUND_OPS = {
+        TOK_PLUSEQ    => "+",
+        TOK_MINUSEQ   => "-",
+        TOK_STAREQ    => "*",
+        TOK_SLASHEQ   => "/",
+        TOK_PERCENTEQ => "%",
+      }.freeze
 
-    # -----------------------------------------------------------------------
-    # Tokenizer helpers
-    # -----------------------------------------------------------------------
+      def self.ident_start?(ch)
+        ch.match?(/[A-Za-z_]/)
+      end
 
-    def self.ident_start?(ch)
-      ch.match?(/[A-Za-z_]/)
-    end
+      def self.ident_part?(ch)
+        ch.match?(/[A-Za-z0-9_]/)
+      end
 
-    def self.ident_part?(ch)
-      ch.match?(/[A-Za-z0-9_]/)
-    end
-
-    # -----------------------------------------------------------------------
-    # Tokenizer
-    # -----------------------------------------------------------------------
-
-    # Tokenize a Ruby Runar source file line by line.
-    #
-    # The tokenizer processes one line at a time, tracking parenthesis depth
-    # to suppress NEWLINE tokens inside multi-line expressions. This matches
-    # the behavior of the TypeScript reference implementation.
-    def self.tokenize(source)
+      # Tokenize a Ruby Runar source file line by line.
+      #
+      # The tokenizer processes one line at a time, tracking parenthesis depth
+      # to suppress NEWLINE tokens inside multi-line expressions. This matches
+      # the behavior of the TypeScript reference implementation.
+      def self.tokenize(source)
       tokens = []
       lines = source.split("\n", -1)
       paren_depth = 0
@@ -570,6 +562,7 @@ module RunarCompiler
       tokens << Token.new(kind: TOK_EOF, value: "", line: lines.length + 1, col: 1)
       tokens
     end
+    end # module RubyTokens (token maps, helpers, tokenizer)
 
     # -----------------------------------------------------------------------
     # Bare method call rewriting
@@ -638,6 +631,8 @@ module RunarCompiler
 
     # Recursive descent parser for Ruby-format Runar contracts.
     class RbParser
+      include RubyTokens
+
       def initialize(tokens, file_name)
         @tokens = tokens
         @pos = 0
@@ -1778,7 +1773,7 @@ module RunarCompiler
     # @param file_name [String] the source file name
     # @return [ParseResult]
     def self.parse_ruby(source, file_name = "contract.runar.rb")
-      tokens = tokenize(source)
+      tokens = RubyTokens.tokenize(source)
       parser = RbParser.new(tokens, file_name)
       parser.parse
     end

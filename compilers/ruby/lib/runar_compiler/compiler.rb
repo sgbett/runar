@@ -127,10 +127,13 @@ module RunarCompiler
     elsif lower.end_with?(".runar.rb")
       require_relative "frontend/parser_ruby"
       Frontend.parse_ruby(source, file_name)
+    elsif lower.end_with?(".runar.zig")
+      require_relative "frontend/parser_zig"
+      Frontend.parse_zig(source, file_name)
     else
       raise ArgumentError,
             "Unsupported source format: #{file_name}. " \
-            "Expected .runar.ts, .runar.sol, .runar.move, .runar.go, .runar.rs, .runar.py, or .runar.rb"
+            "Expected .runar.ts, .runar.sol, .runar.move, .runar.go, .runar.rs, .runar.py, .runar.rb, or .runar.zig"
     end
   end
   private_class_method :_parse_source
@@ -282,7 +285,7 @@ module RunarCompiler
   # Compile a source file through all passes to a Runar artifact.
   #
   # Supports .runar.ts, .runar.sol, .runar.move, .runar.go, .runar.rs,
-  # .runar.py, and .runar.rb extensions (dispatched by file extension).
+  # .runar.py, .runar.rb, and .runar.zig extensions (dispatched by file extension).
   #
   # @param source_path [String] path to the source file
   # @param disable_constant_folding [Boolean] skip constant folding pass

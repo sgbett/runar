@@ -177,6 +177,61 @@ class TestCompiler < Minitest::Test
   end
 
   # ------------------------------------------------------------------
+  # All 28 conformance golden-file tests
+  # ------------------------------------------------------------------
+  # Each test loads the source (preferring .runar.ts, falling back to
+  # .runar.zig for tests that only have Zig sources), compiles via the
+  # Ruby compiler, and compares the hex output to expected-script.hex.
+
+  # Map: test_dir_name => source_file_name
+  CONFORMANCE_TESTS = {
+    'arithmetic'          => 'arithmetic.runar.ts',
+    'auction'             => 'auction.runar.zig',
+    'basic-p2pkh'         => 'basic-p2pkh.runar.ts',
+    'blake3'              => 'blake3.runar.zig',
+    'boolean-logic'       => 'boolean-logic.runar.ts',
+    'bounded-loop'        => 'bounded-loop.runar.ts',
+    'convergence-proof'   => 'convergence-proof.runar.ts',
+    'covenant-vault'      => 'covenant-vault.runar.zig',
+    'ec-demo'             => 'ec-demo.runar.ts',
+    'ec-primitives'       => 'ec-primitives.runar.ts',
+    'escrow'              => 'escrow.runar.zig',
+    'function-patterns'   => 'function-patterns.runar.ts',
+    'if-else'             => 'if-else.runar.ts',
+    'if-without-else'     => 'if-without-else.runar.ts',
+    'math-demo'           => 'math-demo.runar.ts',
+    'multi-method'        => 'multi-method.runar.ts',
+    'oracle-price'        => 'oracle-price.runar.ts',
+    'post-quantum-slhdsa' => 'post-quantum-slhdsa.runar.ts',
+    'post-quantum-wallet' => 'post-quantum-wallet.runar.ts',
+    'post-quantum-wots'   => 'post-quantum-wots.runar.ts',
+    'property-initializers' => 'property-initializers.runar.ts',
+    'schnorr-zkp'         => 'schnorr-zkp.runar.zig',
+    'sphincs-wallet'      => 'sphincs-wallet.runar.ts',
+    'stateful'            => 'stateful.runar.ts',
+    'stateful-bytestring' => 'stateful-bytestring.runar.ts',
+    'stateful-counter'    => 'stateful-counter.runar.ts',
+    'token-ft'            => 'token-ft.runar.zig',
+    'token-nft'           => 'token-nft.runar.zig',
+  }.freeze
+
+  CONFORMANCE_TESTS.each do |test_dir, source_file|
+    method_name = "test_conformance_#{test_dir.gsub('-', '_')}"
+    define_method(method_name) do
+      skip("conformance dir not found") unless File.directory?(CONFORMANCE_DIR)
+
+      source_path = File.join(CONFORMANCE_DIR, test_dir, source_file)
+      hex_path = File.join(CONFORMANCE_DIR, test_dir, 'expected-script.hex')
+      skip("conformance files not found for #{test_dir}") unless File.exist?(source_path) && File.exist?(hex_path)
+
+      expected_hex = File.read(hex_path).strip
+      artifact = RunarCompiler.compile_from_source(source_path, disable_constant_folding: true)
+      assert_equal expected_hex.downcase, artifact.script.downcase,
+                   "#{test_dir}: compiled script should match conformance golden file"
+    end
+  end
+
+  # ------------------------------------------------------------------
   # Error handling tests
   # ------------------------------------------------------------------
 
