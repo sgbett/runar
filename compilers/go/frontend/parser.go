@@ -37,6 +37,7 @@ func (r *ParseResult) ErrorStrings() []string {
 //   - .runar.py -> ParsePython
 //   - .runar.rs -> ParseRustMacro
 //   - .runar.rb -> ParseRuby
+//   - .runar.zig -> ParseZig
 //   - default -> Parse (existing TypeScript parser)
 func ParseSource(source []byte, fileName string) *ParseResult {
 	lower := strings.ToLower(fileName)
@@ -53,6 +54,8 @@ func ParseSource(source []byte, fileName string) *ParseResult {
 		return ParseRustMacro(source, fileName)
 	case strings.HasSuffix(lower, ".runar.rb"):
 		return ParseRuby(source, fileName)
+	case strings.HasSuffix(lower, ".runar.zig"):
+		return ParseZig(source, fileName)
 	default:
 		return Parse(source, fileName)
 	}
@@ -629,7 +632,7 @@ func (p *parseContext) parseVariableDecl(node *sitter.Node) Statement {
 		return nil
 	}
 	if initExpr == nil {
-		initExpr = BigIntLiteral{Value: 0}
+		initExpr = BigIntLiteral{Value: big.NewInt(0)}
 	}
 
 	return VariableDeclStmt{
@@ -824,7 +827,7 @@ func (p *parseContext) parseForStatement(node *sitter.Node) Statement {
 				initStmt = VariableDeclStmt{
 					Name:           "_i",
 					Mutable:        true,
-					Init:           BigIntLiteral{Value: 0},
+					Init:           BigIntLiteral{Value: big.NewInt(0)},
 					SourceLocation: loc,
 				}
 			}
@@ -833,7 +836,7 @@ func (p *parseContext) parseForStatement(node *sitter.Node) Statement {
 		initStmt = VariableDeclStmt{
 			Name:           "_i",
 			Mutable:        true,
-			Init:           BigIntLiteral{Value: 0},
+			Init:           BigIntLiteral{Value: big.NewInt(0)},
 			SourceLocation: loc,
 		}
 	}
@@ -857,7 +860,7 @@ func (p *parseContext) parseForStatement(node *sitter.Node) Statement {
 	if updateNode != nil {
 		update = p.parseForUpdate(updateNode, loc)
 	} else {
-		update = ExpressionStmt{Expr: BigIntLiteral{Value: 0}, SourceLocation: loc}
+		update = ExpressionStmt{Expr: BigIntLiteral{Value: big.NewInt(0)}, SourceLocation: loc}
 	}
 
 	// Parse body
@@ -903,7 +906,7 @@ func (p *parseContext) parseVariableDeclFromForInit(node *sitter.Node) *Variable
 func (p *parseContext) parseForUpdate(node *sitter.Node, loc SourceLocation) Statement {
 	expr := p.parseExpression(node)
 	if expr == nil {
-		return ExpressionStmt{Expr: BigIntLiteral{Value: 0}, SourceLocation: loc}
+		return ExpressionStmt{Expr: BigIntLiteral{Value: big.NewInt(0)}, SourceLocation: loc}
 	}
 	return ExpressionStmt{Expr: expr, SourceLocation: loc}
 }
@@ -971,24 +974,18 @@ func (p *parseContext) parseExpression(node *sitter.Node) Expression {
 		if strings.HasSuffix(text, "n") {
 			text = text[:len(text)-1]
 		}
-		// Parse with big.Int to avoid silent truncation of values > 2^63-1.
-		// Fall back to strconv.ParseInt for hex/octal/binary prefix support,
-		// then validate the result fits in int64.
+		// Parse with big.Int for arbitrary-precision support.
 		bi := new(big.Int)
 		if _, ok := bi.SetString(text, 0); !ok {
-			// Retry without base prefix detection for edge cases
-			val, err := strconv.ParseInt(text, 10, 64)
-			if err != nil {
+			// Retry with decimal base for edge cases
+			bi2 := new(big.Int)
+			if _, ok2 := bi2.SetString(text, 10); !ok2 {
 				p.addError(fmt.Sprintf("invalid integer literal: %s", text))
-				return BigIntLiteral{Value: 0}
+				return BigIntLiteral{Value: big.NewInt(0)}
 			}
-			return BigIntLiteral{Value: val}
+			return BigIntLiteral{Value: bi2}
 		}
-		if !bi.IsInt64() {
-			p.addError(fmt.Sprintf("integer literal %s overflows int64", text))
-			return BigIntLiteral{Value: 0}
-		}
-		return BigIntLiteral{Value: bi.Int64()}
+		return BigIntLiteral{Value: bi}
 
 	case "true":
 		return BoolLiteral{Value: true}
@@ -1060,16 +1057,16 @@ func (p *parseContext) parseBinaryExpression(node *sitter.Node) Expression {
 	}
 
 	if leftNode == nil || rightNode == nil {
-		return BigIntLiteral{Value: 0}
+		return BigIntLiteral{Value: big.NewInt(0)}
 	}
 
 	left := p.parseExpression(leftNode)
 	right := p.parseExpression(rightNode)
 	if left == nil {
-		left = BigIntLiteral{Value: 0}
+		left = BigIntLiteral{Value: big.NewInt(0)}
 	}
 	if right == nil {
-		right = BigIntLiteral{Value: 0}
+		right = BigIntLiteral{Value: big.NewInt(0)}
 	}
 
 	op := ""
@@ -1101,12 +1098,12 @@ func (p *parseContext) parseUnaryExpression(node *sitter.Node) Expression {
 	}
 
 	if argNode == nil {
-		return BigIntLiteral{Value: 0}
+		return BigIntLiteral{Value: big.NewInt(0)}
 	}
 
 	operand := p.parseExpression(argNode)
 	if operand == nil {
-		operand = BigIntLiteral{Value: 0}
+		operand = BigIntLiteral{Value: big.NewInt(0)}
 	}
 
 	op := ""
@@ -1136,12 +1133,12 @@ func (p *parseContext) parseUpdateExpression(node *sitter.Node) Expression {
 	}
 
 	if argNode == nil {
-		return BigIntLiteral{Value: 0}
+		return BigIntLiteral{Value: big.NewInt(0)}
 	}
 
 	operand := p.parseExpression(argNode)
 	if operand == nil {
-		operand = BigIntLiteral{Value: 0}
+		operand = BigIntLiteral{Value: big.NewInt(0)}
 	}
 
 	opText := ""
@@ -1171,7 +1168,7 @@ func (p *parseContext) parseCallExpression(node *sitter.Node) Expression {
 	}
 
 	if funcNode == nil {
-		return BigIntLiteral{Value: 0}
+		return BigIntLiteral{Value: big.NewInt(0)}
 	}
 
 	callee := p.parseExpression(funcNode)
@@ -1216,7 +1213,7 @@ func (p *parseContext) parseMemberExpression(node *sitter.Node) Expression {
 	}
 
 	if objNode == nil || propNode == nil {
-		return BigIntLiteral{Value: 0}
+		return BigIntLiteral{Value: big.NewInt(0)}
 	}
 
 	propName := p.nodeText(propNode)
@@ -1239,13 +1236,13 @@ func (p *parseContext) parseSubscriptExpression(node *sitter.Node) Expression {
 	indexNode := node.ChildByFieldName("index")
 
 	if objNode == nil || indexNode == nil {
-		return BigIntLiteral{Value: 0}
+		return BigIntLiteral{Value: big.NewInt(0)}
 	}
 
 	object := p.parseExpression(objNode)
 	index := p.parseExpression(indexNode)
 	if object == nil || index == nil {
-		return BigIntLiteral{Value: 0}
+		return BigIntLiteral{Value: big.NewInt(0)}
 	}
 
 	return IndexAccessExpr{Object: object, Index: index}
@@ -1257,7 +1254,7 @@ func (p *parseContext) parseTernaryExpression(node *sitter.Node) Expression {
 	altNode := node.ChildByFieldName("alternative")
 
 	if condNode == nil || consNode == nil || altNode == nil {
-		return BigIntLiteral{Value: 0}
+		return BigIntLiteral{Value: big.NewInt(0)}
 	}
 
 	condition := p.parseExpression(condNode)
@@ -1265,7 +1262,7 @@ func (p *parseContext) parseTernaryExpression(node *sitter.Node) Expression {
 	alternate := p.parseExpression(altNode)
 
 	if condition == nil || consequent == nil || alternate == nil {
-		return BigIntLiteral{Value: 0}
+		return BigIntLiteral{Value: big.NewInt(0)}
 	}
 
 	return TernaryExpr{

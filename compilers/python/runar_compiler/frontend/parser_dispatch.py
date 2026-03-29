@@ -46,6 +46,9 @@ def parse_source(source: str, file_name: str) -> ParseResult:
     elif lower.endswith(".runar.rb"):
         from runar_compiler.frontend.parser_ruby import parse_ruby
         return parse_ruby(source, file_name)
+    elif lower.endswith(".runar.zig"):
+        from runar_compiler.frontend.parser_zig import parse_zig
+        return parse_zig(source, file_name)
     else:
         return ParseResult(errors=[Diagnostic(
             message=f"unsupported file extension: {file_name}",

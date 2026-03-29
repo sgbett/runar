@@ -874,14 +874,14 @@ fn parse_expression(expr: &Expr, file: &str, errors: &mut Vec<Diagnostic>) -> Ex
 
         Expr::Lit(Lit::BigInt(bigint)) => {
             // Parse the BigInt value -- SWC gives the numeric part
-            let val = bigint_to_i64(bigint);
+            let val = bigint_to_i128(bigint);
             Expression::BigIntLiteral { value: val }
         }
 
         Expr::Lit(Lit::Num(num)) => {
             // Plain numeric literal -- treat as bigint for Rúnar
             Expression::BigIntLiteral {
-                value: num.value as i64,
+                value: num.value as i128,
             }
         }
 
@@ -1111,12 +1111,12 @@ fn parse_member_expression(
 // ---------------------------------------------------------------------------
 
 /// Convert SWC BigInt to i64. SWC represents BigInt as a boxed `num_bigint::BigInt`.
-fn bigint_to_i64(bigint_lit: &swc::BigInt) -> i64 {
+fn bigint_to_i128(bigint_lit: &swc::BigInt) -> i128 {
     // SWC BigInt has a `value` field of type `Box<num_bigint::BigInt>`.
-    // We convert via string representation to i64.
+    // We convert via string representation to i128.
     use std::str::FromStr;
     let s = bigint_lit.value.to_string();
-    i64::from_str(&s).unwrap_or(0)
+    i128::from_str(&s).unwrap_or(0)
 }
 
 // ---------------------------------------------------------------------------
@@ -1150,6 +1150,9 @@ pub fn parse_source(source: &str, file_name: Option<&str>) -> ParseResult {
     }
     if name.ends_with(".runar.rb") {
         return super::parser_ruby::parse_ruby(source, file_name);
+    }
+    if name.ends_with(".runar.zig") {
+        return super::parser_zig::parse_zig(source, file_name);
     }
     // Default: TypeScript parser
     parse(source, file_name)

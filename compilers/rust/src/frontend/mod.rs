@@ -18,5 +18,6 @@ pub mod parser_python;
 pub mod parser_ruby;
 pub mod parser_rustmacro;
 pub mod parser_sol;
+pub mod parser_zig;
 pub mod typecheck;
 pub mod validator;
