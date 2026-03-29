@@ -134,6 +134,80 @@ class RunarContract:
 
         return txid, tx
 
+    def deploy_with_wallet(
+        self,
+        satoshis: int = 1,
+        description: str = '',
+    ) -> tuple[str, int]:
+        """Deploy the contract using a BRC-100 wallet.
+
+        The wallet owns the coins and creates the transaction itself via
+        ``create_action()``.  Requires the contract to be connected to a
+        :class:`WalletProvider` (via ``connect()``).
+
+        Args:
+            satoshis: Satoshis to lock in the contract output (default: 1).
+            description: Human-readable description for the wallet action.
+
+        Returns:
+            (txid, output_index) tuple.
+        """
+        from runar.sdk.wallet import WalletProvider
+
+        if not isinstance(self._provider, WalletProvider):
+            raise RuntimeError(
+                'deploy_with_wallet requires a connected WalletProvider. '
+                'Call connect(wallet_provider, signer) first.'
+            )
+
+        wallet_provider: WalletProvider = self._provider
+        wallet = wallet_provider.wallet
+        basket = wallet_provider.basket
+
+        locking_script = self.get_locking_script()
+        desc = description or 'Runar contract deployment'
+
+        result = wallet.create_action(
+            description=desc,
+            outputs=[{
+                'locking_script': locking_script,
+                'satoshis': satoshis,
+                'description': f'Deploy {self.artifact.contract_name}',
+                'basket': basket,
+            }],
+        )
+
+        txid = result.get('txid', '')
+        output_index = 0
+
+        # If the wallet returned a raw tx, try to find the exact output index
+        raw_tx = result.get('raw_tx', '')
+        actual_satoshis = satoshis
+        if raw_tx:
+            try:
+                from runar.sdk.wallet import _parse_raw_tx_to_data
+                tx_data = _parse_raw_tx_to_data(txid, raw_tx)
+                for i, out in enumerate(tx_data.outputs):
+                    if out.script == locking_script:
+                        output_index = i
+                        actual_satoshis = out.satoshis
+                        break
+                # Cache for future EF lookups
+                if txid:
+                    wallet_provider.cache_tx(txid, raw_tx)
+            except Exception:
+                pass
+
+        # Track the deployed UTXO
+        self._current_utxo = Utxo(
+            txid=txid,
+            output_index=output_index,
+            satoshis=actual_satoshis,
+            script=locking_script,
+        )
+
+        return txid, output_index
+
     def call(
         self,
         method_name: str,
@@ -684,6 +758,42 @@ class RunarContract:
 
         return txid, tx
 
+    @classmethod
+    def from_utxo(
+        cls,
+        artifact: RunarArtifact,
+        utxo: Utxo,
+    ) -> RunarContract:
+        """Reconnect to an existing deployed contract from a known UTXO.
+
+        This is the synchronous equivalent of from_txid() -- use it when the
+        UTXO data is already available (e.g. from an overlay service or cache)
+        without needing a Provider to fetch the transaction.
+        """
+        dummy_args = [0] * len(artifact.abi.constructor_params)
+        contract = cls(artifact, dummy_args)
+
+        if artifact.state_fields:
+            last_op_return = find_last_op_return(utxo.script)
+            if last_op_return != -1:
+                contract._code_script = utxo.script[:last_op_return]
+            else:
+                contract._code_script = utxo.script
+        else:
+            contract._code_script = utxo.script
+
+        contract._current_utxo = Utxo(
+            txid=utxo.txid, output_index=utxo.output_index,
+            satoshis=utxo.satoshis, script=utxo.script,
+        )
+
+        if artifact.state_fields:
+            state = extract_state_from_script(artifact, utxo.script)
+            if state is not None:
+                contract._state = state
+
+        return contract
+
     @staticmethod
     def from_txid(
         artifact: RunarArtifact,
@@ -700,29 +810,10 @@ class RunarContract:
             )
 
         output = tx.outputs[output_index]
-        dummy_args = [0] * len(artifact.abi.constructor_params)
-        contract = RunarContract(artifact, dummy_args)
-
-        if artifact.state_fields:
-            last_op_return = find_last_op_return(output.script)
-            if last_op_return != -1:
-                contract._code_script = output.script[:last_op_return]
-            else:
-                contract._code_script = output.script
-        else:
-            contract._code_script = output.script
-
-        contract._current_utxo = Utxo(
+        return RunarContract.from_utxo(artifact, Utxo(
             txid=txid, output_index=output_index,
             satoshis=output.satoshis, script=output.script,
-        )
-
-        if artifact.state_fields:
-            state = extract_state_from_script(artifact, output.script)
-            if state is not None:
-                contract._state = state
-
-        return contract
+        ))
 
     def get_locking_script(self) -> str:
         """Return the full locking script hex."""
@@ -804,16 +895,27 @@ class RunarContract:
         else:
             term_unlock_script = self.build_unlocking_script(method_name, resolved_args)
 
-        # Build raw terminal transaction: single input, exact outputs
+        # Resolve funding UTXOs for terminal methods
+        funding_utxos = opts.funding_utxos or []
+
+        # Build raw terminal transaction: contract input + optional funding inputs, exact outputs
         def build_terminal_tx(unlock: str) -> str:
+            num_inputs = 1 + len(funding_utxos)
             tx = ''
             tx += _to_le32(1)  # version
-            tx += _encode_varint(1)  # 1 input
+            tx += _encode_varint(num_inputs)
+            # Input 0: contract UTXO
             tx += _reverse_hex(contract_utxo.txid)
             tx += _to_le32(contract_utxo.output_index)
             tx += _encode_varint(len(unlock) // 2)
             tx += unlock
             tx += 'ffffffff'
+            # Funding inputs (unsigned placeholders)
+            for fu in funding_utxos:
+                tx += _reverse_hex(fu.txid)
+                tx += _to_le32(fu.output_index)
+                tx += '00'  # empty scriptSig
+                tx += 'ffffffff'
             tx += _encode_varint(len(term_outputs))
             for out in term_outputs:
                 tx += _to_le64(out.satoshis)

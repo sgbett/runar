@@ -1,12 +1,14 @@
 package runar
 
 import (
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"sort"
 
 	sdkscript "github.com/bsv-blockchain/go-sdk/script"
 	"github.com/bsv-blockchain/go-sdk/transaction"
+	"golang.org/x/crypto/ripemd160"
 )
 
 // ---------------------------------------------------------------------------
@@ -192,16 +194,31 @@ func varIntByteSize(n int) int {
 	return 9
 }
 
-// BuildP2PKHScript builds a standard P2PKH locking script from an address.
+// BuildP2PKHScript builds a standard P2PKH locking script from an address,
+// pubkey hash, or public key.
 //
 //	OP_DUP OP_HASH160 OP_PUSH20 <pubKeyHash> OP_EQUALVERIFY OP_CHECKSIG
 //	76      a9         14        <20 bytes>    88              ac
 //
-// If the address is a 40-char hex string, it's treated as a raw pubkey hash.
-// Otherwise, the address is decoded as a Base58Check P2PKH address using go-sdk.
+// Accepted input formats:
+//   - 40-char hex: treated as raw 20-byte pubkey hash (hash160)
+//   - 66-char hex: compressed public key (auto-hashed via hash160)
+//   - 130-char hex: uncompressed public key (auto-hashed via hash160)
+//   - Other: decoded as Base58Check BSV address
 func BuildP2PKHScript(address string) string {
 	pubKeyHash := address
-	if len(address) != 40 || !isHex(address) {
+
+	if len(address) == 40 && isHex(address) {
+		// Already a raw 20-byte pubkey hash in hex
+		pubKeyHash = address
+	} else if (len(address) == 66 || len(address) == 130) && isHex(address) {
+		// Compressed (33 bytes) or uncompressed (65 bytes) public key — hash it
+		pubKeyBytes, err := hex.DecodeString(address)
+		if err != nil {
+			panic(fmt.Sprintf("BuildP2PKHScript: invalid public key hex %q: %v", address, err))
+		}
+		pubKeyHash = computeHash160Hex(pubKeyBytes)
+	} else {
 		// Decode Base58Check address to extract the 20-byte pubkey hash
 		addr, err := sdkscript.NewAddressFromString(address)
 		if err != nil {
@@ -210,6 +227,14 @@ func BuildP2PKHScript(address string) string {
 		pubKeyHash = hex.EncodeToString(addr.PublicKeyHash)
 	}
 	return "76a914" + pubKeyHash + "88ac"
+}
+
+// computeHash160Hex computes RIPEMD160(SHA256(data)) and returns the hex-encoded result.
+func computeHash160Hex(data []byte) string {
+	h256 := sha256.Sum256(data)
+	r := ripemd160.New()
+	r.Write(h256[:])
+	return hex.EncodeToString(r.Sum(nil))
 }
 
 func isHex(s string) bool {

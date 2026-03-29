@@ -9,6 +9,7 @@ require_relative 'deployment'
 require_relative 'calling'
 require_relative 'oppushtx'
 require_relative 'anf_interpreter'
+require_relative 'wallet'
 
 # RunarContract — runtime wrapper for a compiled Runar contract.
 #
@@ -148,6 +149,53 @@ module Runar
         end
 
         [txid, tx]
+      end
+
+      # Deploy the contract using a BRC-100 wallet.
+      #
+      # The wallet owns the coins and creates the transaction itself via
+      # +create_action+. Requires the contract to be connected to a
+      # WalletProvider (via +connect+).
+      #
+      # @param satoshis    [Integer]     satoshis to lock in the contract output (default: 1)
+      # @param description [String, nil] human-readable description for the wallet action
+      # @return [Hash] { txid: String, output_index: Integer }
+      def deploy_with_wallet(satoshis: 1, description: nil)
+        unless @provider.is_a?(WalletProvider)
+          raise 'deploy_with_wallet requires a connected WalletProvider. ' \
+                'Call connect(wallet_provider, signer) first.'
+        end
+
+        wallet = @provider.wallet
+        basket = @provider.basket
+        locking_script = get_locking_script
+        desc = description || 'Runar contract deployment'
+
+        result = wallet.create_action(
+          description: desc,
+          outputs: [{
+            locking_script: locking_script,
+            satoshis: satoshis,
+            output_description: "Deploy #{@artifact.contract_name}",
+            basket: basket
+          }]
+        )
+
+        txid = result[:txid] || result['txid'] || ''
+        raw_tx = result[:raw_tx] || result['raw_tx']
+        output_index = 0
+
+        # Cache the raw tx if available.
+        @provider.cache_tx(txid, raw_tx) if raw_tx && !raw_tx.empty?
+
+        @current_utxo = Utxo.new(
+          txid: txid,
+          output_index: output_index,
+          satoshis: satoshis,
+          script: locking_script
+        )
+
+        { txid: txid, output_index: output_index }
       end
 
       # Invoke a public method (spend the contract UTXO).
@@ -463,6 +511,62 @@ module Runar
         contract
       end
       # rubocop:enable Metrics/AbcSize, Metrics/MethodLength
+
+      # Reconnect to an existing deployed contract from a UTXO.
+      #
+      # This is the synchronous equivalent of +from_txid+ -- use it when the
+      # UTXO data is already available (e.g. from an overlay service or cache)
+      # without needing a Provider to fetch the transaction.
+      #
+      # @param artifact [RunarArtifact]
+      # @param utxo     [Utxo, Hash] the UTXO containing the contract output.
+      #   Accepts a Utxo struct or a Hash with :txid, :output_index, :satoshis, :script keys.
+      # @return [RunarContract]
+      def self.from_utxo(artifact, utxo)
+        utxo = normalize_utxo(utxo)
+        dummy_args = Array.new(artifact.abi.constructor_params.length, 0)
+        contract   = new(artifact, dummy_args)
+
+        stateful = !artifact.state_fields.empty?
+        code_script = if stateful
+                        last_or = State.find_last_op_return(utxo.script)
+                        last_or != -1 ? utxo.script[0, last_or] : utxo.script
+                      else
+                        utxo.script
+                      end
+
+        contract.instance_variable_set(:@code_script, code_script)
+        contract.instance_variable_set(
+          :@current_utxo,
+          Utxo.new(txid: utxo.txid, output_index: utxo.output_index,
+                   satoshis: utxo.satoshis, script: utxo.script)
+        )
+
+        if stateful
+          state = State.extract_state_from_script(artifact, utxo.script)
+          contract.instance_variable_set(:@state, state) if state
+        end
+
+        contract
+      end
+
+      # Normalize a UTXO argument to a Utxo struct.
+      # @api private
+      def self.normalize_utxo(utxo)
+        case utxo
+        when Utxo then utxo
+        when Hash
+          Utxo.new(
+            txid: utxo[:txid] || utxo['txid'],
+            output_index: utxo[:output_index] || utxo['output_index'] || utxo[:outputIndex] || utxo['outputIndex'],
+            satoshis: utxo[:satoshis] || utxo['satoshis'],
+            script: utxo[:script] || utxo['script'] || ''
+          )
+        else
+          utxo
+        end
+      end
+      private_class_method :normalize_utxo
 
       # Return the full locking script hex (code script + optional OP_RETURN + state).
       #

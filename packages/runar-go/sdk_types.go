@@ -71,6 +71,11 @@ type CallOptions struct {
 	// The fee comes from the contract balance. The contract is considered
 	// fully spent after this call (currentUtxo becomes nil).
 	TerminalOutputs []TerminalOutput `json:"terminalOutputs,omitempty"`
+
+	// Additional funding UTXOs to include as P2PKH inputs for terminal
+	// method calls. Enables terminal methods to receive additional funds
+	// when the contract's own balance is insufficient for outputs + fees.
+	FundingUtxos []UTXO `json:"fundingUtxos,omitempty"`
 }
 
 // TerminalOutput specifies an exact output for a terminal method call.

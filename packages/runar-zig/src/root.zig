@@ -17,6 +17,10 @@ pub const sdk_deploy = @import("sdk_deploy.zig");
 pub const sdk_call = @import("sdk_call.zig");
 pub const sdk_oppushtx = @import("sdk_oppushtx.zig");
 pub const sdk_contract = @import("sdk_contract.zig");
+pub const sdk_woc_provider = @import("sdk_woc_provider.zig");
+pub const sdk_script_utils = @import("sdk_script_utils.zig");
+pub const sdk_anf_interpreter = @import("sdk_anf_interpreter.zig");
+pub const sdk_wallet = @import("sdk_wallet.zig");
 
 // SDK type re-exports
 pub const RunarArtifact = sdk_types.RunarArtifact;
@@ -37,6 +41,15 @@ pub const Signer = sdk_signer.Signer;
 pub const LocalSigner = sdk_signer.LocalSigner;
 pub const MockSigner = sdk_signer.MockSigner;
 pub const ExternalSigner = sdk_signer.ExternalSigner;
+pub const WalletClient = sdk_wallet.WalletClient;
+pub const MockWalletClient = sdk_wallet.MockWalletClient;
+pub const WalletProvider = sdk_wallet.WalletProvider;
+pub const WalletSigner = sdk_wallet.WalletSigner;
+pub const ProtocolID = sdk_wallet.ProtocolID;
+pub const WalletActionOutput = sdk_wallet.WalletActionOutput;
+pub const WalletActionResult = sdk_wallet.WalletActionResult;
+pub const WalletOutput = sdk_wallet.WalletOutput;
+pub const deployWithWallet = sdk_wallet.deployWithWallet;
 pub const serializeState = sdk_state.serializeState;
 pub const deserializeState = sdk_state.deserializeState;
 pub const encodePushData = sdk_state.encodePushData;
@@ -157,6 +170,7 @@ test {
     _ = @import("sdk_call.zig");
     _ = @import("sdk_oppushtx.zig");
     _ = @import("sdk_contract.zig");
+    _ = @import("sdk_wallet.zig");
     if (build_options.has_bsvz_runar_harness) {
         _ = @import("script_integration_test.zig");
     }

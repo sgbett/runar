@@ -11,6 +11,10 @@ pub mod contract;
 pub mod oppushtx;
 pub mod anf_interpreter;
 pub mod codegen;
+pub mod script_utils;
+pub mod token_wallet;
+pub mod wallet;
+pub mod woc_provider;
 
 pub use types::*;
 pub use state::{serialize_state, deserialize_state, extract_state_from_script, find_last_op_return};
@@ -23,3 +27,11 @@ pub use contract::RunarContract;
 pub use types::PreparedCall;
 pub use oppushtx::compute_op_push_tx;
 pub use codegen::generate_rust;
+pub use script_utils::{extract_constructor_args, matches_artifact};
+pub use woc_provider::WhatsOnChainProvider;
+pub use token_wallet::TokenWallet;
+pub use wallet::{
+    WalletClient, WalletSigner, WalletProvider,
+    WalletActionOutput, WalletActionResult, WalletOutput,
+    DeployWithWalletOptions, deploy_with_wallet,
+};

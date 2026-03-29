@@ -135,6 +135,56 @@ def build_call_transaction(
     return tx, len(all_utxos), change if change > 0 else 0
 
 
+# ---------------------------------------------------------------------------
+# Fee estimation
+# ---------------------------------------------------------------------------
+
+_P2PKH_INPUT_SIZE = 148
+_P2PKH_OUTPUT_SIZE = 34
+_TX_OVERHEAD = 10
+
+
+def estimate_call_fee(
+    locking_script_byte_len: int,
+    unlocking_script_byte_len: int,
+    num_funding_inputs: int,
+    fee_rate: int = 100,
+) -> int:
+    """Estimate the fee for a method call transaction.
+
+    Args:
+        locking_script_byte_len:   Byte length of the contract locking script.
+        unlocking_script_byte_len: Byte length of the unlocking script.
+        num_funding_inputs:        Number of P2PKH funding inputs.
+        fee_rate:                  Fee rate in satoshis per KB (default: 100).
+
+    Returns:
+        Estimated fee in satoshis.
+    """
+    contract_input_size = (
+        32 + 4 +
+        _varint_byte_size(unlocking_script_byte_len) +
+        unlocking_script_byte_len +
+        4
+    )
+    funding_inputs_size = num_funding_inputs * _P2PKH_INPUT_SIZE
+    contract_output_size = (
+        8 +
+        _varint_byte_size(locking_script_byte_len) +
+        locking_script_byte_len
+    )
+    change_output_size = _P2PKH_OUTPUT_SIZE
+    tx_size = (
+        _TX_OVERHEAD +
+        contract_input_size +
+        funding_inputs_size +
+        contract_output_size +
+        change_output_size
+    )
+    rate = max(1, fee_rate)
+    return (tx_size * rate + 999) // 1000
+
+
 def insert_unlocking_script(tx_hex: str, input_index: int, unlock_script: str) -> str:
     """Replace the scriptSig of a specific input with the given unlocking script."""
     pos = 0

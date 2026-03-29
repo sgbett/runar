@@ -207,6 +207,22 @@ module Runar
             "insert_unlocking_script: input index #{input_index} out of range"
     end
 
+    # Estimate the fee for a method call transaction.
+    #
+    # @param locking_script_byte_len  [Integer] byte length of the contract locking script
+    # @param unlocking_script_byte_len [Integer] byte length of the unlocking script
+    # @param num_funding_inputs       [Integer] number of P2PKH funding inputs
+    # @param fee_rate                 [Integer] satoshis per kilobyte (default: 100)
+    # @return [Integer] estimated fee in satoshis
+    def estimate_call_fee(locking_script_byte_len, unlocking_script_byte_len, num_funding_inputs, fee_rate = 100)
+      contract_input_size = 32 + 4 + varint_byte_size(unlocking_script_byte_len) + unlocking_script_byte_len + 4
+      funding_inputs_size = num_funding_inputs * P2PKH_INPUT_SIZE
+      contract_output_size = 8 + varint_byte_size(locking_script_byte_len) + locking_script_byte_len
+      change_output_size = P2PKH_OUTPUT_SIZE
+      tx_size = TX_OVERHEAD + contract_input_size + funding_inputs_size + contract_output_size + change_output_size
+      (tx_size * [1, fee_rate].max + 999) / 1000
+    end
+
     # ---------------------------------------------------------------------------
     # Private helper
     # ---------------------------------------------------------------------------

@@ -138,15 +138,29 @@ def _address_to_pubkey_hash(address: str) -> str:
     return decoded[1:21].hex()
 
 
-def build_p2pkh_script(address: str) -> str:
+def build_p2pkh_script(address_or_pub_key: str) -> str:
     """Build a standard P2PKH locking script.
 
-    Accepts either a 40-char hex pubkey hash or a Base58Check P2PKH address.
+    Accepted input formats:
+    - 40-char hex: treated as raw 20-byte pubkey hash (hash160)
+    - 66-char hex: compressed public key (auto-hashed via hash160)
+    - 130-char hex: uncompressed public key (auto-hashed via hash160)
+    - Other: decoded as Base58Check BSV address
     """
-    if len(address) == 40 and _is_hex(address):
-        pub_key_hash = address
+    if len(address_or_pub_key) == 40 and _is_hex(address_or_pub_key):
+        pub_key_hash = address_or_pub_key
+    elif (
+        (len(address_or_pub_key) == 66 or len(address_or_pub_key) == 130)
+        and _is_hex(address_or_pub_key)
+    ):
+        # Compressed (33 bytes) or uncompressed (65 bytes) public key -- hash it
+        import hashlib
+        pub_key_bytes = bytes.fromhex(address_or_pub_key)
+        sha256_hash = hashlib.sha256(pub_key_bytes).digest()
+        ripemd160_hash = hashlib.new('ripemd160', sha256_hash).digest()
+        pub_key_hash = ripemd160_hash.hex()
     else:
-        pub_key_hash = _address_to_pubkey_hash(address)
+        pub_key_hash = _address_to_pubkey_hash(address_or_pub_key)
     return '76a914' + pub_key_hash + '88ac'
 
 

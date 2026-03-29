@@ -872,6 +872,50 @@ func (c *RunarContract) FinalizeCall(
 	return txid, tx, nil
 }
 
+// FromUtxo reconnects to an existing deployed contract from a known UTXO
+// without needing a Provider to fetch the transaction. This is the synchronous
+// equivalent of FromTxId() — use it when the UTXO data is already available
+// (e.g. from an overlay service or cache).
+func FromUtxo(artifact *RunarArtifact, utxo UTXO) *RunarContract {
+	// Create dummy constructor args
+	dummyArgs := make([]interface{}, len(artifact.ABI.Constructor.Params))
+	for i := range dummyArgs {
+		dummyArgs[i] = int64(0)
+	}
+
+	contract := NewRunarContract(artifact, dummyArgs)
+
+	// Store the code portion of the on-chain script
+	if len(artifact.StateFields) > 0 {
+		lastOpReturn := FindLastOpReturn(utxo.Script)
+		if lastOpReturn != -1 {
+			contract.codeScript = utxo.Script[:lastOpReturn]
+		} else {
+			contract.codeScript = utxo.Script
+		}
+	} else {
+		contract.codeScript = utxo.Script
+	}
+
+	// Set the current UTXO
+	contract.currentUtxo = &UTXO{
+		Txid:        utxo.Txid,
+		OutputIndex: utxo.OutputIndex,
+		Satoshis:    utxo.Satoshis,
+		Script:      utxo.Script,
+	}
+
+	// Extract state if this is a stateful contract
+	if len(artifact.StateFields) > 0 {
+		state := ExtractStateFromScript(artifact, utxo.Script)
+		if state != nil {
+			contract.state = state
+		}
+	}
+
+	return contract
+}
+
 // FromTxId reconnects to an existing deployed contract from its deployment
 // transaction.
 func FromTxId(
@@ -1184,6 +1228,7 @@ func (c *RunarContract) prepareCallTerminal(
 	contractUtxo UTXO,
 ) (*PreparedCall, error) {
 	termOutputs := options.TerminalOutputs
+	fundingUtxos := options.FundingUtxos
 
 	// Build placeholder unlocking script
 	var termUnlockScript string
@@ -1204,6 +1249,16 @@ func (c *RunarContract) prepareCallTerminal(
 			UnlockingScript:  unlockLS,
 			SequenceNumber:   0xffffffff,
 		})
+		// Add funding UTXOs as additional P2PKH inputs (unsigned)
+		for _, fu := range fundingUtxos {
+			fuHash := txidToChainHash(fu.Txid)
+			ttx.AddInput(&transaction.TransactionInput{
+				SourceTXID:       fuHash,
+				SourceTxOutIndex: uint32(fu.OutputIndex),
+				UnlockingScript:  &sdkscript.Script{},
+				SequenceNumber:   0xffffffff,
+			})
+		}
 		for _, out := range termOutputs {
 			outLS, _ := sdkscript.NewFromHex(out.ScriptHex)
 			ttx.AddOutput(&transaction.TransactionOutput{
@@ -1293,6 +1348,21 @@ func (c *RunarContract) prepareCallTerminal(
 				finalPreimage = s
 			}
 		}
+	}
+
+	// Sign funding UTXOs (P2PKH inputs added after the contract input)
+	for i, fu := range fundingUtxos {
+		inputIdx := 1 + i // contract input is at index 0
+		sig, signErr := signer.Sign(termTx, inputIdx, fu.Script, fu.Satoshis, nil)
+		if signErr != nil {
+			return nil, fmt.Errorf("RunarContract.PrepareCall terminal: signing funding input %d: %w", inputIdx, signErr)
+		}
+		pubKey, pkErr := signer.GetPublicKey()
+		if pkErr != nil {
+			return nil, fmt.Errorf("RunarContract.PrepareCall terminal: getting public key: %w", pkErr)
+		}
+		unlockScript := EncodePushData(sig) + EncodePushData(pubKey)
+		termTx = InsertUnlockingScript(termTx, inputIdx, unlockScript)
 	}
 
 	// Compute sighash from preimage

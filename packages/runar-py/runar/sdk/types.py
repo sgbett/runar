@@ -180,6 +180,7 @@ class CallOptions:
     additional_contract_inputs: list[Utxo | dict] | None = None
     additional_contract_input_args: list[list] | None = None
     terminal_outputs: list[TerminalOutput | dict] | None = None
+    funding_utxos: list[Utxo] | None = None
 
 
 @dataclass
