@@ -1,6 +1,7 @@
 package frontend
 
 import (
+	"math/big"
 	"strings"
 	"testing"
 )
@@ -223,7 +224,7 @@ func TestTypeCheck_TypeMismatch_ArithmeticOnBoolean(t *testing.T) {
 						Init: BinaryExpr{
 							Op:    "+",
 							Left:  Identifier{Name: "flag"},
-							Right: BigIntLiteral{Value: 1},
+							Right: BigIntLiteral{Value: big.NewInt(1)},
 						},
 					},
 					ExpressionStmt{
@@ -233,7 +234,7 @@ func TestTypeCheck_TypeMismatch_ArithmeticOnBoolean(t *testing.T) {
 								BinaryExpr{
 									Op:    "===",
 									Left:  Identifier{Name: "result"},
-									Right: BigIntLiteral{Value: 2},
+									Right: BigIntLiteral{Value: big.NewInt(2)},
 								},
 							},
 						},
@@ -480,7 +481,7 @@ func TestTypeCheck_UnknownStandaloneFunction(t *testing.T) {
 								BinaryExpr{
 									Op:    ">",
 									Left:  Identifier{Name: "result"},
-									Right: BigIntLiteral{Value: 0},
+									Right: BigIntLiteral{Value: big.NewInt(0)},
 								},
 							},
 						},

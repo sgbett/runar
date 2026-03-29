@@ -1,6 +1,7 @@
 package frontend
 
 import (
+	"math/big"
 	"strings"
 	"testing"
 )
@@ -157,7 +158,7 @@ func TestValidate_PublicMethodMissingFinalAssert(t *testing.T) {
 						Expr: BinaryExpr{
 							Op:    "+",
 							Left:  Identifier{Name: "val"},
-							Right: BigIntLiteral{Value: 1},
+							Right: BigIntLiteral{Value: big.NewInt(1)},
 						},
 					},
 				},
@@ -216,7 +217,7 @@ func TestValidate_DirectRecursion(t *testing.T) {
 								BinaryExpr{
 									Op:    "-",
 									Left:  Identifier{Name: "n"},
-									Right: BigIntLiteral{Value: 1},
+									Right: BigIntLiteral{Value: big.NewInt(1)},
 								},
 							},
 						},
@@ -321,7 +322,7 @@ func TestValidate_StatefulNoFinalAssertOK(t *testing.T) {
 						Value: BinaryExpr{
 							Op:    "+",
 							Left:  PropertyAccessExpr{Property: "count"},
-							Right: BigIntLiteral{Value: 1},
+							Right: BigIntLiteral{Value: big.NewInt(1)},
 						},
 					},
 				},
@@ -491,7 +492,7 @@ func TestValidate_ForLoopNonConstantBound(t *testing.T) {
 					ForStmt{
 						Init: VariableDeclStmt{
 							Name: "i",
-							Init: BigIntLiteral{Value: 0},
+							Init: BigIntLiteral{Value: big.NewInt(0)},
 						},
 						Condition: BinaryExpr{
 							Op:   "<",
@@ -499,7 +500,7 @@ func TestValidate_ForLoopNonConstantBound(t *testing.T) {
 							Right: BinaryExpr{ // non-constant: runtime arithmetic
 								Op:    "+",
 								Left:  Identifier{Name: "limit"},
-								Right: BigIntLiteral{Value: 1},
+								Right: BigIntLiteral{Value: big.NewInt(1)},
 							},
 						},
 						Update: ExpressionStmt{
@@ -693,7 +694,7 @@ func TestValidate_StatefulSmartContractNonReadonlyAllowed(t *testing.T) {
 						Value: BinaryExpr{
 							Op:    "+",
 							Left:  PropertyAccessExpr{Property: "count"},
-							Right: BigIntLiteral{Value: 1},
+							Right: BigIntLiteral{Value: big.NewInt(1)},
 						},
 					},
 				},
@@ -829,7 +830,7 @@ func TestValidate_MultiplePublicMethodsAllowed(t *testing.T) {
 					ExpressionStmt{
 						Expr: CallExpr{
 							Callee: Identifier{Name: "assert"},
-							Args:   []Expression{BinaryExpr{Op: ">", Left: Identifier{Name: "b"}, Right: BigIntLiteral{Value: 0}}},
+							Args:   []Expression{BinaryExpr{Op: ">", Left: Identifier{Name: "b"}, Right: BigIntLiteral{Value: big.NewInt(0)}}},
 						},
 					},
 				},
@@ -873,10 +874,10 @@ func TestValidate_IfElseBothBranchesAssert_OK(t *testing.T) {
 					IfStmt{
 						Condition: Identifier{Name: "cond"},
 						Then: []Statement{
-							ExpressionStmt{Expr: CallExpr{Callee: Identifier{Name: "assert"}, Args: []Expression{BinaryExpr{Op: ">", Left: Identifier{Name: "a"}, Right: BigIntLiteral{Value: 0}}}}},
+							ExpressionStmt{Expr: CallExpr{Callee: Identifier{Name: "assert"}, Args: []Expression{BinaryExpr{Op: ">", Left: Identifier{Name: "a"}, Right: BigIntLiteral{Value: big.NewInt(0)}}}}},
 						},
 						Else: []Statement{
-							ExpressionStmt{Expr: CallExpr{Callee: Identifier{Name: "assert"}, Args: []Expression{BinaryExpr{Op: ">", Left: Identifier{Name: "b"}, Right: BigIntLiteral{Value: 0}}}}},
+							ExpressionStmt{Expr: CallExpr{Callee: Identifier{Name: "assert"}, Args: []Expression{BinaryExpr{Op: ">", Left: Identifier{Name: "b"}, Right: BigIntLiteral{Value: big.NewInt(0)}}}}},
 						},
 					},
 				},
@@ -965,7 +966,7 @@ func TestValidate_PrivateMethodWithoutAssert_OK(t *testing.T) {
 				Body: []Statement{
 					// Private method with no assert — should be OK
 					ExpressionStmt{
-						Expr: BinaryExpr{Op: "+", Left: Identifier{Name: "x"}, Right: BigIntLiteral{Value: 1}},
+						Expr: BinaryExpr{Op: "+", Left: Identifier{Name: "x"}, Right: BigIntLiteral{Value: big.NewInt(1)}},
 					},
 				},
 			},
@@ -1054,7 +1055,7 @@ func TestValidate_ForLoopIdentifierBound_OK(t *testing.T) {
 				Body: []Statement{
 					// for (let i = 0n; i < N; i++) where N is an identifier → treated as const
 					ForStmt{
-						Init:      VariableDeclStmt{Name: "i", Init: BigIntLiteral{Value: 0}},
+						Init:      VariableDeclStmt{Name: "i", Init: BigIntLiteral{Value: big.NewInt(0)}},
 						Condition: BinaryExpr{Op: "<", Left: Identifier{Name: "i"}, Right: Identifier{Name: "N"}},
 						Update:    ExpressionStmt{Expr: IncrementExpr{Operand: Identifier{Name: "i"}}},
 						Body:      []Statement{},
@@ -1162,7 +1163,7 @@ func TestValidate_NonRecursiveMethodCalls_NoError(t *testing.T) {
 				Body: []Statement{
 					// methodB does NOT call methodA
 					ExpressionStmt{
-						Expr: BinaryExpr{Op: "+", Left: Identifier{Name: "v"}, Right: BigIntLiteral{Value: 1}},
+						Expr: BinaryExpr{Op: "+", Left: Identifier{Name: "v"}, Right: BigIntLiteral{Value: big.NewInt(1)}},
 					},
 				},
 			},
@@ -1201,7 +1202,7 @@ func TestValidate_SmartContractPublicMethodNeedsAssert(t *testing.T) {
 				Params:     []ParamNode{{Name: "x", Type: PrimitiveType{Name: "bigint"}}},
 				Body: []Statement{
 					// No trailing assert
-					VariableDeclStmt{Name: "r", Init: BinaryExpr{Op: "+", Left: Identifier{Name: "x"}, Right: BigIntLiteral{Value: 1}}},
+					VariableDeclStmt{Name: "r", Init: BinaryExpr{Op: "+", Left: Identifier{Name: "x"}, Right: BigIntLiteral{Value: big.NewInt(1)}}},
 				},
 			},
 		},
@@ -1271,7 +1272,7 @@ func TestValidate_ManualCheckPreimage_Warning(t *testing.T) {
 						Value: BinaryExpr{
 							Op:    "+",
 							Left:  PropertyAccessExpr{Property: "count"},
-							Right: BigIntLiteral{Value: 1},
+							Right: BigIntLiteral{Value: big.NewInt(1)},
 						},
 					},
 				},
@@ -1339,7 +1340,7 @@ func TestValidate_ManualGetStateScript_Warning(t *testing.T) {
 						Value: BinaryExpr{
 							Op:    "+",
 							Left:  PropertyAccessExpr{Property: "count"},
-							Right: BigIntLiteral{Value: 1},
+							Right: BigIntLiteral{Value: big.NewInt(1)},
 						},
 					},
 				},
@@ -1453,7 +1454,7 @@ func TestValidate_TxPreimageExplicitProperty_Error(t *testing.T) {
 						Value: BinaryExpr{
 							Op:    "+",
 							Left:  PropertyAccessExpr{Property: "count"},
-							Right: BigIntLiteral{Value: 1},
+							Right: BigIntLiteral{Value: big.NewInt(1)},
 						},
 					},
 				},

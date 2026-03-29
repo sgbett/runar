@@ -2,7 +2,7 @@ package frontend
 
 import (
 	"fmt"
-	"strconv"
+	"math/big"
 	"strings"
 	"unicode"
 )
@@ -863,7 +863,7 @@ func (p *moveParser) parseMoveLetDecl(loc SourceLocation) Statement {
 	if p.match(moveTokAssign) {
 		init = p.parseMoveExpression()
 	} else {
-		init = BigIntLiteral{Value: 0}
+		init = BigIntLiteral{Value: big.NewInt(0)}
 	}
 
 	p.expect(moveTokSemicolon)
@@ -962,10 +962,10 @@ func (p *moveParser) parseMoveWhile(loc SourceLocation) Statement {
 	// Convert while loop to a for loop with no init/update for AST compatibility
 	return ForStmt{
 		Init: VariableDeclStmt{
-			Name: "_w", Mutable: true, Init: BigIntLiteral{Value: 0}, SourceLocation: loc,
+			Name: "_w", Mutable: true, Init: BigIntLiteral{Value: big.NewInt(0)}, SourceLocation: loc,
 		},
 		Condition:      condition,
-		Update:         ExpressionStmt{Expr: BigIntLiteral{Value: 0}, SourceLocation: loc},
+		Update:         ExpressionStmt{Expr: BigIntLiteral{Value: big.NewInt(0)}, SourceLocation: loc},
 		Body:           body,
 		SourceLocation: loc,
 	}
@@ -979,10 +979,10 @@ func (p *moveParser) parseMoveLoop(loc SourceLocation) Statement {
 	// Convert loop {} to for(;;) {} — infinite loop with true condition
 	return ForStmt{
 		Init: VariableDeclStmt{
-			Name: "_l", Mutable: true, Init: BigIntLiteral{Value: 0}, SourceLocation: loc,
+			Name: "_l", Mutable: true, Init: BigIntLiteral{Value: big.NewInt(0)}, SourceLocation: loc,
 		},
 		Condition:      BoolLiteral{Value: true},
-		Update:         ExpressionStmt{Expr: BigIntLiteral{Value: 0}, SourceLocation: loc},
+		Update:         ExpressionStmt{Expr: BigIntLiteral{Value: big.NewInt(0)}, SourceLocation: loc},
 		Body:           body,
 		SourceLocation: loc,
 	}
@@ -1298,7 +1298,7 @@ func (p *moveParser) parseMovePrimary() Expression {
 	default:
 		p.addError(fmt.Sprintf("line %d: unexpected token %q", tok.line, tok.value))
 		p.advance()
-		return BigIntLiteral{Value: 0}
+		return BigIntLiteral{Value: big.NewInt(0)}
 	}
 }
 
@@ -1321,11 +1321,11 @@ func parseMoveNumber(s string) Expression {
 	for _, suffix := range []string{"u256", "u128", "u64", "u32", "u16", "u8"} {
 		s = strings.TrimSuffix(s, suffix)
 	}
-	val, err := strconv.ParseInt(s, 0, 64)
-	if err != nil {
-		return BigIntLiteral{Value: 0}
+	bi := new(big.Int)
+	if _, ok := bi.SetString(s, 0); !ok {
+		return BigIntLiteral{Value: big.NewInt(0)}
 	}
-	return BigIntLiteral{Value: val}
+	return BigIntLiteral{Value: bi}
 }
 
 // ---------------------------------------------------------------------------

@@ -221,7 +221,7 @@ enum TokenType {
     MinusMinus, // --
     // Literals
     Ident(String),
-    Number(i64),
+    Number(i128),
     StringLit(String), // backtick or double-quoted
     // End
     Eof,
@@ -414,7 +414,7 @@ fn tokenize(source: &str) -> Vec<Token> {
                 pos += 1;
                 col += 1;
             }
-            let n: i64 = val.parse().unwrap_or(0);
+            let n: i128 = val.parse().unwrap_or(0);
             tokens.push(Token { typ: TokenType::Number(n), line: l, col: c });
             continue;
         }

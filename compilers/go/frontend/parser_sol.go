@@ -2,7 +2,7 @@ package frontend
 
 import (
 	"fmt"
-	"strconv"
+	"math/big"
 	"strings"
 	"unicode"
 )
@@ -868,7 +868,7 @@ func (p *solParser) parseSolFor(loc SourceLocation) Statement {
 	} else {
 		p.expect(solTokSemicolon)
 		initStmt = VariableDeclStmt{
-			Name: "_i", Mutable: true, Init: BigIntLiteral{Value: 0}, SourceLocation: loc,
+			Name: "_i", Mutable: true, Init: BigIntLiteral{Value: big.NewInt(0)}, SourceLocation: loc,
 		}
 	}
 
@@ -915,7 +915,7 @@ func (p *solParser) parseSolVarDecl(loc SourceLocation) Statement {
 	if p.match(solTokAssign) {
 		init = p.parseSolExpression()
 	} else {
-		init = BigIntLiteral{Value: 0}
+		init = BigIntLiteral{Value: big.NewInt(0)}
 	}
 
 	p.expect(solTokSemicolon)
@@ -1212,7 +1212,7 @@ func (p *solParser) parseSolPrimary() Expression {
 	default:
 		p.addError(fmt.Sprintf("line %d: unexpected token %q", tok.line, tok.value))
 		p.advance()
-		return BigIntLiteral{Value: 0}
+		return BigIntLiteral{Value: big.NewInt(0)}
 	}
 }
 
@@ -1235,9 +1235,9 @@ func parseSolNumber(s string) Expression {
 	if strings.HasSuffix(s, "n") {
 		s = s[:len(s)-1]
 	}
-	val, err := strconv.ParseInt(s, 0, 64)
-	if err != nil {
-		return BigIntLiteral{Value: 0}
+	bi := new(big.Int)
+	if _, ok := bi.SetString(s, 0); !ok {
+		return BigIntLiteral{Value: big.NewInt(0)}
 	}
-	return BigIntLiteral{Value: val}
+	return BigIntLiteral{Value: bi}
 }

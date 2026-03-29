@@ -196,7 +196,7 @@ enum Token {
 
     // Identifiers and literals
     Ident(String),
-    NumberLit(i64),
+    NumberLit(i128),
     HexStringLit(String),
     StringLit(String),
 
@@ -604,9 +604,9 @@ fn tokenize(source: &str) -> Vec<Token> {
                     }
                 }
                 let val = if num_str.starts_with("0x") || num_str.starts_with("0X") {
-                    i64::from_str_radix(&num_str[2..], 16).unwrap_or(0)
+                    i128::from_str_radix(&num_str[2..], 16).unwrap_or(0)
                 } else {
-                    num_str.parse::<i64>().unwrap_or(0)
+                    num_str.parse::<i128>().unwrap_or(0)
                 };
                 tokens.push(Token::NumberLit(val));
                 continue;

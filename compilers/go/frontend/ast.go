@@ -2,6 +2,8 @@
 // parse, validate, typecheck, and ANF lowering.
 package frontend
 
+import "math/big"
+
 // ---------------------------------------------------------------------------
 // Source locations
 // ---------------------------------------------------------------------------
@@ -199,7 +201,7 @@ func (Identifier) exprMarker() {}
 
 // BigIntLiteral represents a bigint literal like `42n`.
 type BigIntLiteral struct {
-	Value int64
+	Value *big.Int
 }
 
 func (BigIntLiteral) exprMarker() {}

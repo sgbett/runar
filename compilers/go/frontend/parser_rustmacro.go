@@ -2,7 +2,7 @@ package frontend
 
 import (
 	"fmt"
-	"strconv"
+	"math/big"
 	"strings"
 	"unicode"
 )
@@ -918,7 +918,7 @@ func (p *rustMacroParser) parseStatement() Statement {
 		initStmt := VariableDeclStmt{
 			Name:           varName,
 			Mutable:        true,
-			Init:           BigIntLiteral{Value: 0},
+			Init:           BigIntLiteral{Value: big.NewInt(0)},
 			SourceLocation: loc,
 		}
 		cond := BinaryExpr{
@@ -1212,16 +1212,16 @@ func (p *rustMacroParser) parsePrimary() Expression {
 	switch t.kind {
 	case rustTokNumber:
 		p.advance()
-		val, err := strconv.ParseInt(t.value, 10, 64)
-		if err != nil {
+		bi := new(big.Int)
+		if _, ok := bi.SetString(t.value, 0); !ok {
 			p.errors = append(p.errors, Diagnostic{
 				Message:  fmt.Sprintf("invalid integer literal '%s' at %s:%d:%d", t.value, p.fileName, t.line, t.col),
 				Severity: SeverityError,
 				Loc:      &SourceLocation{File: p.fileName, Line: t.line, Column: t.col},
 			})
-			return BigIntLiteral{Value: 0}
+			return BigIntLiteral{Value: big.NewInt(0)}
 		}
-		return BigIntLiteral{Value: val}
+		return BigIntLiteral{Value: bi}
 
 	case rustTokHexString:
 		p.advance()

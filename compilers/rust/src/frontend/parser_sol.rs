@@ -82,7 +82,7 @@ enum Token {
 
     // Identifiers and literals
     Ident(String),
-    NumberLit(i64),
+    NumberLit(i128),
     StringLit(String),
 
     // Operators
@@ -300,7 +300,7 @@ fn tokenize(source: &str) -> Vec<Token> {
             }
             let num_str: String = chars[start..i].iter().collect();
             let num_str = num_str.trim_end_matches('n');
-            let val = num_str.parse::<i64>().unwrap_or(0);
+            let val = num_str.parse::<i128>().unwrap_or(0);
             tokens.push(Token::NumberLit(val));
             continue;
         }

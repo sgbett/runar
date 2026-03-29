@@ -28,7 +28,7 @@ func makeTestMethod(name string, body []ir.ANFBinding) ir.ANFMethod {
 	}
 }
 
-func mkInt(val int64) ir.ANFValue  { return makeLoadConstInt(val) }
+func mkInt(val int64) ir.ANFValue  { return makeLoadConstInt(big.NewInt(val)) }
 func mkBool(val bool) ir.ANFValue  { return makeLoadConstBool(val) }
 func mkStr(val string) ir.ANFValue { return makeLoadConstString(val) }
 func binOp(op, left, right string) ir.ANFValue {

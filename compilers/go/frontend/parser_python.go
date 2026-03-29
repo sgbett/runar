@@ -2,6 +2,7 @@ package frontend
 
 import (
 	"fmt"
+	"math/big"
 	"strconv"
 	"strings"
 	"unicode"
@@ -1315,7 +1316,7 @@ func (p *pyParser) parsePyFor(loc SourceLocation) Statement {
 		limitExpr = p.parsePyExpression()
 	} else {
 		// range(n) — init = 0, limit = n
-		initExpr = BigIntLiteral{Value: 0}
+		initExpr = BigIntLiteral{Value: big.NewInt(0)}
 		limitExpr = first
 	}
 
@@ -1383,7 +1384,7 @@ func (p *pyParser) parsePyExprOrAssignStatement(loc SourceLocation) Statement {
 		if p.match(pyTokAssign) {
 			init = p.parsePyExpression()
 		} else {
-			init = BigIntLiteral{Value: 0}
+			init = BigIntLiteral{Value: big.NewInt(0)}
 		}
 		p.skipNewlines()
 		return VariableDeclStmt{
@@ -1718,7 +1719,7 @@ func (p *pyParser) parsePyPrimary() Expression {
 			return BoolLiteral{Value: false}
 		}
 		if name == "None" {
-			return BigIntLiteral{Value: 0}
+			return BigIntLiteral{Value: big.NewInt(0)}
 		}
 		if name == "true" {
 			return BoolLiteral{Value: true}
@@ -1762,7 +1763,7 @@ func (p *pyParser) parsePyPrimary() Expression {
 	default:
 		p.addError(fmt.Sprintf("line %d: unexpected token %q", tok.line, tok.value))
 		p.advance()
-		return BigIntLiteral{Value: 0}
+		return BigIntLiteral{Value: big.NewInt(0)}
 	}
 }
 
@@ -1822,11 +1823,11 @@ func (p *pyParser) parsePyCallArgs() []Expression {
 }
 
 func parsePyNumber(s string) Expression {
-	val, err := strconv.ParseInt(s, 0, 64)
-	if err != nil {
-		return BigIntLiteral{Value: 0}
+	bi := new(big.Int)
+	if _, ok := bi.SetString(s, 0); !ok {
+		return BigIntLiteral{Value: big.NewInt(0)}
 	}
-	return BigIntLiteral{Value: val}
+	return BigIntLiteral{Value: bi}
 }
 
 // ---------------------------------------------------------------------------

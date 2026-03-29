@@ -2,6 +2,7 @@ package frontend
 
 import (
 	"fmt"
+	"math/big"
 	"strconv"
 	"strings"
 	"unicode"
@@ -1757,7 +1758,7 @@ func (p *rbParser) parsePrimary() Expression {
 	// nil -> 0
 	if tok.kind == rbTokNil {
 		p.advance()
-		return BigIntLiteral{Value: 0}
+		return BigIntLiteral{Value: big.NewInt(0)}
 	}
 
 	// Instance variable: @var -> property access
@@ -1818,7 +1819,7 @@ func (p *rbParser) parsePrimary() Expression {
 
 	p.addError(fmt.Sprintf("line %d: unexpected token %q", tok.line, tok.value))
 	p.advance()
-	return BigIntLiteral{Value: 0}
+	return BigIntLiteral{Value: big.NewInt(0)}
 }
 
 func (p *rbParser) parseCallArgs() []Expression {
@@ -1836,12 +1837,12 @@ func (p *rbParser) parseCallArgs() []Expression {
 }
 
 func (p *rbParser) parseRbNumber(s string) Expression {
-	val, err := strconv.ParseInt(s, 0, 64)
-	if err != nil {
-		p.addError(fmt.Sprintf("line %d: invalid number literal %q: %v", p.peek().line, s, err))
-		return BigIntLiteral{Value: 0}
+	bi := new(big.Int)
+	if _, ok := bi.SetString(s, 0); !ok {
+		p.addError(fmt.Sprintf("line %d: invalid number literal %q", p.peek().line, s))
+		return BigIntLiteral{Value: big.NewInt(0)}
 	}
-	return BigIntLiteral{Value: val}
+	return BigIntLiteral{Value: bi}
 }
 
 // Ensure the unicode import is used

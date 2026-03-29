@@ -408,10 +408,7 @@ func anfValueToConst(v *ir.ANFValue) *constValue {
 func constToANFValue(cv *constValue) ir.ANFValue {
 	switch cv.kind {
 	case constBigInt:
-		if cv.bigint.IsInt64() {
-			return makeLoadConstInt(cv.bigint.Int64())
-		}
-		return makeLoadConstBigInt(cv.bigint)
+		return makeLoadConstInt(cv.bigint)
 	case constBool:
 		return makeLoadConstBool(cv.b)
 	case constString:

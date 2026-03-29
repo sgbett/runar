@@ -149,7 +149,7 @@ func extractLiteralValue(expr Expression) interface{} {
 	case UnaryExpr:
 		if e.Op == "-" {
 			if lit, ok := e.Operand.(BigIntLiteral); ok {
-				return -lit.Value
+				return new(big.Int).Neg(lit.Value)
 			}
 		}
 	}
@@ -729,7 +729,7 @@ func extractLoopCount(stmt ForStmt) int {
 func extractBigIntValue(expr Expression) *big.Int {
 	switch e := expr.(type) {
 	case BigIntLiteral:
-		return big.NewInt(e.Value)
+		return new(big.Int).Set(e.Value)
 	case UnaryExpr:
 		if e.Op == "-" {
 			inner := extractBigIntValue(e.Operand)
@@ -825,7 +825,7 @@ func (ctx *lowerCtx) lowerExprToRef(expr Expression) string {
 		return ctx.emit(ir.ANFValue{Kind: "array_literal", Elements: elementRefs})
 	}
 
-	return ctx.emit(makeLoadConstInt(0))
+	return ctx.emit(makeLoadConstInt(big.NewInt(0)))
 }
 
 // lowerIdentifier matches the TS reference's lowerIdentifier exactly:
@@ -881,7 +881,7 @@ func (ctx *lowerCtx) lowerMemberExpr(e MemberExpr) string {
 			"ANYONECANPAY": 0x80,
 		}
 		if val, ok := sigHashValues[e.Property]; ok {
-			return ctx.emit(makeLoadConstInt(val))
+			return ctx.emit(makeLoadConstInt(big.NewInt(val)))
 		}
 	}
 
@@ -1028,7 +1028,7 @@ func (ctx *lowerCtx) lowerTernaryExpr(e TernaryExpr) string {
 
 func (ctx *lowerCtx) lowerIncrementExpr(e IncrementExpr) string {
 	operandRef := ctx.lowerExprToRef(e.Operand)
-	oneRef := ctx.emit(makeLoadConstInt(1))
+	oneRef := ctx.emit(makeLoadConstInt(big.NewInt(1)))
 	result := ctx.emit(ir.ANFValue{Kind: "bin_op", Op: "+", Left: operandRef, Right: oneRef})
 
 	// If the operand is a named variable, update it
@@ -1047,7 +1047,7 @@ func (ctx *lowerCtx) lowerIncrementExpr(e IncrementExpr) string {
 
 func (ctx *lowerCtx) lowerDecrementExpr(e DecrementExpr) string {
 	operandRef := ctx.lowerExprToRef(e.Operand)
-	oneRef := ctx.emit(makeLoadConstInt(1))
+	oneRef := ctx.emit(makeLoadConstInt(big.NewInt(1)))
 	result := ctx.emit(ir.ANFValue{Kind: "bin_op", Op: "-", Left: operandRef, Right: oneRef})
 
 	// If the operand is a named variable, update it
@@ -1068,16 +1068,18 @@ func (ctx *lowerCtx) lowerDecrementExpr(e DecrementExpr) string {
 // ANFValue constructors — build properly serializable values
 // ---------------------------------------------------------------------------
 
-func makeLoadConstInt(val int64) ir.ANFValue {
+func makeLoadConstInt(val *big.Int) ir.ANFValue {
 	raw, _ := json.Marshal(val)
-	bi := big.NewInt(val)
-	i := val
-	return ir.ANFValue{
+	v := ir.ANFValue{
 		Kind:        "load_const",
 		RawValue:    raw,
-		ConstBigInt: bi,
-		ConstInt:    &i,
+		ConstBigInt: new(big.Int).Set(val),
 	}
+	if val.IsInt64() {
+		i := val.Int64()
+		v.ConstInt = &i
+	}
+	return v
 }
 
 func makeLoadConstBool(val bool) ir.ANFValue {

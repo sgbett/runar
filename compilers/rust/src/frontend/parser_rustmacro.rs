@@ -897,7 +897,7 @@ impl RustDslParser {
         match self.current().typ.clone() {
             TokenType::Number(val) => {
                 self.advance_clone();
-                let n: i64 = val.parse().unwrap_or(0);
+                let n: i128 = val.parse().unwrap_or(0);
                 Expression::BigIntLiteral { value: n }
             }
             TokenType::HexString(val) => {

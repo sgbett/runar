@@ -64,11 +64,22 @@ fn lower_properties(contract: &ContractNode) -> Vec<ANFProperty> {
         .collect()
 }
 
+/// Convert an i128 to a serde_json::Value. Values within i64 range use
+/// Number; larger values fall back to a JSON number via string parsing so
+/// precision is preserved in the IR.
+fn i128_to_json(v: i128) -> serde_json::Value {
+    if v >= i64::MIN as i128 && v <= i64::MAX as i128 {
+        serde_json::Value::Number(serde_json::Number::from(v as i64))
+    } else {
+        // serde_json can parse arbitrarily large integer strings into Number
+        let s = v.to_string();
+        serde_json::from_str(&s).unwrap_or_else(|_| serde_json::Value::Number(serde_json::Number::from(0)))
+    }
+}
+
 fn extract_literal_value(expr: &Expression) -> Option<serde_json::Value> {
     match expr {
-        Expression::BigIntLiteral { value } => Some(serde_json::Value::Number(
-            serde_json::Number::from(*value),
-        )),
+        Expression::BigIntLiteral { value } => Some(i128_to_json(*value)),
         Expression::BoolLiteral { value } => Some(serde_json::Value::Bool(*value)),
         Expression::ByteStringLiteral { value } => {
             Some(serde_json::Value::String(value.clone()))
@@ -78,7 +89,7 @@ fn extract_literal_value(expr: &Expression) -> Option<serde_json::Value> {
             operand,
         } => {
             if let Expression::BigIntLiteral { value } = operand.as_ref() {
-                Some(serde_json::Value::Number(serde_json::Number::from(-*value)))
+                Some(i128_to_json(-*value))
             } else {
                 None
             }
@@ -709,7 +720,7 @@ fn extract_loop_count(init: &Statement, condition: &Expression) -> usize {
     0
 }
 
-fn extract_bigint_value(expr: &Expression) -> Option<i64> {
+fn extract_bigint_value(expr: &Expression) -> Option<i128> {
     match expr {
         Expression::BigIntLiteral { value } => Some(*value),
         Expression::UnaryExpr { op, operand } if *op == UnaryOp::Neg => {
@@ -730,7 +741,7 @@ fn extract_bigint_value(expr: &Expression) -> Option<i64> {
 fn lower_expr_to_ref(expr: &Expression, ctx: &mut LoweringContext) -> String {
     match expr {
         Expression::BigIntLiteral { value } => ctx.emit(ANFValue::LoadConst {
-            value: serde_json::Value::Number(serde_json::Number::from(*value)),
+            value: i128_to_json(*value),
         }),
 
         Expression::BoolLiteral { value } => ctx.emit(ANFValue::LoadConst {

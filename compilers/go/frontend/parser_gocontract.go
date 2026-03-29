@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"math/big"
 	"strconv"
 	"strings"
 	"unicode"
@@ -537,8 +538,11 @@ func (p *goContractParser) convertExpression(expr ast.Expr) Expression {
 	case *ast.BasicLit:
 		switch e.Kind {
 		case token.INT:
-			val, _ := strconv.ParseInt(e.Value, 10, 64)
-			return BigIntLiteral{Value: val}
+			bi := new(big.Int)
+			if _, ok := bi.SetString(e.Value, 0); !ok {
+				bi = big.NewInt(0)
+			}
+			return BigIntLiteral{Value: bi}
 		case token.STRING:
 			s, _ := strconv.Unquote(e.Value)
 			return ByteStringLiteral{Value: s}

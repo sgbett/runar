@@ -1,6 +1,7 @@
 package frontend
 
 import (
+	"math/big"
 	"strings"
 	"testing"
 )
@@ -308,8 +309,8 @@ class Test extends SmartContract {
 	if !ok {
 		t.Fatalf("expected BigIntLiteral on left of ===, got %T", binExpr.Left)
 	}
-	if lit.Value != 42 {
-		t.Errorf("expected BigIntLiteral value 42, got %d", lit.Value)
+	if lit.Value.Cmp(big.NewInt(42)) != 0 {
+		t.Errorf("expected BigIntLiteral value 42, got %s", lit.Value.String())
 	}
 }
 

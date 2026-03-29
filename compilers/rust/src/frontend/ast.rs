@@ -276,7 +276,7 @@ pub enum Expression {
         name: String,
     },
     BigIntLiteral {
-        value: i64,
+        value: i128,
     },
     BoolLiteral {
         value: bool,
