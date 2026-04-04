@@ -578,6 +578,11 @@ impl<'a> MoveParser<'a> {
                         self.struct_name = name;
                         parent_class = pc;
                         properties = props;
+                    } else {
+                        self.errors.push(Diagnostic::error(format!(
+                            "Expected 'struct' after 'resource', got {:?}",
+                            self.peek()
+                        ), None));
                     }
                 }
                 Token::Struct => {
@@ -619,9 +624,13 @@ impl<'a> MoveParser<'a> {
         };
 
         // If struct was marked as "resource" or has mutable fields, it's stateful
-        let has_mutable = properties.iter().any(|p| !p.readonly);
-        if is_resource || has_mutable {
+        if is_resource {
             parent_class = "StatefulSmartContract".to_string();
+        } else {
+            let has_mutable = properties.iter().any(|p| !p.readonly);
+            if has_mutable {
+                parent_class = "StatefulSmartContract".to_string();
+            }
         }
 
         // Determine readonly based on parent class

@@ -11,6 +11,7 @@ import { deployCommand } from './commands/deploy.js';
 import { verifyCommand } from './commands/verify.js';
 import { codegenCommand } from './commands/codegen.js';
 import { debugCommand } from './commands/debug.js';
+import { analyzeCommand } from './commands/analyze.js';
 
 program
   .name('runar')
@@ -74,5 +75,14 @@ program
   .option('-u, --unlock <hex>', 'raw unlocking script hex (alternative to --method)')
   .option('-b, --break <loc>', 'initial breakpoint (opcode# or file:line)')
   .action(debugCommand);
+
+program
+  .command('analyze')
+  .description('Analyze compiled Bitcoin Script for potential issues')
+  .argument('<input>', 'hex script, .hex file, or artifact JSON')
+  .option('--json', 'output findings as JSON')
+  .option('--verbose', 'include detailed path analysis')
+  .option('--severity <level>', 'minimum severity to report (error, warning, info)', 'info')
+  .action(analyzeCommand);
 
 program.parse();

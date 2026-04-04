@@ -273,7 +273,9 @@ class MoveParser {
           parentClass = 'StatefulSmartContract';
         }
       } else if (this.current().type === 'public' || this.current().type === 'fun') {
-        methods.push(this.parseFunction());
+        const { method, hasMutReceiver: hasMut } = this.parseFunction();
+        if (hasMut) parentClass = 'StatefulSmartContract';
+        methods.push(method);
       } else {
         this.advance(); // skip unknown
       }
@@ -348,7 +350,7 @@ class MoveParser {
     return { kind: 'custom_type', name: mapped };
   }
 
-  private parseFunction(): MethodNode {
+  private parseFunction(): { method: MethodNode; hasMutReceiver: boolean } {
     const location = this.loc();
     let visibility: 'public' | 'private' = 'private';
     if (this.current().type === 'public') {
@@ -367,11 +369,15 @@ class MoveParser {
 
     this.expect('(');
     const params: ParamNode[] = [];
+    let hasMutReceiver = false;
     while (this.current().type !== ')' && this.current().type !== 'eof') {
       // Skip &self, &mut self, contract: &ContractName
       if (this.current().type === '&') {
         this.advance();
-        if (this.current().type === 'mut') this.advance();
+        if (this.current().type === 'mut') {
+          hasMutReceiver = true;
+          this.advance();
+        }
         if (this.current().type === 'ident' && this.current().value === 'self') {
           this.advance();
           if (this.current().type === ',') this.advance();
@@ -392,7 +398,10 @@ class MoveParser {
         // Skip reference markers
         if (this.current().type === '&') {
           this.advance();
-          if (this.current().type === 'mut') this.advance();
+          if (this.current().type === 'mut') {
+            hasMutReceiver = true;
+            this.advance();
+          }
         }
         const pType = this.parseMoveType();
 
@@ -426,7 +435,10 @@ class MoveParser {
     }
     this.expect('}');
 
-    return { kind: 'method', name, params, body, visibility, sourceLocation: location };
+    return {
+      method: { kind: 'method', name, params, body, visibility, sourceLocation: location },
+      hasMutReceiver,
+    };
   }
 
   private parseStatement(): Statement {

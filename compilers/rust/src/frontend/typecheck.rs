@@ -900,6 +900,13 @@ impl<'a> TypeChecker<'a> {
                     return BYTESTRING.to_string();
                 }
 
+                if property == "addOutput" || property == "addRawOutput" {
+                    for arg in args {
+                        self.infer_expr_type(arg, env);
+                    }
+                    return VOID.to_string();
+                }
+
                 if let Some((params, return_type)) = self.method_sigs.get(property).cloned() {
                     let param_strs: Vec<&str> = params.iter().map(|s| s.as_str()).collect();
                     return self.check_call_args(

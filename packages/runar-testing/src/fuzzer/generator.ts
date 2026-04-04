@@ -7,6 +7,15 @@
  */
 
 import fc from 'fast-check';
+import type {
+  GeneratedContract,
+  GeneratedProperty,
+  GeneratedMethod,
+  GeneratedParam,
+  Expr,
+  Stmt,
+  RuinarType,
+} from './contract-ir.js';
 
 // ---------------------------------------------------------------------------
 // Primitive types available in Rúnar
@@ -515,3 +524,382 @@ ${methods.join('\n\n')}
 `;
       }),
   );
+
+// ===========================================================================
+// IR-based generators (language-neutral)
+// ===========================================================================
+
+/**
+ * Configuration for the IR-based contract generator.
+ */
+export interface GeneratorConfig {
+  maxProperties: number;
+  maxExprDepth: number;
+  maxMethods: number;
+  maxStatements: number;
+  maxParams: number;
+}
+
+const DEFAULT_CONFIG: GeneratorConfig = {
+  maxProperties: 3,
+  maxExprDepth: 3,
+  maxMethods: 3,
+  maxStatements: 4,
+  maxParams: 3,
+};
+
+// ---------------------------------------------------------------------------
+// IR type generator
+// ---------------------------------------------------------------------------
+
+const arbRuinarType: fc.Arbitrary<RuinarType> = fc.oneof(
+  { weight: 5, arbitrary: fc.constant('bigint' as RuinarType) },
+  { weight: 3, arbitrary: fc.constant('boolean' as RuinarType) },
+  { weight: 1, arbitrary: fc.constant('ByteString' as RuinarType) },
+  { weight: 1, arbitrary: fc.constant('PubKey' as RuinarType) },
+);
+
+// ---------------------------------------------------------------------------
+// IR expression generators
+// ---------------------------------------------------------------------------
+
+function arbBigintLiteralIR(): fc.Arbitrary<Expr> {
+  return fc.bigInt({ min: -100n, max: 100n }).map(
+    (v): Expr => ({ kind: 'bigint_literal', value: v }),
+  );
+}
+
+function arbBoolLiteralIR(): fc.Arbitrary<Expr> {
+  return fc.boolean().map(
+    (v): Expr => ({ kind: 'bool_literal', value: v }),
+  );
+}
+
+function arbByteStringLiteralIR(): fc.Arbitrary<Expr> {
+  return fc
+    .array(fc.integer({ min: 0, max: 255 }), { minLength: 0, maxLength: 4 })
+    .map((bytes): Expr => ({
+      kind: 'bytestring_literal',
+      hex: bytes.map((b) => b.toString(16).padStart(2, '0')).join(''),
+    }));
+}
+
+/** Generate a bigint-typed expression using available vars. */
+function arbBigintExprIR(
+  bigintVars: string[],
+  depth: number,
+): fc.Arbitrary<Expr> {
+  if (depth <= 0) {
+    const options: fc.Arbitrary<Expr>[] = [arbBigintLiteralIR()];
+    if (bigintVars.length > 0) {
+      options.push(fc.constantFrom(...bigintVars).map(
+        (name): Expr => name.startsWith('this.')
+          ? { kind: 'property_ref', name: name.slice(5) }
+          : { kind: 'var_ref', name },
+      ));
+    }
+    return fc.oneof(...options);
+  }
+
+  const leaf = arbBigintExprIR(bigintVars, 0);
+  const ops: Array<'+' | '-' | '*'> = ['+', '-', '*'];
+
+  return fc.oneof(
+    leaf,
+    // Binary arithmetic
+    fc.tuple(
+      arbBigintExprIR(bigintVars, depth - 1),
+      fc.constantFrom(...ops),
+      arbBigintExprIR(bigintVars, depth - 1),
+    ).map(([left, op, right]): Expr => ({ kind: 'binary', op, left, right })),
+    // Math builtins
+    fc.tuple(
+      fc.constantFrom('abs'),
+      arbBigintExprIR(bigintVars, depth - 1),
+    ).map(([fn, arg]): Expr => ({ kind: 'call', fn, args: [arg] })),
+    fc.tuple(
+      fc.constantFrom('min', 'max'),
+      arbBigintExprIR(bigintVars, depth - 1),
+      arbBigintExprIR(bigintVars, depth - 1),
+    ).map(([fn, a, b]): Expr => ({ kind: 'call', fn, args: [a, b] })),
+  );
+}
+
+/** Generate a boolean-typed expression. */
+function arbBoolExprIR(
+  bigintVars: string[],
+  boolVars: string[],
+  depth: number,
+): fc.Arbitrary<Expr> {
+  if (depth <= 0) {
+    const options: fc.Arbitrary<Expr>[] = [arbBoolLiteralIR()];
+    if (boolVars.length > 0) {
+      options.push(fc.constantFrom(...boolVars).map(
+        (name): Expr => name.startsWith('this.')
+          ? { kind: 'property_ref', name: name.slice(5) }
+          : { kind: 'var_ref', name },
+      ));
+    }
+    return fc.oneof(...options);
+  }
+
+  const comparisons: Array<'===' | '!==' | '<' | '>' | '<=' | '>='> =
+    ['===', '!==', '<', '>', '<=', '>='];
+
+  return fc.oneof(
+    // Comparison
+    bigintVars.length > 0
+      ? fc.tuple(
+          arbBigintExprIR(bigintVars, depth - 1),
+          fc.constantFrom(...comparisons),
+          arbBigintExprIR(bigintVars, depth - 1),
+        ).map(([left, op, right]): Expr => ({ kind: 'binary', op, left, right }))
+      : arbBoolLiteralIR(),
+    // Logical
+    fc.tuple(
+      arbBoolExprIR(bigintVars, boolVars, depth - 1),
+      fc.constantFrom('&&' as const, '||' as const),
+      arbBoolExprIR(bigintVars, boolVars, depth - 1),
+    ).map(([left, op, right]): Expr => ({ kind: 'binary', op, left, right })),
+    // Negation
+    arbBoolExprIR(bigintVars, boolVars, depth - 1).map(
+      (operand): Expr => ({ kind: 'unary', op: '!', operand }),
+    ),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// IR statement generators
+// ---------------------------------------------------------------------------
+
+function arbAssertStmtIR(
+  bigintVars: string[],
+  boolVars: string[],
+): fc.Arbitrary<Stmt> {
+  return arbBoolExprIR(bigintVars, boolVars, 2).map(
+    (condition): Stmt => ({ kind: 'assert', condition }),
+  );
+}
+
+function arbVarDeclStmtIR(
+  bigintVars: string[],
+): fc.Arbitrary<{ stmt: Stmt; name: string; type: RuinarType }> {
+  return fc.tuple(
+    fc.integer({ min: 0, max: 99 }).map((n) => `local${n}`),
+    arbBigintExprIR(bigintVars, 2),
+  ).map(([name, value]) => ({
+    stmt: { kind: 'var_decl' as const, name, type: 'bigint' as const, value, mutable: false },
+    name,
+    type: 'bigint' as RuinarType,
+  }));
+}
+
+function arbIfStmtIR(
+  bigintVars: string[],
+  boolVars: string[],
+): fc.Arbitrary<Stmt> {
+  return fc.tuple(
+    arbBoolExprIR(bigintVars, boolVars, 1),
+    arbAssertStmtIR(bigintVars, boolVars),
+    fc.option(arbAssertStmtIR(bigintVars, boolVars)),
+  ).map(([condition, thenStmt, elseStmt]): Stmt => ({
+    kind: 'if',
+    condition,
+    then: [thenStmt],
+    else_: elseStmt ? [elseStmt] : undefined,
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// IR method and contract generators
+// ---------------------------------------------------------------------------
+
+function arbMethodIR(
+  properties: GeneratedProperty[],
+  config: GeneratorConfig,
+): fc.Arbitrary<GeneratedMethod> {
+  return fc.tuple(
+    fc.integer({ min: 0, max: 9 }).map((n) => `method${n}`),
+    fc.array(
+      fc.tuple(
+        fc.integer({ min: 0, max: 99 }).map((n) => `param${n}`),
+        fc.constantFrom('bigint' as RuinarType, 'boolean' as RuinarType),
+      ),
+      { minLength: 0, maxLength: config.maxParams },
+    ),
+  ).chain(([name, paramDefs]) => {
+    // Deduplicate
+    const seen = new Set<string>();
+    const params: GeneratedParam[] = [];
+    for (const [pName, pType] of paramDefs) {
+      const unique = seen.has(pName) ? `${pName}X` : pName;
+      seen.add(unique);
+      params.push({ name: unique, type: pType });
+    }
+
+    const bigintVars = [
+      ...properties.filter((p) => p.type === 'bigint').map((p) => `this.${p.name}`),
+      ...params.filter((p) => p.type === 'bigint').map((p) => p.name),
+    ];
+    const boolVars = [
+      ...properties.filter((p) => p.type === 'boolean').map((p) => `this.${p.name}`),
+      ...params.filter((p) => p.type === 'boolean').map((p) => p.name),
+    ];
+
+    return fc.tuple(
+      fc.array(arbVarDeclStmtIR(bigintVars), { minLength: 0, maxLength: 2 }),
+      fc.array(arbIfStmtIR(bigintVars, boolVars), { minLength: 0, maxLength: 1 }),
+      fc.array(arbAssertStmtIR(bigintVars, boolVars), { minLength: 1, maxLength: 2 }),
+    ).map(([decls, ifs, asserts]): GeneratedMethod => {
+      const body: Stmt[] = [
+        ...decls.map((d) => d.stmt),
+        ...ifs,
+        ...asserts,
+      ];
+
+      return {
+        name,
+        visibility: 'public',
+        params,
+        body,
+        mutatesState: false,
+      };
+    });
+  });
+}
+
+function arbStatefulMethodIR(
+  properties: GeneratedProperty[],
+  config: GeneratorConfig,
+): fc.Arbitrary<GeneratedMethod> {
+  const mutableProps = properties.filter((p) => !p.readonly);
+
+  return fc.tuple(
+    fc.integer({ min: 0, max: 9 }).map((n) => `method${n}`),
+    fc.array(
+      fc.tuple(
+        fc.integer({ min: 0, max: 99 }).map((n) => `param${n}`),
+        fc.constant('bigint' as RuinarType),
+      ),
+      { minLength: 0, maxLength: config.maxParams },
+    ),
+  ).chain(([name, paramDefs]) => {
+    const seen = new Set<string>();
+    const params: GeneratedParam[] = [];
+    for (const [pName, pType] of paramDefs) {
+      const unique = seen.has(pName) ? `${pName}X` : pName;
+      seen.add(unique);
+      params.push({ name: unique, type: pType });
+    }
+
+    const bigintVars = [
+      ...properties.filter((p) => p.type === 'bigint').map((p) => `this.${p.name}`),
+      ...params.filter((p) => p.type === 'bigint').map((p) => p.name),
+    ];
+    const boolVars = properties.filter((p) => p.type === 'boolean').map((p) => `this.${p.name}`);
+
+    return fc.tuple(
+      // State mutations
+      fc.array(
+        fc.tuple(
+          fc.constantFrom(...mutableProps.filter((p) => p.type === 'bigint').map((p) => p.name)),
+          arbBigintExprIR(bigintVars, 1),
+        ).map(([target, value]): Stmt => ({
+          kind: 'assign',
+          target,
+          value,
+          isProperty: true,
+        })),
+        { minLength: 1, maxLength: Math.min(2, mutableProps.length) },
+      ),
+      fc.array(arbAssertStmtIR(bigintVars, boolVars), { minLength: 0, maxLength: 1 }),
+    ).map(([mutations, asserts]): GeneratedMethod => ({
+      name,
+      visibility: 'public',
+      params,
+      body: [...asserts, ...mutations],
+      mutatesState: true,
+    }));
+  });
+}
+
+/**
+ * Generate a random stateless GeneratedContract IR.
+ */
+export const arbGeneratedContract: fc.Arbitrary<GeneratedContract> = fc
+  .tuple(
+    fc.integer({ min: 0, max: 99 }).map((n) => `FuzzContract${n}`),
+    fc.array(
+      fc.tuple(
+        fc.integer({ min: 0, max: 99 }).map((n) => `prop${n}`),
+        fc.constantFrom('bigint' as RuinarType, 'boolean' as RuinarType),
+      ),
+      { minLength: 1, maxLength: DEFAULT_CONFIG.maxProperties },
+    ),
+  )
+  .chain(([name, propDefs]) => {
+    const seen = new Set<string>();
+    const properties: GeneratedProperty[] = [];
+    for (const [pName, pType] of propDefs) {
+      const unique = seen.has(pName) ? `${pName}X` : pName;
+      seen.add(unique);
+      properties.push({ name: unique, type: pType, readonly: true });
+    }
+
+    return fc
+      .array(arbMethodIR(properties, DEFAULT_CONFIG), {
+        minLength: 1,
+        maxLength: DEFAULT_CONFIG.maxMethods,
+      })
+      .map((methods): GeneratedContract => ({
+        name,
+        parentClass: 'SmartContract',
+        properties,
+        methods,
+      }));
+  });
+
+/**
+ * Generate a random stateful GeneratedContract IR.
+ */
+export const arbGeneratedStatefulContract: fc.Arbitrary<GeneratedContract> = fc
+  .tuple(
+    fc.integer({ min: 0, max: 99 }).map((n) => `FuzzStateful${n}`),
+    // At least one mutable bigint property
+    fc.array(
+      fc.tuple(
+        fc.integer({ min: 0, max: 99 }).map((n) => `prop${n}`),
+        fc.constant('bigint' as RuinarType),
+        fc.boolean(), // readonly?
+      ),
+      { minLength: 1, maxLength: DEFAULT_CONFIG.maxProperties },
+    ),
+  )
+  .chain(([name, propDefs]) => {
+    const seen = new Set<string>();
+    const properties: GeneratedProperty[] = [];
+    let hasMutable = false;
+    for (const [pName, pType, isReadonly] of propDefs) {
+      const unique = seen.has(pName) ? `${pName}X` : pName;
+      seen.add(unique);
+      properties.push({ name: unique, type: pType, readonly: isReadonly });
+      if (!isReadonly) hasMutable = true;
+    }
+
+    // Ensure at least one mutable property
+    if (!hasMutable && properties.length > 0) {
+      properties[0]!.readonly = false;
+    }
+
+    return fc
+      .array(arbStatefulMethodIR(properties, DEFAULT_CONFIG), {
+        minLength: 1,
+        maxLength: DEFAULT_CONFIG.maxMethods,
+      })
+      .map((methods): GeneratedContract => ({
+        name,
+        parentClass: 'StatefulSmartContract',
+        properties,
+        methods,
+      }));
+  });

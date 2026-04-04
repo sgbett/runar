@@ -652,16 +652,8 @@ func TestANFECOptimizer_Rule10_EcAddMulGenMulGen(t *testing.T) {
 	}
 
 	// After Rule 10, t4 should be ecMulGen with k1+k2 = 8
-	// Since Rule 10 is NOT implemented, this will still be ecAdd.
-	// If it becomes ecMulGen, the rule was implemented and the test passes.
-	if t4Result.Value.Kind == "call" && t4Result.Value.Func == "ecMulGen" {
-		// Rule 10 fired — verify the result makes sense
-		t.Logf("Rule 10 fired: t4 is now ecMulGen with args %v", t4Result.Value.Args)
-	} else if t4Result.Value.Kind == "call" && t4Result.Value.Func == "ecAdd" {
-		// Rule 10 was NOT implemented — fail with a descriptive message
-		t.Errorf("Rule 10 not implemented: ecAdd(ecMulGen(k1), ecMulGen(k2)) was NOT rewritten to ecMulGen(k1+k2); t4 is still %s(%s)", t4Result.Value.Func, strings.Join(t4Result.Value.Args, ", "))
-	} else {
-		t.Errorf("unexpected t4 after optimization: kind=%s func=%s", t4Result.Value.Kind, t4Result.Value.Func)
+	if t4Result.Value.Kind != "call" || t4Result.Value.Func != "ecMulGen" {
+		t.Errorf("expected t4 to be ecMulGen after Rule 10, got %s(%s)", t4Result.Value.Func, strings.Join(t4Result.Value.Args, ", "))
 	}
 }
 

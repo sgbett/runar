@@ -666,11 +666,9 @@ const Parser = struct {
 
         // Finalize property readonly flags based on parent class
         if (parent_class == .stateful_smart_contract) {
-            for (properties.items) |*prop| {
-                // In stateful contracts, properties are mutable by default
-                // unless they had no &mut marker (readonly stays as set during struct parsing)
-                _ = prop;
-            }
+            // Properties with explicit &mut type marker are already mutable.
+            // Others remain as parsed (readonly by default in struct definitions).
+            _ = &properties; // intentional no-op — properties are finalized above
         }
 
         // Build constructor from properties (auto-generate)

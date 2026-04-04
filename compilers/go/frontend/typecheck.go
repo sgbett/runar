@@ -704,6 +704,12 @@ func (tc *typeChecker) checkCallExpr(e CallExpr, env *typeEnv) string {
 			if me.Property == "getStateScript" {
 				return "ByteString"
 			}
+			if me.Property == "addOutput" || me.Property == "addRawOutput" {
+				for _, arg := range e.Args {
+					tc.inferExprType(arg, env)
+				}
+				return "void"
+			}
 			if sig, ok := tc.methodSigs[me.Property]; ok {
 				return tc.checkCallArgs(me.Property, sig, e.Args, env)
 			}

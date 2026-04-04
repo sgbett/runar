@@ -27,6 +27,29 @@ export {
   arbStatelessContract,
   arbArithmeticContract,
   arbCryptoContract,
+  arbGeneratedContract,
+  arbGeneratedStatefulContract,
+  renderTypeScript,
+  renderGo,
+  renderRust,
+  renderPython,
+  renderZig,
+  renderRuby,
+  RENDERERS,
+  FORMAT_EXTENSIONS,
+  toSnakeCase,
+  toPascalCase,
+} from './fuzzer/index.js';
+export type {
+  GeneratorConfig,
+  GeneratedContract,
+  GeneratedProperty,
+  GeneratedMethod,
+  GeneratedParam,
+  RenderFormat,
+  RuinarType,
+  Expr,
+  Stmt,
 } from './fuzzer/index.js';
 
 // Test helpers
@@ -86,6 +109,14 @@ export {
   SLH_SHA2_256s, SLH_SHA2_256f, ALL_SHA2_PARAMS,
 } from './crypto/slh-dsa.js';
 export type { SLHParams, SLHKeyPair } from './crypto/slh-dsa.js';
+
+// Analyzer
+export { analyzeScript, parseScript, getStackEffect, analyzeStackLinear } from './analyzer/index.js';
+export type {
+  AnalysisResult, AnalysisFinding, AnalysisSummary,
+  ExecutionPath, FindingSeverity, FindingCode,
+} from './analyzer/index.js';
+export type { ParsedOpcode } from './analyzer/index.js';
 
 // Mock preimage helpers (standalone BIP-143 preimage building for stateful contracts)
 export {

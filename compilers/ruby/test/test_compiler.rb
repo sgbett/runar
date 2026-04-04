@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'ostruct'
 require_relative 'test_helper'
 
 class TestCompiler < Minitest::Test

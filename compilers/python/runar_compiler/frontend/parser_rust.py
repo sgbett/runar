@@ -558,12 +558,15 @@ class _RustParser:
                             field_type = self.parse_rust_type()
                             self.match_tok(TOK_COMMA)
 
-                            properties.append(PropertyNode(
-                                name=_snake_to_camel(field_name),
-                                type=field_type,
-                                readonly=readonly,
-                                source_location=field_loc,
-                            ))
+                            # Skip txPreimage — implicit stateful param, not a contract property
+                            camel_name = _snake_to_camel(field_name)
+                            if camel_name != "txPreimage":
+                                properties.append(PropertyNode(
+                                    name=camel_name,
+                                    type=field_type,
+                                    readonly=readonly,
+                                    source_location=field_loc,
+                                ))
                         else:
                             self.advance()
 

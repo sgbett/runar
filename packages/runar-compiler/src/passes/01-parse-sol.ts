@@ -279,13 +279,21 @@ class SolParser {
       };
     }
 
+    // Resolve bare property references in method bodies (Solidity allows
+    // referencing state variables without `this.` prefix)
+    const propNames = new Set(properties.map(p => p.name));
+    const resolvedMethods = methods.map(m => {
+      const paramNameSet = new Set(m.params.map(p => p.name));
+      return { ...m, body: m.body.map(s => resolvePropertyAccess(s, propNames, paramNameSet)) };
+    });
+
     const contract: ContractNode = {
       kind: 'contract',
       name: contractName,
       parentClass,
       properties,
       constructor: constructorNode,
-      methods,
+      methods: resolvedMethods,
       sourceFile: this.file,
     };
 
@@ -916,6 +924,73 @@ function renameIdentifiers(stmt: Statement, map: Map<string, string>): Statement
       };
     case 'return_statement':
       return stmt.value ? { ...stmt, value: renameExpr(stmt.value) } : stmt;
+    default:
+      return stmt;
+  }
+}
+
+/**
+ * Convert bare identifiers that match property names to property_access nodes.
+ * In Solidity, contract state variables can be referenced without `this.`.
+ */
+function resolvePropertyAccess(stmt: Statement, propNames: Set<string>, paramNames: Set<string>): Statement {
+  function resolveExpr(expr: Expression): Expression {
+    switch (expr.kind) {
+      case 'identifier': {
+        // Only convert if it's a property name and NOT a local variable/parameter
+        if (propNames.has(expr.name) && !paramNames.has(expr.name)) {
+          return { kind: 'property_access', property: expr.name };
+        }
+        return expr;
+      }
+      case 'binary_expr':
+        return { ...expr, left: resolveExpr(expr.left), right: resolveExpr(expr.right) };
+      case 'unary_expr':
+        return { ...expr, operand: resolveExpr(expr.operand) };
+      case 'call_expr':
+        return { ...expr, callee: resolveExpr(expr.callee), args: expr.args.map(resolveExpr) };
+      case 'member_expr':
+        return { ...expr, object: resolveExpr(expr.object) };
+      case 'ternary_expr':
+        return { ...expr, condition: resolveExpr(expr.condition), consequent: resolveExpr(expr.consequent), alternate: resolveExpr(expr.alternate) };
+      case 'index_access':
+        return { ...expr, object: resolveExpr(expr.object), index: resolveExpr(expr.index) };
+      case 'increment_expr':
+      case 'decrement_expr':
+        return { ...expr, operand: resolveExpr(expr.operand) };
+      default:
+        return expr;
+    }
+  }
+
+  switch (stmt.kind) {
+    case 'variable_decl': {
+      const resolved = { ...stmt, init: resolveExpr(stmt.init) };
+      // The declared variable shadows any property with the same name
+      paramNames.add(stmt.name);
+      return resolved;
+    }
+    case 'assignment':
+      return { ...stmt, target: resolveExpr(stmt.target), value: resolveExpr(stmt.value) };
+    case 'expression_statement':
+      return { ...stmt, expression: resolveExpr(stmt.expression) };
+    case 'if_statement':
+      return {
+        ...stmt,
+        condition: resolveExpr(stmt.condition),
+        then: stmt.then.map(s => resolvePropertyAccess(s, propNames, new Set(paramNames))),
+        else: stmt.else?.map(s => resolvePropertyAccess(s, propNames, new Set(paramNames))),
+      };
+    case 'for_statement':
+      return {
+        ...stmt,
+        init: resolvePropertyAccess(stmt.init, propNames, paramNames) as typeof stmt.init,
+        condition: resolveExpr(stmt.condition),
+        update: resolvePropertyAccess(stmt.update, propNames, paramNames),
+        body: stmt.body.map(s => resolvePropertyAccess(s, propNames, new Set(paramNames))),
+      };
+    case 'return_statement':
+      return stmt.value ? { ...stmt, value: resolveExpr(stmt.value) } : stmt;
     default:
       return stmt;
   }

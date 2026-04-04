@@ -441,9 +441,9 @@ class _MoveParser:
                 if is_resource:
                     self.advance()  # skip "resource"
                 props = self._parse_move_struct()
-                properties.extend(props)
                 if is_resource or any(not p.readonly for p in props):
                     parent_class = "StatefulSmartContract"
+                properties.extend(props)
                 continue
 
             # public fun or fun

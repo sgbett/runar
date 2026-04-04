@@ -310,6 +310,11 @@ impl RustDslParser {
                             if field_attr == "readonly" { readonly = true; }
                         }
 
+                        // Skip optional `pub` visibility modifier
+                        if matches!(self.current().typ, TokenType::Pub) {
+                            self.advance_clone();
+                        }
+
                         let loc = self.loc();
                         if let TokenType::Ident(field_name) = self.current().typ.clone() {
                             self.advance_clone();

@@ -50,9 +50,9 @@ export interface ConformanceResult {
  */
 export const INPUT_FORMATS = [
   { ext: '.runar.ts',   compilers: ['ts', 'go', 'rust', 'python', 'zig', 'ruby'] as const },
-  { ext: '.runar.sol',  compilers: ['ts', 'go', 'rust', 'python', 'ruby'] as const },
-  { ext: '.runar.move', compilers: ['ts', 'go', 'rust', 'python', 'ruby'] as const },
-  { ext: '.runar.py',   compilers: ['ts', 'go', 'rust', 'python', 'ruby'] as const },
+  { ext: '.runar.sol',  compilers: ['ts', 'go', 'rust', 'python', 'zig', 'ruby'] as const },
+  { ext: '.runar.move', compilers: ['ts', 'go', 'rust', 'python', 'zig', 'ruby'] as const },
+  { ext: '.runar.py',   compilers: ['ts', 'go', 'rust', 'python', 'zig', 'ruby'] as const },
   { ext: '.runar.go',   compilers: ['ts', 'go', 'rust', 'python', 'zig', 'ruby'] as const },
   { ext: '.runar.rs',   compilers: ['ts', 'go', 'rust', 'python', 'zig', 'ruby'] as const },
   { ext: '.runar.rb',   compilers: ['ts', 'go', 'rust', 'python', 'zig', 'ruby'] as const },

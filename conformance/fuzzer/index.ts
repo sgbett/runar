@@ -9,9 +9,11 @@
  * Options:
  *   --num <count>          Number of random programs to generate (default: 100)
  *   --seed <n>             RNG seed for reproducibility
- *   --compilers <list>     Comma-separated list of compilers: ts,go,rust (default: ts,go,rust)
+ *   --compilers <list>     Comma-separated list: ts,go,rust,python,zig,ruby (default: all available)
  *   --verbose              Print each generated program and result
  *   --property             Use fast-check property-based mode (with shrinking)
+ *   --hex                  Compare final hex script instead of IR
+ *   --findings-dir <path>  Directory to save failing cases (default: conformance/fuzz-findings)
  *   --output <path>        Write results JSON to file
  *   --help                 Show this help message
  */
@@ -23,6 +25,7 @@ import {
   runPropertyBasedDifferential,
   type DifferentialResult,
   type FuzzerOptions,
+  type CompilerName,
 } from './differential.js';
 
 // ---------------------------------------------------------------------------
@@ -32,9 +35,11 @@ import {
 interface FuzzerCLIOptions {
   num: number;
   seed?: number;
-  compilers: ('ts' | 'go' | 'rust')[];
+  compilers: CompilerName[];
   verbose: boolean;
   property: boolean;
+  hex: boolean;
+  findingsDir?: string;
   output?: string;
   help: boolean;
 }
@@ -42,9 +47,10 @@ interface FuzzerCLIOptions {
 function parseArgs(argv: string[]): FuzzerCLIOptions {
   const opts: FuzzerCLIOptions = {
     num: 100,
-    compilers: ['ts', 'go', 'rust'],
+    compilers: ['ts', 'go', 'rust', 'python', 'zig', 'ruby'],
     verbose: false,
     property: false,
+    hex: false,
     help: false,
   };
 
@@ -58,8 +64,8 @@ function parseArgs(argv: string[]): FuzzerCLIOptions {
         opts.seed = parseInt(argv[++i] ?? '0', 10);
         break;
       case '--compilers': {
-        const raw = argv[++i] ?? 'ts,go,rust';
-        opts.compilers = raw.split(',').map((s) => s.trim()) as FuzzerCLIOptions['compilers'];
+        const raw = argv[++i] ?? 'ts,go,rust,python,zig,ruby';
+        opts.compilers = raw.split(',').map((s) => s.trim()) as CompilerName[];
         break;
       }
       case '--verbose':
@@ -67,6 +73,12 @@ function parseArgs(argv: string[]): FuzzerCLIOptions {
         break;
       case '--property':
         opts.property = true;
+        break;
+      case '--hex':
+        opts.hex = true;
+        break;
+      case '--findings-dir':
+        opts.findingsDir = resolve(argv[++i] ?? '');
         break;
       case '--output':
         opts.output = resolve(argv[++i] ?? '');
@@ -89,7 +101,7 @@ function printHelp(): void {
 Rúnar Differential Fuzzer
 
 Generates random valid Rúnar contract programs, compiles them through all
-available compiler implementations, and verifies that the IR output matches
+available compiler implementations, and verifies that the output matches
 byte-for-byte.
 
 Usage:
@@ -98,10 +110,14 @@ Usage:
 Options:
   --num <count>          Number of random programs to generate (default: 100)
   --seed <n>             RNG seed for reproducible runs
-  --compilers <list>     Comma-separated list: ts,go,rust (default: ts,go,rust)
+  --compilers <list>     Comma-separated list: ts,go,rust,python,zig,ruby
+                         (default: all available)
   --verbose              Print each generated program and its result
   --property             Use fast-check property-based mode with shrinking
                          (finds minimal failing programs)
+  --hex                  Compare final hex script instead of IR
+  --findings-dir <path>  Directory to save failing cases
+                         (default: conformance/fuzz-findings)
   --output <path>        Write results JSON to file
   --help, -h             Show this help message
 
@@ -111,6 +127,9 @@ Examples:
 
   # Reproducible run with seed
   npx tsx conformance/fuzzer/index.ts --seed 42 --verbose
+
+  # Compare hex output across all 6 compilers
+  npx tsx conformance/fuzzer/index.ts --hex --num 50
 
   # Property-based mode (will shrink failing inputs)
   npx tsx conformance/fuzzer/index.ts --property --seed 12345
@@ -135,6 +154,7 @@ async function main(): Promise<void> {
   console.log('Rúnar Differential Fuzzer');
   console.log(`  Programs: ${opts.num}`);
   console.log(`  Compilers: ${opts.compilers.join(', ')}`);
+  console.log(`  Compare: ${opts.hex ? 'hex script' : 'ANF IR'}`);
   if (opts.seed !== undefined) {
     console.log(`  Seed: ${opts.seed}`);
   }
@@ -145,10 +165,11 @@ async function main(): Promise<void> {
     seed: opts.seed,
     compilers: opts.compilers,
     verbose: opts.verbose,
+    compareHex: opts.hex,
+    findingsDir: opts.findingsDir,
   };
 
   if (opts.property) {
-    // Property-based mode: fast-check handles iteration and shrinking
     try {
       await runPropertyBasedDifferential(fuzzerOpts);
       console.log('All property checks passed.');
@@ -158,7 +179,6 @@ async function main(): Promise<void> {
       process.exit(1);
     }
   } else {
-    // Sample-based mode: generate N programs and compare
     const results = await runDifferentialFuzzing(opts.num, fuzzerOpts);
 
     const mismatches = results.filter((r) => !r.match);
@@ -178,6 +198,7 @@ async function main(): Promise<void> {
         mismatches: mismatches.length,
         seed: opts.seed,
         compilers: opts.compilers,
+        compareHex: opts.hex,
         results: results.map((r) => ({
           match: r.match,
           mismatchDetails: r.mismatchDetails,

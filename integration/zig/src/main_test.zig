@@ -10,6 +10,17 @@ comptime {
     _ = @import("function_patterns_test.zig");
     _ = @import("compile_all_test.zig");
     _ = @import("compile.zig");
+    _ = @import("auction_test.zig");
+    _ = @import("convergence_proof_test.zig");
+    _ = @import("covenant_vault_test.zig");
+    _ = @import("ec_isolation_test.zig");
+    _ = @import("token_ft_test.zig");
+    _ = @import("token_nft_test.zig");
+    _ = @import("oracle_price_test.zig");
+    _ = @import("schnorr_zkp_test.zig");
+    _ = @import("sphincs_wallet_test.zig");
+    _ = @import("tic_tac_toe_test.zig");
+    _ = @import("post_quantum_wallet_test.zig");
 }
 
 test "integration_setup" {

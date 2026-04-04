@@ -556,7 +556,10 @@ func (p *moveParser) parseModule() (*ContractNode, error) {
 
 		// public fun or fun
 		if p.checkIdent("public") || p.checkIdent("fun") {
-			method := p.parseMoveFunction()
+			method, hasMutRecv := p.parseMoveFunction()
+			if hasMutRecv {
+				parentClass = "StatefulSmartContract"
+			}
 			methods = append(methods, method)
 			continue
 		}
@@ -682,7 +685,7 @@ func (p *moveParser) parseMoveTypeName() string {
 // Function parsing
 // ---------------------------------------------------------------------------
 
-func (p *moveParser) parseMoveFunction() MethodNode {
+func (p *moveParser) parseMoveFunction() (MethodNode, bool) {
 	loc := p.loc()
 	visibility := "private"
 
@@ -703,7 +706,7 @@ func (p *moveParser) parseMoveFunction() MethodNode {
 	nameTok := p.expect(moveTokIdent)
 	name := snakeToCamel(nameTok.value)
 
-	params := p.parseMoveParams()
+	params, hasMutRecv := p.parseMoveParams()
 
 	// Optional return type: : Type
 	if p.match(moveTokColon) {
@@ -718,12 +721,13 @@ func (p *moveParser) parseMoveFunction() MethodNode {
 		Body:           body,
 		Visibility:     visibility,
 		SourceLocation: loc,
-	}
+	}, hasMutRecv
 }
 
-func (p *moveParser) parseMoveParams() []ParamNode {
+func (p *moveParser) parseMoveParams() ([]ParamNode, bool) {
 	p.expect(moveTokLParen)
 	var params []ParamNode
+	hasMutRecv := false
 
 	for !p.check(moveTokRParen) && !p.check(moveTokEOF) {
 		// Skip &self, self, &mut self, contract: &ContractName
@@ -737,14 +741,12 @@ func (p *moveParser) parseMoveParams() []ParamNode {
 
 		// Check for & prefix
 		isRef := false
-		isMut := false
 		if p.check(moveTokAmp) {
 			isRef = true
 			p.advance()
 			if p.matchIdent("mut") {
-				isMut = true
+				hasMutRecv = true
 			}
-			_ = isMut
 		}
 
 		nameTok := p.expect(moveTokIdent)
@@ -756,7 +758,7 @@ func (p *moveParser) parseMoveParams() []ParamNode {
 		if p.check(moveTokAmp) {
 			p.advance()
 			if p.matchIdent("mut") {
-				// &mut Type
+				hasMutRecv = true
 			}
 		}
 
@@ -785,7 +787,7 @@ func (p *moveParser) parseMoveParams() []ParamNode {
 	}
 
 	p.expect(moveTokRParen)
-	return params
+	return params, hasMutRecv
 }
 
 // ---------------------------------------------------------------------------

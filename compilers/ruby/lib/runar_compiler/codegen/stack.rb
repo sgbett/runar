@@ -1718,9 +1718,7 @@ module RunarCompiler::Codegen
     end
 
     # -----------------------------------------------------------------
-    # Specialized call lowering stubs
-    # These will be fully implemented in Part 2 for advanced kinds.
-    # For now, provide the basic structure or delegate to codegen modules.
+    # Specialized call lowering
     # -----------------------------------------------------------------
 
     def _lower_check_multi_sig(binding_name, args, binding_index, last_uses)
