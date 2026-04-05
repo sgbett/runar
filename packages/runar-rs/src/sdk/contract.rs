@@ -1228,23 +1228,55 @@ impl RunarContract {
     fn build_code_script(&self) -> String {
         let mut script = self.artifact.script.clone();
 
-        if let Some(ref slots) = self.artifact.constructor_slots {
-            if !slots.is_empty() {
-                // Sort by byteOffset descending so splicing doesn't shift later offsets
-                let mut sorted_slots = slots.clone();
-                sorted_slots.sort_by(|a, b| b.byte_offset.cmp(&a.byte_offset));
+        let has_constructor_slots = self
+            .artifact
+            .constructor_slots
+            .as_ref()
+            .map_or(false, |s| !s.is_empty());
+        let has_code_sep_slots = self
+            .artifact
+            .code_sep_index_slots
+            .as_ref()
+            .map_or(false, |s| !s.is_empty());
 
-                for slot in &sorted_slots {
-                    let encoded = encode_arg(&self.constructor_args[slot.param_index]);
-                    let hex_offset = slot.byte_offset * 2;
-                    // Replace the 1-byte OP_0 placeholder (2 hex chars) with the encoded arg
-                    let before = &script[..hex_offset];
-                    let after = &script[hex_offset + 2..];
-                    script = format!("{}{}{}", before, encoded, after);
+        if has_constructor_slots || has_code_sep_slots {
+            // Build a unified list of all template slot substitutions, then process
+            // them in descending byte-offset order so each splice doesn't invalidate
+            // the positions of earlier (higher-offset) entries.
+            let mut subs: Vec<(usize, String)> = Vec::new();
+
+            // Constructor arg slots: replace OP_0 placeholder with encoded arg
+            if let Some(ref slots) = self.artifact.constructor_slots {
+                for slot in slots {
+                    subs.push((
+                        slot.byte_offset,
+                        encode_arg(&self.constructor_args[slot.param_index]),
+                    ));
                 }
-
-                return script;
             }
+
+            // CodeSepIndex slots: replace OP_0 placeholder with encoded adjusted
+            // codeSeparatorIndex.
+            if has_code_sep_slots {
+                let resolved = self.resolved_code_sep_slot_values();
+                for rs in &resolved {
+                    subs.push((
+                        rs.0,
+                        encode_script_number(rs.1 as i64),
+                    ));
+                }
+            }
+
+            // Sort descending by byte offset and apply
+            subs.sort_by(|a, b| b.0.cmp(&a.0));
+            for (byte_offset, encoded) in &subs {
+                let hex_offset = byte_offset * 2;
+                let before = &script[..hex_offset];
+                let after = &script[hex_offset + 2..];
+                script = format!("{}{}{}", before, encoded, after);
+            }
+
+            return script;
         }
 
         // Backward compatibility: old stateless artifacts without constructorSlots.
@@ -1400,20 +1432,69 @@ impl RunarContract {
         self.code_script.clone().unwrap_or_else(|| self.build_code_script())
     }
 
-    /// Adjust code separator byte offset for constructor arg substitution.
+    /// Adjust code separator byte offset for constructor arg and codeSepIndex
+    /// slot substitution. Both slot types replace OP_0 (1 byte) with encoded
+    /// push data, shifting subsequent byte offsets.
     fn adjust_code_sep_offset(&self, base_offset: usize) -> usize {
+        let mut shift: isize = 0;
         if let Some(ref slots) = self.artifact.constructor_slots {
-            let mut shift: isize = 0;
             for slot in slots {
                 if slot.byte_offset < base_offset {
                     let encoded = encode_arg(&self.constructor_args[slot.param_index]);
-                    shift += (encoded.len() / 2) as isize - 1; // encoded bytes minus 1-byte placeholder
+                    shift += (encoded.len() / 2) as isize - 1;
                 }
             }
-            (base_offset as isize + shift) as usize
-        } else {
-            base_offset
         }
+        // Account for codeSepIndex slot expansions
+        for (template_offset, adjusted_value) in self.resolved_code_sep_slot_values() {
+            if template_offset < base_offset {
+                let encoded = encode_script_number(adjusted_value as i64);
+                shift += (encoded.len() / 2) as isize - 1;
+            }
+        }
+        (base_offset as isize + shift) as usize
+    }
+
+    /// Resolve the adjusted codeSep index values for all codeSepIndex slots,
+    /// processing them in ascending template byte-offset order so that each
+    /// slot's value correctly accounts for earlier slots' expansions.
+    fn resolved_code_sep_slot_values(&self) -> Vec<(usize, usize)> {
+        let slots = match self.artifact.code_sep_index_slots {
+            Some(ref s) if !s.is_empty() => s,
+            _ => return Vec::new(),
+        };
+
+        // Sort by template byte offset ascending (left-to-right in the script)
+        let mut sorted = slots.clone();
+        sorted.sort_by_key(|s| s.byte_offset);
+
+        let mut result: Vec<(usize, usize)> = Vec::new();
+
+        for slot in &sorted {
+            // Compute the fully-adjusted codeSep index: constructor expansion +
+            // expansion from earlier codeSepIndex slots that precede this slot's codeSepIndex.
+            let mut shift: isize = 0;
+            if let Some(ref cs_slots) = self.artifact.constructor_slots {
+                for cs in cs_slots {
+                    if cs.byte_offset < slot.code_sep_index {
+                        let encoded = encode_arg(&self.constructor_args[cs.param_index]);
+                        shift += (encoded.len() / 2) as isize - 1;
+                    }
+                }
+            }
+            for &(prev_offset, prev_value) in &result {
+                if prev_offset < slot.code_sep_index {
+                    let prev_encoded = encode_script_number(prev_value as i64);
+                    shift += (prev_encoded.len() / 2) as isize - 1;
+                }
+            }
+            result.push((
+                slot.byte_offset,
+                (slot.code_sep_index as isize + shift) as usize,
+            ));
+        }
+
+        result
     }
 
     /// Get the adjusted code separator index for a method.
@@ -1724,6 +1805,7 @@ mod tests {
             script: script.to_string(),
             state_fields: None,
             constructor_slots: None,
+            code_sep_index_slots: None,
             code_separator_index: None,
             code_separator_indices: None,
             anf: None,
@@ -1782,6 +1864,7 @@ mod tests {
             script: "51".to_string(),
             state_fields: None,
             constructor_slots: None,
+            code_sep_index_slots: None,
             code_separator_index: None,
             code_separator_indices: None,
             anf: None,
@@ -1818,6 +1901,7 @@ mod tests {
                 param_index: 0,
                 byte_offset: 2,
             }]),
+            code_sep_index_slots: None,
             code_separator_index: None,
             code_separator_indices: None,
             anf: None,
@@ -1855,6 +1939,7 @@ mod tests {
                 ConstructorSlot { param_index: 0, byte_offset: 0 },
                 ConstructorSlot { param_index: 1, byte_offset: 2 },
             ]),
+            code_sep_index_slots: None,
             code_separator_index: None,
             code_separator_indices: None,
             anf: None,
@@ -1888,6 +1973,7 @@ mod tests {
             script: "76a90088ac".to_string(),
             state_fields: None,
             constructor_slots: None,
+            code_sep_index_slots: None,
             code_separator_index: None,
             code_separator_indices: None,
             anf: None,
@@ -1922,6 +2008,7 @@ mod tests {
             script: "009c69".to_string(),
             state_fields: None,
             constructor_slots: Some(vec![ConstructorSlot { param_index: 0, byte_offset: 0 }]),
+            code_sep_index_slots: None,
             code_separator_index: None,
             code_separator_indices: None,
             anf: None,
@@ -1948,6 +2035,7 @@ mod tests {
             script: "00930088".to_string(),
             state_fields: None,
             constructor_slots: Some(vec![ConstructorSlot { param_index: 0, byte_offset: 2 }]),
+            code_sep_index_slots: None,
             code_separator_index: None,
             code_separator_indices: None,
             anf: None,
@@ -2381,6 +2469,7 @@ mod tests {
             script: code_hex.to_string(),
             state_fields: Some(state_fields),
             constructor_slots: None,
+            code_sep_index_slots: None,
             code_separator_index: None,
             code_separator_indices: None,
             anf: None,
@@ -2456,6 +2545,7 @@ mod tests {
             script: "51".to_string(),
             state_fields: Some(vec![StateField { name: "count".to_string(), field_type: "bigint".to_string(), index: 0, initial_value: None }]),
             constructor_slots: None,
+            code_sep_index_slots: None,
             code_separator_index: None,
             code_separator_indices: None,
             anf: None,
@@ -2497,6 +2587,7 @@ mod tests {
                 StateField { name: "metadata".to_string(), field_type: "ByteString".to_string(), index: 2, initial_value: None },
             ]),
             constructor_slots: None,
+            code_sep_index_slots: None,
             code_separator_index: None,
             code_separator_indices: None,
             anf: None,
@@ -2717,6 +2808,7 @@ mod tests {
                 initial_value: Some(serde_json::Value::String("0n".to_string())),
             }]),
             constructor_slots: None,
+            code_sep_index_slots: None,
             code_separator_index: None,
             code_separator_indices: None,
             anf: None,
@@ -2743,6 +2835,7 @@ mod tests {
                 initial_value: Some(serde_json::Value::String("1000n".to_string())),
             }]),
             constructor_slots: None,
+            code_sep_index_slots: None,
             code_separator_index: None,
             code_separator_indices: None,
             anf: None,
@@ -2769,6 +2862,7 @@ mod tests {
                 initial_value: Some(serde_json::Value::String("-42n".to_string())),
             }]),
             constructor_slots: None,
+            code_sep_index_slots: None,
             code_separator_index: None,
             code_separator_indices: None,
             anf: None,
@@ -2795,6 +2889,7 @@ mod tests {
                 initial_value: Some(serde_json::Value::String("0n".to_string())),
             }]),
             constructor_slots: None,
+            code_sep_index_slots: None,
             code_separator_index: None,
             code_separator_indices: None,
             anf: None,

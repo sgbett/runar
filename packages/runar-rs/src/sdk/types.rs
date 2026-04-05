@@ -118,6 +118,8 @@ pub struct RunarArtifact {
     pub state_fields: Option<Vec<StateField>>,
     #[serde(default)]
     pub constructor_slots: Option<Vec<ConstructorSlot>>,
+    #[serde(default)]
+    pub code_sep_index_slots: Option<Vec<CodeSepIndexSlot>>,
     #[serde(default, rename = "codeSeparatorIndex")]
     pub code_separator_index: Option<usize>,
     #[serde(default, rename = "codeSeparatorIndices")]
@@ -180,6 +182,17 @@ pub struct StateField {
 pub struct ConstructorSlot {
     pub param_index: usize,
     pub byte_offset: usize,
+}
+
+/// A codeSepIndex slot describing where a codeSeparatorIndex placeholder
+/// (OP_0) resides in the template script. The SDK substitutes these at
+/// deployment time with the adjusted codeSeparatorIndex value that accounts
+/// for constructor arg expansion.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeSepIndexSlot {
+    pub byte_offset: usize,
+    pub code_sep_index: usize,
 }
 
 // ---------------------------------------------------------------------------

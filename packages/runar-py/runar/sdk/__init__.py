@@ -3,7 +3,7 @@
 from runar.sdk.types import (
     Utxo, TransactionData, Transaction, TxInput, TxOutput,
     RunarArtifact, Abi, AbiMethod, AbiParam,
-    StateField, ConstructorSlot, DeployOptions, CallOptions, OutputSpec,
+    StateField, ConstructorSlot, CodeSepIndexSlot, DeployOptions, CallOptions, OutputSpec,
     PreparedCall, SdkValue, TerminalOutput,
 )
 from runar.sdk.provider import Provider, MockProvider
@@ -25,7 +25,7 @@ from runar.sdk.wallet import WalletClient, WalletProvider, WalletSigner
 __all__ = [
     'Utxo', 'TransactionData', 'Transaction', 'TxInput', 'TxOutput',
     'RunarArtifact', 'Abi', 'AbiMethod', 'AbiParam',
-    'StateField', 'ConstructorSlot', 'DeployOptions', 'CallOptions', 'OutputSpec',
+    'StateField', 'ConstructorSlot', 'CodeSepIndexSlot', 'DeployOptions', 'CallOptions', 'OutputSpec',
     'PreparedCall', 'SdkValue', 'TerminalOutput',
     'Provider', 'MockProvider', 'RPCProvider', 'WhatsOnChainProvider',
     'Signer', 'MockSigner', 'ExternalSigner', 'LocalSigner',

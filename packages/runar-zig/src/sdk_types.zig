@@ -99,6 +99,7 @@ pub const RunarArtifact = struct {
     asm_text: []const u8 = &.{},
     state_fields: []StateField = &.{},
     constructor_slots: []ConstructorSlot = &.{},
+    code_sep_index_slots: []CodeSepIndexSlot = &.{},
     build_timestamp: []const u8 = &.{},
     code_separator_index: ?i32 = null,
     code_separator_indices: []i32 = &.{},
@@ -120,6 +121,7 @@ pub const RunarArtifact = struct {
         for (self.state_fields) |*sf| sf.deinit(a);
         if (self.state_fields.len > 0) a.free(self.state_fields);
         if (self.constructor_slots.len > 0) a.free(self.constructor_slots);
+        if (self.code_sep_index_slots.len > 0) a.free(self.code_sep_index_slots);
         if (self.code_separator_indices.len > 0) a.free(self.code_separator_indices);
         if (self.anf_json) |aj| a.free(aj);
         self.* = .{ .allocator = a };
@@ -210,6 +212,22 @@ pub const RunarArtifact = struct {
                     };
                 }
                 artifact.constructor_slots = slots;
+            }
+        }
+
+        // Parse codeSepIndexSlots
+        if (root.get("codeSepIndexSlots")) |csis_val| {
+            if (csis_val == .array) {
+                const items = csis_val.array.items;
+                var csis = try allocator.alloc(CodeSepIndexSlot, items.len);
+                for (items, 0..) |item, i| {
+                    const obj = item.object;
+                    csis[i] = .{
+                        .byte_offset = if (obj.get("byteOffset")) |bo| @intCast(bo.integer) else 0,
+                        .code_sep_index = if (obj.get("codeSepIndex")) |ci| @intCast(ci.integer) else 0,
+                    };
+                }
+                artifact.code_sep_index_slots = csis;
             }
         }
 
@@ -398,6 +416,15 @@ pub const StateField = struct {
 pub const ConstructorSlot = struct {
     param_index: i32,
     byte_offset: i32,
+};
+
+/// CodeSepIndexSlot describes where a codeSeparatorIndex placeholder (OP_0)
+/// resides in the template script. The SDK substitutes these at deployment
+/// time with the adjusted codeSeparatorIndex value that accounts for
+/// constructor arg expansion.
+pub const CodeSepIndexSlot = struct {
+    byte_offset: i32,
+    code_sep_index: i32,
 };
 
 // ---------------------------------------------------------------------------

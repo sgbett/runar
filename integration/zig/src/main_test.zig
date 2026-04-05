@@ -23,6 +23,7 @@ comptime {
     _ = @import("post_quantum_wallet_test.zig");
     _ = @import("babybear_test.zig");
     _ = @import("merkle_proof_test.zig");
+    _ = @import("state_covenant_test.zig");
 }
 
 test "integration_setup" {

@@ -1025,15 +1025,46 @@ class RunarContract:
         return self._code_script or self._build_code_script()
 
     def _adjust_code_sep_offset(self, base_offset: int) -> int:
-        """Adjust code separator byte offset for constructor arg substitution."""
-        if not self.artifact.constructor_slots:
-            return base_offset
+        """Adjust code separator byte offset for constructor arg and codeSepIndex
+        slot substitution. Both slot types replace OP_0 (1 byte) with encoded
+        push data, shifting subsequent byte offsets."""
         shift = 0
-        for slot in self.artifact.constructor_slots:
-            if slot.byte_offset < base_offset:
-                encoded = _encode_arg(self._constructor_args[slot.param_index])
-                shift += len(encoded) // 2 - 1  # encoded bytes minus 1-byte placeholder
+        if self.artifact.constructor_slots:
+            for slot in self.artifact.constructor_slots:
+                if slot.byte_offset < base_offset:
+                    encoded = _encode_arg(self._constructor_args[slot.param_index])
+                    shift += len(encoded) // 2 - 1  # encoded bytes minus 1-byte placeholder
+        # Account for codeSepIndex slot expansions
+        for template_offset, adjusted_value in self._resolved_code_sep_slot_values():
+            if template_offset < base_offset:
+                encoded = _encode_script_number(adjusted_value)
+                shift += len(encoded) // 2 - 1
         return base_offset + shift
+
+    def _resolved_code_sep_slot_values(self) -> list[tuple[int, int]]:
+        """Resolve the adjusted codeSep index values for all codeSepIndex slots,
+        processing them in ascending template byte-offset order so that each
+        slot's value correctly accounts for earlier slots' expansions."""
+        if not self.artifact.code_sep_index_slots:
+            return []
+        # Sort by template byte offset ascending (left-to-right in the script)
+        sorted_slots = sorted(self.artifact.code_sep_index_slots, key=lambda s: s.byte_offset)
+        result: list[tuple[int, int]] = []
+        for slot in sorted_slots:
+            # Compute the fully-adjusted codeSep index: constructor expansion +
+            # expansion from earlier codeSepIndex slots that precede this slot's codeSepIndex.
+            shift = 0
+            if self.artifact.constructor_slots:
+                for cs in self.artifact.constructor_slots:
+                    if cs.byte_offset < slot.code_sep_index:
+                        encoded = _encode_arg(self._constructor_args[cs.param_index])
+                        shift += len(encoded) // 2 - 1
+            for prev_offset, prev_value in result:
+                if prev_offset < slot.code_sep_index:
+                    prev_encoded = _encode_script_number(prev_value)
+                    shift += len(prev_encoded) // 2 - 1
+            result.append((slot.byte_offset, slot.code_sep_index + shift))
+        return result
 
     def _get_code_sep_index(self, method_index: int) -> int:
         """Get the adjusted code separator index for a method, or -1 if none."""
@@ -1067,11 +1098,37 @@ class RunarContract:
     def _build_code_script(self) -> str:
         script = self.artifact.script
 
-        if self.artifact.constructor_slots:
-            slots = sorted(self.artifact.constructor_slots, key=lambda s: s.byte_offset, reverse=True)
-            for slot in slots:
-                encoded = _encode_arg(self._constructor_args[slot.param_index])
-                hex_offset = slot.byte_offset * 2
+        has_constructor_slots = bool(self.artifact.constructor_slots)
+        has_code_sep_slots = bool(self.artifact.code_sep_index_slots)
+
+        if has_constructor_slots or has_code_sep_slots:
+            # Build a unified list of all template slot substitutions, then
+            # process them in descending byte-offset order so each splice
+            # doesn't invalidate the positions of earlier (higher-offset) entries.
+            subs: list[tuple[int, str]] = []
+
+            # Constructor arg slots: replace OP_0 placeholder with encoded arg
+            if has_constructor_slots:
+                for slot in self.artifact.constructor_slots:
+                    subs.append((
+                        slot.byte_offset,
+                        _encode_arg(self._constructor_args[slot.param_index]),
+                    ))
+
+            # CodeSepIndex slots: replace OP_0 placeholder with encoded adjusted
+            # codeSeparatorIndex.
+            if has_code_sep_slots:
+                resolved = self._resolved_code_sep_slot_values()
+                for template_offset, adjusted_value in resolved:
+                    subs.append((
+                        template_offset,
+                        _encode_script_number(adjusted_value),
+                    ))
+
+            # Sort descending by byte offset and apply
+            subs.sort(key=lambda s: s[0], reverse=True)
+            for byte_offset, encoded in subs:
+                hex_offset = byte_offset * 2
                 script = script[:hex_offset] + encoded + script[hex_offset + 2:]
         elif not self.artifact.state_fields:
             # Backward compatibility: old stateless artifacts without constructorSlots.

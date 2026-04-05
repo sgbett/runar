@@ -85,6 +85,17 @@ class ConstructorSlot:
 
 
 @dataclass
+class CodeSepIndexSlot:
+    """Where a codeSeparatorIndex placeholder (OP_0) resides in the template script.
+
+    The SDK substitutes these at deployment time with the adjusted
+    codeSeparatorIndex value that accounts for constructor arg expansion.
+    """
+    byte_offset: int
+    code_sep_index: int
+
+
+@dataclass
 class RunarArtifact:
     """Compiled output of a Runar compiler."""
     version: str = ''
@@ -95,6 +106,7 @@ class RunarArtifact:
     asm: str = ''
     state_fields: list[StateField] = field(default_factory=list)
     constructor_slots: list[ConstructorSlot] = field(default_factory=list)
+    code_sep_index_slots: list[CodeSepIndexSlot] = field(default_factory=list)
     build_timestamp: str = ''
     code_separator_index: int | None = None
     code_separator_indices: list[int] | None = None
@@ -128,6 +140,10 @@ class RunarArtifact:
             ConstructorSlot(param_index=cs['paramIndex'], byte_offset=cs['byteOffset'])
             for cs in d.get('constructorSlots', [])
         ]
+        code_sep_idx_slots = [
+            CodeSepIndexSlot(byte_offset=s['byteOffset'], code_sep_index=s['codeSepIndex'])
+            for s in d.get('codeSepIndexSlots', [])
+        ]
         return RunarArtifact(
             version=d.get('version', ''),
             compiler_version=d.get('compilerVersion', ''),
@@ -137,6 +153,7 @@ class RunarArtifact:
             asm=d.get('asm', ''),
             state_fields=state_fields,
             constructor_slots=ctor_slots,
+            code_sep_index_slots=code_sep_idx_slots,
             build_timestamp=d.get('buildTimestamp', ''),
             code_separator_index=d.get('codeSeparatorIndex'),
             code_separator_indices=d.get('codeSeparatorIndices'),

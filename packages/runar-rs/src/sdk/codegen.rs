@@ -919,6 +919,7 @@ mod tests {
             script: "5151".to_string(),
             state_fields,
             constructor_slots: None,
+            code_sep_index_slots: None,
             code_separator_index: None,
             code_separator_indices: None,
             anf: None,

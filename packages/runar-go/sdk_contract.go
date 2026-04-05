@@ -1074,19 +1074,51 @@ func (c *RunarContract) SetCurrentUtxo(utxo *UTXO) {
 func (c *RunarContract) buildCodeScript() string {
 	script := c.Artifact.Script
 
-	if len(c.Artifact.ConstructorSlots) > 0 {
-		// Sort by byteOffset descending so splicing doesn't shift later offsets
-		slots := make([]ConstructorSlot, len(c.Artifact.ConstructorSlots))
-		copy(slots, c.Artifact.ConstructorSlots)
-		sort.Slice(slots, func(i, j int) bool {
-			return slots[i].ByteOffset > slots[j].ByteOffset
-		})
+	hasConstructorSlots := len(c.Artifact.ConstructorSlots) > 0
+	hasCodeSepSlots := len(c.Artifact.CodeSepIndexSlots) > 0
 
-		for _, slot := range slots {
-			encoded := encodeArg(c.constructorArgs[slot.ParamIndex])
-			hexOffset := slot.ByteOffset * 2
-			// Replace the 1-byte OP_0 placeholder (2 hex chars) with the encoded arg
-			script = script[:hexOffset] + encoded + script[hexOffset+2:]
+	if hasConstructorSlots || hasCodeSepSlots {
+		// Build a unified list of all template slot substitutions, then process
+		// them in descending byte-offset order so each splice doesn't invalidate
+		// the positions of earlier (higher-offset) entries.
+		type substitution struct {
+			byteOffset int
+			encoded    string
+		}
+		var subs []substitution
+
+		// Constructor arg slots: replace OP_0 placeholder with encoded arg
+		if hasConstructorSlots {
+			for _, slot := range c.Artifact.ConstructorSlots {
+				subs = append(subs, substitution{
+					byteOffset: slot.ByteOffset,
+					encoded:    encodeArg(c.constructorArgs[slot.ParamIndex]),
+				})
+			}
+		}
+
+		// CodeSepIndex slots: replace OP_0 placeholder with encoded adjusted
+		// codeSeparatorIndex. The adjusted value accounts for constructor arg
+		// expansion AND earlier codeSepIndex slot expansions that shift
+		// OP_CODESEPARATOR positions in the substituted script.
+		if hasCodeSepSlots {
+			resolved := c.resolvedCodeSepSlotValues()
+			for _, rs := range resolved {
+				subs = append(subs, substitution{
+					byteOffset: rs.templateByteOffset,
+					encoded:    encodeScriptNumber(int64(rs.adjustedValue)),
+				})
+			}
+		}
+
+		// Sort descending by byte offset and apply
+		sort.Slice(subs, func(i, j int) bool {
+			return subs[i].byteOffset > subs[j].byteOffset
+		})
+		for _, sub := range subs {
+			hexOffset := sub.byteOffset * 2
+			// Replace the 1-byte OP_0 placeholder (2 hex chars) with the encoded value
+			script = script[:hexOffset] + sub.encoded + script[hexOffset+2:]
 		}
 	} else if len(c.Artifact.StateFields) == 0 {
 		// Backward compatibility: old stateless artifacts without constructorSlots.
@@ -1109,11 +1141,10 @@ func (c *RunarContract) getCodePartHex() string {
 }
 
 // adjustCodeSepOffset adjusts a code separator byte offset from the base
-// (template) script to the constructor-arg-substituted script.
+// (template) script to the fully-substituted script. Both constructor arg
+// slots and codeSepIndex slots replace OP_0 (1 byte) with encoded push
+// data, shifting subsequent byte offsets.
 func (c *RunarContract) adjustCodeSepOffset(baseOffset int) int {
-	if len(c.Artifact.ConstructorSlots) == 0 {
-		return baseOffset
-	}
 	shift := 0
 	for _, slot := range c.Artifact.ConstructorSlots {
 		if slot.ByteOffset < baseOffset {
@@ -1121,7 +1152,72 @@ func (c *RunarContract) adjustCodeSepOffset(baseOffset int) int {
 			shift += len(encoded)/2 - 1 // encoded bytes minus the 1-byte OP_0 placeholder
 		}
 	}
+	// Account for codeSepIndex slot expansions
+	for _, rs := range c.resolvedCodeSepSlotValues() {
+		if rs.templateByteOffset < baseOffset {
+			encoded := encodeScriptNumber(int64(rs.adjustedValue))
+			shift += len(encoded)/2 - 1
+		}
+	}
 	return baseOffset + shift
+}
+
+// resolvedCodeSepSlotValues resolves the adjusted codeSep index values for
+// all codeSepIndex slots, processing them in ascending template byte-offset
+// order so that each slot's value correctly accounts for earlier slots'
+// expansions.
+func (c *RunarContract) resolvedCodeSepSlotValues() []struct {
+	templateByteOffset int
+	adjustedValue      int
+} {
+	if len(c.Artifact.CodeSepIndexSlots) == 0 {
+		return nil
+	}
+	// Sort by template byte offset ascending (left-to-right in the script)
+	sorted := make([]CodeSepIndexSlot, len(c.Artifact.CodeSepIndexSlots))
+	copy(sorted, c.Artifact.CodeSepIndexSlots)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].ByteOffset < sorted[j].ByteOffset
+	})
+
+	type resolved struct {
+		templateByteOffset int
+		adjustedValue      int
+	}
+	var result []resolved
+
+	for _, slot := range sorted {
+		// Compute the fully-adjusted codeSep index: constructor expansion +
+		// expansion from earlier codeSepIndex slots that precede this slot's codeSepIndex.
+		shift := 0
+		for _, cs := range c.Artifact.ConstructorSlots {
+			if cs.ByteOffset < slot.CodeSepIndex {
+				encoded := encodeArg(c.constructorArgs[cs.ParamIndex])
+				shift += len(encoded)/2 - 1
+			}
+		}
+		for _, prev := range result {
+			if prev.templateByteOffset < slot.CodeSepIndex {
+				prevEncoded := encodeScriptNumber(int64(prev.adjustedValue))
+				shift += len(prevEncoded)/2 - 1
+			}
+		}
+		result = append(result, resolved{
+			templateByteOffset: slot.ByteOffset,
+			adjustedValue:      slot.CodeSepIndex + shift,
+		})
+	}
+
+	// Convert to the return type
+	out := make([]struct {
+		templateByteOffset int
+		adjustedValue      int
+	}, len(result))
+	for i, r := range result {
+		out[i].templateByteOffset = r.templateByteOffset
+		out[i].adjustedValue = r.adjustedValue
+	}
+	return out
 }
 
 // getCodeSepIndex returns the adjusted code separator byte offset for a

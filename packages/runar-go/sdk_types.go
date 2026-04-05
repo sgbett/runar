@@ -128,18 +128,19 @@ type PreparedCall struct {
 
 // RunarArtifact is the compiled output of a Runar compiler.
 type RunarArtifact struct {
-	Version                string            `json:"version"`
-	CompilerVersion        string            `json:"compilerVersion"`
-	ContractName           string            `json:"contractName"`
-	ABI                    ABI               `json:"abi"`
-	Script                 string            `json:"script"`
-	ASM                    string            `json:"asm"`
-	StateFields            []StateField      `json:"stateFields,omitempty"`
-	ConstructorSlots       []ConstructorSlot `json:"constructorSlots,omitempty"`
-	BuildTimestamp         string            `json:"buildTimestamp"`
-	CodeSeparatorIndex     *int              `json:"codeSeparatorIndex,omitempty"`
-	CodeSeparatorIndices   []int             `json:"codeSeparatorIndices,omitempty"`
-	ANF                    *ANFProgram       `json:"anf,omitempty"`
+	Version                string             `json:"version"`
+	CompilerVersion        string             `json:"compilerVersion"`
+	ContractName           string             `json:"contractName"`
+	ABI                    ABI                `json:"abi"`
+	Script                 string             `json:"script"`
+	ASM                    string             `json:"asm"`
+	StateFields            []StateField       `json:"stateFields,omitempty"`
+	ConstructorSlots       []ConstructorSlot  `json:"constructorSlots,omitempty"`
+	CodeSepIndexSlots      []CodeSepIndexSlot `json:"codeSepIndexSlots,omitempty"`
+	BuildTimestamp         string             `json:"buildTimestamp"`
+	CodeSeparatorIndex     *int               `json:"codeSeparatorIndex,omitempty"`
+	CodeSeparatorIndices   []int              `json:"codeSeparatorIndices,omitempty"`
+	ANF                    *ANFProgram        `json:"anf,omitempty"`
 }
 
 // ABI describes the contract's public interface.
@@ -180,4 +181,13 @@ type StateField struct {
 type ConstructorSlot struct {
 	ParamIndex int `json:"paramIndex"`
 	ByteOffset int `json:"byteOffset"`
+}
+
+// CodeSepIndexSlot describes where a codeSeparatorIndex placeholder (OP_0)
+// resides in the template script. The SDK substitutes these at deployment
+// time with the adjusted codeSeparatorIndex value that accounts for
+// constructor arg expansion.
+type CodeSepIndexSlot struct {
+	ByteOffset   int `json:"byteOffset"`
+	CodeSepIndex int `json:"codeSepIndex"`
 }

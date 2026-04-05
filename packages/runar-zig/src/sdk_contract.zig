@@ -911,33 +911,64 @@ pub const RunarContract = struct {
     fn buildCodeScript(self: *const RunarContract) ![]u8 {
         var script = try self.allocator.dupe(u8, self.artifact.script);
 
-        if (self.artifact.constructor_slots.len > 0) {
-            // Sort by byteOffset descending so splicing doesn't shift later offsets
-            const indices = try self.allocator.alloc(usize, self.artifact.constructor_slots.len);
-            defer self.allocator.free(indices);
-            for (0..self.artifact.constructor_slots.len) |i| indices[i] = i;
-            const slots = self.artifact.constructor_slots;
-            std.mem.sort(usize, indices, slots, struct {
-                fn lessThan(ctx: []const types.ConstructorSlot, a: usize, b: usize) bool {
-                    return ctx[a].byte_offset > ctx[b].byte_offset;
+        const has_constructor_slots = self.artifact.constructor_slots.len > 0;
+        const has_code_sep_slots = self.artifact.code_sep_index_slots.len > 0;
+
+        if (has_constructor_slots or has_code_sep_slots) {
+            // Build a unified list of all template slot substitutions, then process
+            // them in descending byte-offset order so each splice doesn't invalidate
+            // the positions of earlier (higher-offset) entries.
+            const SubEntry = struct {
+                byte_offset: i32,
+                encoded: []u8,
+            };
+            var subs: std.ArrayListUnmanaged(SubEntry) = .empty;
+            defer {
+                for (subs.items) |item| self.allocator.free(item.encoded);
+                subs.deinit(self.allocator);
+            }
+
+            // Constructor arg slots: replace OP_0 placeholder with encoded arg
+            if (has_constructor_slots) {
+                for (self.artifact.constructor_slots) |slot| {
+                    const param_idx: usize = @intCast(slot.param_index);
+                    if (param_idx >= self.constructor_args.len) continue;
+                    const encoded = try state_mod.encodeArg(self.allocator, self.constructor_args[param_idx]);
+                    try subs.append(self.allocator, .{
+                        .byte_offset = slot.byte_offset,
+                        .encoded = encoded,
+                    });
+                }
+            }
+
+            // CodeSepIndex slots: replace OP_0 placeholder with encoded adjusted
+            // codeSeparatorIndex.
+            if (has_code_sep_slots) {
+                const resolved = try self.resolvedCodeSepSlotValues();
+                defer self.allocator.free(resolved);
+                for (resolved) |rs| {
+                    const encoded = try state_mod.encodeScriptNumber(self.allocator, rs.adjusted_value);
+                    try subs.append(self.allocator, .{
+                        .byte_offset = rs.template_byte_offset,
+                        .encoded = encoded,
+                    });
+                }
+            }
+
+            // Sort descending by byte offset and apply
+            std.mem.sort(SubEntry, subs.items, {}, struct {
+                fn lessThan(_: void, a: SubEntry, b: SubEntry) bool {
+                    return a.byte_offset > b.byte_offset;
                 }
             }.lessThan);
 
-            for (indices) |idx| {
-                const slot = slots[idx];
-                const param_idx: usize = @intCast(slot.param_index);
-                if (param_idx >= self.constructor_args.len) continue;
-
-                const encoded = try state_mod.encodeArg(self.allocator, self.constructor_args[param_idx]);
-                defer self.allocator.free(encoded);
-
-                const hex_offset: usize = @intCast(slot.byte_offset * 2);
-                // Replace the 1-byte OP_0 placeholder (2 hex chars) with encoded arg
+            for (subs.items) |sub| {
+                const hex_offset: usize = @intCast(sub.byte_offset * 2);
                 if (hex_offset + 2 <= script.len) {
-                    var new_script = try self.allocator.alloc(u8, script.len - 2 + encoded.len);
+                    var new_script = try self.allocator.alloc(u8, script.len - 2 + sub.encoded.len);
                     @memcpy(new_script[0..hex_offset], script[0..hex_offset]);
-                    @memcpy(new_script[hex_offset .. hex_offset + encoded.len], encoded);
-                    @memcpy(new_script[hex_offset + encoded.len ..], script[hex_offset + 2 ..]);
+                    @memcpy(new_script[hex_offset .. hex_offset + sub.encoded.len], sub.encoded);
+                    @memcpy(new_script[hex_offset + sub.encoded.len ..], script[hex_offset + 2 ..]);
                     self.allocator.free(script);
                     script = new_script;
                 }
@@ -972,9 +1003,10 @@ pub const RunarContract = struct {
     }
 
     /// adjustCodeSepOffset adjusts a code separator byte offset from the base
-    /// (template) script to the constructor-arg-substituted script.
+    /// (template) script to the fully-substituted script. Both constructor arg
+    /// slots and codeSepIndex slots replace OP_0 (1 byte) with encoded push
+    /// data, shifting subsequent byte offsets.
     pub fn adjustCodeSepOffset(self: *const RunarContract, base_offset: i32) !i32 {
-        if (self.artifact.constructor_slots.len == 0) return base_offset;
         var shift: i32 = 0;
         for (self.artifact.constructor_slots) |slot| {
             if (slot.byte_offset < base_offset) {
@@ -986,7 +1018,76 @@ pub const RunarContract = struct {
                 }
             }
         }
+        // Account for codeSepIndex slot expansions
+        const resolved = try self.resolvedCodeSepSlotValues();
+        defer self.allocator.free(resolved);
+        for (resolved) |rs| {
+            if (rs.template_byte_offset < base_offset) {
+                const encoded = try state_mod.encodeScriptNumber(self.allocator, rs.adjusted_value);
+                defer self.allocator.free(encoded);
+                shift += @as(i32, @intCast(encoded.len / 2)) - 1;
+            }
+        }
         return base_offset + shift;
+    }
+
+    /// Resolved code separator index slot entry.
+    const ResolvedCodeSepEntry = struct {
+        template_byte_offset: i32,
+        adjusted_value: i64,
+    };
+
+    /// Resolve the adjusted codeSep index values for all codeSepIndex slots,
+    /// processing them in ascending template byte-offset order so that each
+    /// slot's value correctly accounts for earlier slots' expansions.
+    fn resolvedCodeSepSlotValues(self: *const RunarContract) ![]ResolvedCodeSepEntry {
+        if (self.artifact.code_sep_index_slots.len == 0) {
+            return try self.allocator.alloc(ResolvedCodeSepEntry, 0);
+        }
+
+        // Sort by template byte offset ascending (left-to-right in the script)
+        const sorted_indices = try self.allocator.alloc(usize, self.artifact.code_sep_index_slots.len);
+        defer self.allocator.free(sorted_indices);
+        for (0..self.artifact.code_sep_index_slots.len) |i| sorted_indices[i] = i;
+        const slot_data = self.artifact.code_sep_index_slots;
+        std.mem.sort(usize, sorted_indices, slot_data, struct {
+            fn lessThan(ctx: []const types.CodeSepIndexSlot, a: usize, b: usize) bool {
+                return ctx[a].byte_offset < ctx[b].byte_offset;
+            }
+        }.lessThan);
+
+        var result: std.ArrayListUnmanaged(ResolvedCodeSepEntry) = .empty;
+        errdefer result.deinit(self.allocator);
+
+        for (sorted_indices) |idx| {
+            const slot = slot_data[idx];
+            // Compute the fully-adjusted codeSep index: constructor expansion +
+            // expansion from earlier codeSepIndex slots that precede this slot's codeSepIndex.
+            var shift: i32 = 0;
+            for (self.artifact.constructor_slots) |cs| {
+                if (cs.byte_offset < slot.code_sep_index) {
+                    const param_idx_u: usize = @intCast(cs.param_index);
+                    if (param_idx_u < self.constructor_args.len) {
+                        const encoded = try state_mod.encodeArg(self.allocator, self.constructor_args[param_idx_u]);
+                        defer self.allocator.free(encoded);
+                        shift += @as(i32, @intCast(encoded.len / 2)) - 1;
+                    }
+                }
+            }
+            for (result.items) |prev| {
+                if (prev.template_byte_offset < slot.code_sep_index) {
+                    const prev_encoded = try state_mod.encodeScriptNumber(self.allocator, prev.adjusted_value);
+                    defer self.allocator.free(prev_encoded);
+                    shift += @as(i32, @intCast(prev_encoded.len / 2)) - 1;
+                }
+            }
+            try result.append(self.allocator, .{
+                .template_byte_offset = slot.byte_offset,
+                .adjusted_value = @as(i64, slot.code_sep_index) + @as(i64, shift),
+            });
+        }
+
+        return result.toOwnedSlice(self.allocator);
     }
 
     /// getCodeSepIndex returns the adjusted code separator byte offset for a
