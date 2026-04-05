@@ -26,7 +26,7 @@ conformance/
       stateful-counter/
         input.json
         expected-locking.hex
-      stateless-p2pkh/
+      basic-p2pkh/
         input.json
         expected-locking.hex
     tools/
@@ -182,9 +182,9 @@ Input artifact: compiled from `conformance/tests/stateful-bytestring/stateful-by
 
 ### 2. stateful-counter
 
-Exercises state serialization with bigint and codeSep (no constructor-only args):
+Exercises state serialization with bigint (no constructor-only args, no codeSepIndex slots):
 - **Constructor slots**: None — the only constructor param (`count`) is a state field, not baked into code
-- **CodeSepIndex slots**: Present (stateful multi-method contract has codeSep)
+- **CodeSepIndex slots**: None — codeSep indices are hardcoded since no constructor args shift byte offsets
 - **State serialization**: bigint `count` field (8-byte LE sign-magnitude)
 
 Input artifact: compiled from `conformance/tests/stateful-counter/stateful-counter.runar.ts`.
