@@ -256,6 +256,14 @@ func CompileToSDKArtifact(sourcePath string, constructorArgs map[string]interfac
 	if len(emitResult.CodeSeparatorIndices) > 0 {
 		artifact.CodeSeparatorIndices = emitResult.CodeSeparatorIndices
 	}
+	if len(emitResult.CodeSepIndexSlots) > 0 {
+		for _, s := range emitResult.CodeSepIndexSlots {
+			artifact.CodeSepIndexSlots = append(artifact.CodeSepIndexSlots, runar.CodeSepIndexSlot{
+				ByteOffset:   s.ByteOffset,
+				CodeSepIndex: s.CodeSepIndex,
+			})
+		}
+	}
 	return artifact, nil
 }
 
@@ -368,7 +376,7 @@ func CompileSourceStringToSDKArtifact(source, fileName string, constructorArgs m
 		})
 	}
 
-	return &runar.RunarArtifact{
+	artifact := &runar.RunarArtifact{
 		Version:          "runar-v0.1.0",
 		CompilerVersion:  "integration-test",
 		ContractName:     program.ContractName,
@@ -379,7 +387,23 @@ func CompileSourceStringToSDKArtifact(source, fileName string, constructorArgs m
 			Constructor: runar.ABIConstructor{Params: ctorParams},
 			Methods:     abiMethods,
 		},
-	}, nil
+	}
+	if emitResult.CodeSeparatorIndex >= 0 {
+		idx := emitResult.CodeSeparatorIndex
+		artifact.CodeSeparatorIndex = &idx
+	}
+	if len(emitResult.CodeSeparatorIndices) > 0 {
+		artifact.CodeSeparatorIndices = emitResult.CodeSeparatorIndices
+	}
+	if len(emitResult.CodeSepIndexSlots) > 0 {
+		for _, s := range emitResult.CodeSepIndexSlots {
+			artifact.CodeSepIndexSlots = append(artifact.CodeSepIndexSlots, runar.CodeSepIndexSlot{
+				ByteOffset:   s.ByteOffset,
+				CodeSepIndex: s.CodeSepIndex,
+			})
+		}
+	}
+	return artifact, nil
 }
 
 // AstTypeName extracts the type name string from a frontend.TypeNode.
