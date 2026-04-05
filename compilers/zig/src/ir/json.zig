@@ -1077,6 +1077,17 @@ fn writeCanonicalArtifact(writer: anytype, artifact: types.Artifact, depth: usiz
         try writer.writeAll("],\n");
     }
 
+    if (artifact.code_sep_index_slots) |slots| {
+        try writeIndent(writer, depth + 1);
+        try writeJsonString(writer, "code_sep_index_slots");
+        try writer.writeAll(": [");
+        for (slots, 0..) |slot, i| {
+            if (i > 0) try writer.writeAll(", ");
+            try writer.print("{{\"byte_offset\": {d}, \"code_sep_index\": {d}}}", .{ slot.byte_offset, slot.code_sep_index });
+        }
+        try writer.writeAll("],\n");
+    }
+
     try writeIndent(writer, depth + 1);
     try writeJsonString(writer, "compiler_version");
     try writer.writeAll(": ");

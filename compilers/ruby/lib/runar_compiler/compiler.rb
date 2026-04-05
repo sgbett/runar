@@ -62,6 +62,7 @@ module RunarCompiler
     :ir,
     :state_fields,
     :constructor_slots,
+    :code_sep_index_slots,
     :code_separator_index,
     :code_separator_indices,
     :build_timestamp,
@@ -79,6 +80,7 @@ module RunarCompiler
       ir: nil,
       state_fields: [],
       constructor_slots: [],
+      code_sep_index_slots: [],
       code_separator_index: nil,
       code_separator_indices: nil,
       build_timestamp: "",
@@ -277,6 +279,7 @@ module RunarCompiler
       emit_result.constructor_slots,
       emit_result.code_separator_index,
       emit_result.code_separator_indices,
+      code_sep_index_slots: emit_result.code_sep_index_slots,
       source_map: emit_result.source_map,
       stack_methods: stack_methods
     )
@@ -378,6 +381,7 @@ module RunarCompiler
     constructor_slots,
     code_separator_index = -1,
     code_separator_indices = nil,
+    code_sep_index_slots: [],
     source_map: nil,
     stack_methods: nil,
     include_ir: false,
@@ -455,6 +459,7 @@ module RunarCompiler
       ir: ir_snapshot,
       state_fields: state_fields,
       constructor_slots: constructor_slots,
+      code_sep_index_slots: code_sep_index_slots,
       code_separator_index: cs_index,
       code_separator_indices: cs_indices,
       build_timestamp: Time.now.utc.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -541,6 +546,12 @@ module RunarCompiler
     if artifact.constructor_slots && !artifact.constructor_slots.empty?
       d["constructorSlots"] = artifact.constructor_slots.map do |cs|
         { "paramIndex" => cs.param_index, "byteOffset" => cs.byte_offset }
+      end
+    end
+
+    if artifact.code_sep_index_slots && !artifact.code_sep_index_slots.empty?
+      d["codeSepIndexSlots"] = artifact.code_sep_index_slots.map do |slot|
+        { "byteOffset" => slot.byte_offset, "codeSepIndex" => slot.code_sep_index }
       end
     end
 

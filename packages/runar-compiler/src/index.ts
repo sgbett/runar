@@ -299,6 +299,7 @@ export function compile(source: string, options?: CompileOptions): CompileResult
       emitResult.scriptAsm,
       {
         constructorSlots: emitResult.constructorSlots,
+        codeSepIndexSlots: emitResult.codeSepIndexSlots,
         codeSeparatorIndex: emitResult.codeSeparatorIndex,
         codeSeparatorIndices: emitResult.codeSeparatorIndices,
         includeSourceMap: emitResult.sourceMap.length > 0,

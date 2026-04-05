@@ -1078,16 +1078,46 @@ export class RunarContract {
   private buildCodeScript(): string {
     let script = this.artifact.script;
 
-    if (this.artifact.constructorSlots && this.artifact.constructorSlots.length > 0) {
-      // Sort by byteOffset descending so splicing doesn't shift later offsets
-      const slots = [...this.artifact.constructorSlots].sort(
-        (a, b) => b.byteOffset - a.byteOffset,
-      );
-      for (const slot of slots) {
-        const encoded = encodeArg(this.constructorArgs[slot.paramIndex]);
-        const hexOffset = slot.byteOffset * 2;
-        // Replace the 1-byte OP_0 placeholder (2 hex chars) with the encoded arg
-        script = script.slice(0, hexOffset) + encoded + script.slice(hexOffset + 2);
+    const hasConstructorSlots = this.artifact.constructorSlots && this.artifact.constructorSlots.length > 0;
+    const hasCodeSepSlots = this.artifact.codeSepIndexSlots && this.artifact.codeSepIndexSlots.length > 0;
+
+    if (hasConstructorSlots || hasCodeSepSlots) {
+      // Build a unified list of all template slot substitutions, then process
+      // them in descending byte-offset order so each splice doesn't invalidate
+      // the positions of earlier (higher-offset) entries.
+      type Substitution = { byteOffset: number; encoded: string };
+      const subs: Substitution[] = [];
+
+      // Constructor arg slots: replace OP_0 placeholder with encoded arg
+      if (hasConstructorSlots) {
+        for (const slot of this.artifact.constructorSlots!) {
+          subs.push({
+            byteOffset: slot.byteOffset,
+            encoded: encodeArg(this.constructorArgs[slot.paramIndex]),
+          });
+        }
+      }
+
+      // CodeSepIndex slots: replace OP_0 placeholder with encoded adjusted
+      // codeSeparatorIndex. The adjusted value accounts for constructor arg
+      // expansion AND earlier codeSepIndex slot expansions that shift
+      // OP_CODESEPARATOR positions in the substituted script.
+      if (hasCodeSepSlots) {
+        const resolved = this._resolvedCodeSepSlotValues();
+        for (const rs of resolved) {
+          subs.push({
+            byteOffset: rs.templateByteOffset,
+            encoded: encodeScriptNumber(BigInt(rs.adjustedValue)),
+          });
+        }
+      }
+
+      // Sort descending by byte offset and apply
+      subs.sort((a, b) => b.byteOffset - a.byteOffset);
+      for (const sub of subs) {
+        const hexOffset = sub.byteOffset * 2;
+        // Replace the 1-byte OP_0 placeholder (2 hex chars) with the encoded value
+        script = script.slice(0, hexOffset) + sub.encoded + script.slice(hexOffset + 2);
       }
     } else if (!this.artifact.stateFields || this.artifact.stateFields.length === 0) {
       // Backward compatibility: old stateless artifacts without constructorSlots.
@@ -1141,21 +1171,67 @@ export class RunarContract {
 
   /**
    * Adjust a code separator byte offset from the base (template) script to
-   * the constructor-arg-substituted script. Constructor slots replace OP_0
-   * (1 byte) with the encoded push data, shifting all subsequent byte offsets.
+   * the fully-substituted script. Both constructor arg slots and codeSepIndex
+   * slots replace OP_0 (1 byte) with encoded push data, shifting subsequent
+   * byte offsets.
    */
   private adjustCodeSepOffset(baseOffset: number): number {
-    if (!this.artifact.constructorSlots || this.artifact.constructorSlots.length === 0) {
-      return baseOffset;
-    }
     let shift = 0;
-    for (const slot of this.artifact.constructorSlots) {
-      if (slot.byteOffset < baseOffset) {
-        const encoded = encodeArg(this.constructorArgs[slot.paramIndex]);
-        shift += encoded.length / 2 - 1; // encoded bytes minus the 1-byte OP_0 placeholder
+    if (this.artifact.constructorSlots) {
+      for (const slot of this.artifact.constructorSlots) {
+        if (slot.byteOffset < baseOffset) {
+          const encoded = encodeArg(this.constructorArgs[slot.paramIndex]);
+          shift += encoded.length / 2 - 1; // encoded bytes minus the 1-byte OP_0 placeholder
+        }
+      }
+    }
+    // Account for codeSepIndex slot expansions. Each slot's encoded value
+    // is the fully-adjusted codeSep index, computed by resolveCodeSepSlotValues.
+    const resolvedSlots = this._resolvedCodeSepSlotValues();
+    for (const rs of resolvedSlots) {
+      if (rs.templateByteOffset < baseOffset) {
+        const encoded = encodeScriptNumber(BigInt(rs.adjustedValue));
+        shift += encoded.length / 2 - 1;
       }
     }
     return baseOffset + shift;
+  }
+
+  /**
+   * Resolve the adjusted codeSep index values for all codeSepIndex slots,
+   * processing them in ascending template byte-offset order so that each
+   * slot's value correctly accounts for earlier slots' expansions.
+   */
+  private _resolvedCodeSepSlotValues(): Array<{ templateByteOffset: number; adjustedValue: number }> {
+    if (!this.artifact.codeSepIndexSlots || this.artifact.codeSepIndexSlots.length === 0) {
+      return [];
+    }
+    // Sort by template byte offset ascending (left-to-right in the script)
+    const sorted = [...this.artifact.codeSepIndexSlots].sort(
+      (a, b) => a.byteOffset - b.byteOffset,
+    );
+    const result: Array<{ templateByteOffset: number; adjustedValue: number }> = [];
+    for (const slot of sorted) {
+      // Compute the fully-adjusted codeSep index: constructor expansion +
+      // expansion from earlier codeSepIndex slots that precede this slot's codeSepIndex.
+      let shift = 0;
+      if (this.artifact.constructorSlots) {
+        for (const cs of this.artifact.constructorSlots) {
+          if (cs.byteOffset < slot.codeSepIndex) {
+            const encoded = encodeArg(this.constructorArgs[cs.paramIndex]);
+            shift += encoded.length / 2 - 1;
+          }
+        }
+      }
+      for (const prev of result) {
+        if (prev.templateByteOffset < slot.codeSepIndex) {
+          const prevEncoded = encodeScriptNumber(BigInt(prev.adjustedValue));
+          shift += prevEncoded.length / 2 - 1;
+        }
+      }
+      result.push({ templateByteOffset: slot.byteOffset, adjustedValue: slot.codeSepIndex + shift });
+    }
+    return result;
   }
 
   /**

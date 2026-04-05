@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::codegen::emit::{ConstructorSlot, SourceMapping};
+use crate::codegen::emit::{CodeSepIndexSlot, ConstructorSlot, SourceMapping};
 use crate::ir::ANFProgram;
 
 // ---------------------------------------------------------------------------
@@ -92,6 +92,8 @@ pub struct RunarArtifact {
     pub state_fields: Vec<StateField>,
     #[serde(rename = "constructorSlots", skip_serializing_if = "Vec::is_empty", default)]
     pub constructor_slots: Vec<ConstructorSlot>,
+    #[serde(rename = "codeSepIndexSlots", skip_serializing_if = "Vec::is_empty", default)]
+    pub code_sep_index_slots: Vec<CodeSepIndexSlot>,
     #[serde(rename = "codeSeparatorIndex", skip_serializing_if = "Option::is_none")]
     pub code_separator_index: Option<usize>,
     #[serde(rename = "codeSeparatorIndices", skip_serializing_if = "Option::is_none")]
@@ -115,6 +117,7 @@ pub fn assemble_artifact(
     script_hex: &str,
     script_asm: &str,
     constructor_slots: Vec<ConstructorSlot>,
+    code_sep_index_slots: Vec<CodeSepIndexSlot>,
     code_separator_index: i64,
     code_separator_indices: Vec<usize>,
     include_anf: bool,
@@ -228,6 +231,7 @@ pub fn assemble_artifact(
         ir,
         state_fields,
         constructor_slots,
+        code_sep_index_slots,
         code_separator_index: cs_index,
         code_separator_indices: cs_indices,
         build_timestamp: now,

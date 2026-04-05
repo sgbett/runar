@@ -24,6 +24,17 @@ pub struct ConstructorSlot {
     pub byte_offset: usize,
 }
 
+/// Records the byte offset of a codeSepIndex placeholder (OP_0) in the
+/// emitted script. The SDK replaces it with the adjusted codeSeparatorIndex
+/// at deployment time.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodeSepIndexSlot {
+    #[serde(rename = "byteOffset")]
+    pub byte_offset: usize,
+    #[serde(rename = "codeSepIndex")]
+    pub code_sep_index: usize,
+}
+
 // ---------------------------------------------------------------------------
 // SourceMapping
 // ---------------------------------------------------------------------------
@@ -49,6 +60,7 @@ pub struct EmitResult {
     pub script_hex: String,
     pub script_asm: String,
     pub constructor_slots: Vec<ConstructorSlot>,
+    pub code_sep_index_slots: Vec<CodeSepIndexSlot>,
     pub code_separator_index: i64,
     pub code_separator_indices: Vec<usize>,
     /// Source mappings (opcode index to source location).
@@ -64,6 +76,7 @@ struct EmitContext {
     asm_parts: Vec<String>,
     byte_length: usize,
     constructor_slots: Vec<ConstructorSlot>,
+    code_sep_index_slots: Vec<CodeSepIndexSlot>,
     code_separator_index: i64,
     code_separator_indices: Vec<usize>,
     opcode_index: usize,
@@ -79,6 +92,7 @@ impl EmitContext {
             asm_parts: Vec::new(),
             byte_length: 0,
             constructor_slots: Vec::new(),
+            code_sep_index_slots: Vec::new(),
             code_separator_index: -1,
             code_separator_indices: Vec::new(),
             opcode_index: 0,
@@ -307,13 +321,22 @@ fn emit_stack_op(op: &StackOp, ctx: &mut EmitContext) -> Result<(), String> {
             Ok(())
         }
         StackOp::PushCodeSepIndex => {
-            // Push the codeSeparatorIndex as a numeric constant.
-            let idx = if ctx.code_separator_index < 0 {
+            // Emit an OP_0 placeholder that the SDK will replace with the
+            // adjusted codeSeparatorIndex at runtime.
+            let code_sep_idx = if ctx.code_separator_index < 0 {
                 0i64
             } else {
                 ctx.code_separator_index
             };
-            ctx.emit_push(&PushValue::Int(idx as i128));
+            let byte_offset = ctx.byte_length;
+            ctx.record_source_mapping();
+            ctx.append_hex("00"); // OP_0 placeholder
+            ctx.asm_parts.push("OP_0".to_string());
+            ctx.opcode_index += 1;
+            ctx.code_sep_index_slots.push(CodeSepIndexSlot {
+                byte_offset,
+                code_sep_index: code_sep_idx as usize,
+            });
             Ok(())
         }
     }
@@ -370,6 +393,7 @@ pub fn emit(methods: &[StackMethod]) -> Result<EmitResult, String> {
             script_hex: String::new(),
             script_asm: String::new(),
             constructor_slots: Vec::new(),
+            code_sep_index_slots: Vec::new(),
             code_separator_index: -1,
             code_separator_indices: Vec::new(),
             source_map: Vec::new(),
@@ -391,6 +415,7 @@ pub fn emit(methods: &[StackMethod]) -> Result<EmitResult, String> {
         script_hex: ctx.get_hex(),
         script_asm: ctx.get_asm(),
         constructor_slots: ctx.constructor_slots,
+        code_sep_index_slots: ctx.code_sep_index_slots,
         code_separator_index: ctx.code_separator_index,
         code_separator_indices: ctx.code_separator_indices,
         source_map: ctx.source_map,
@@ -445,6 +470,7 @@ pub fn emit_method(method: &StackMethod) -> Result<EmitResult, String> {
         script_hex: ctx.get_hex(),
         script_asm: ctx.get_asm(),
         constructor_slots: ctx.constructor_slots,
+        code_sep_index_slots: ctx.code_sep_index_slots,
         code_separator_index: ctx.code_separator_index,
         code_separator_indices: ctx.code_separator_indices,
         source_map: ctx.source_map,

@@ -202,9 +202,7 @@ describe('NULLFAIL multi-method reproduction', () => {
     }
   });
 
-  // Known bug: second checkSig method call fails with OP_NUMEQUALVERIFY
-  // See RUNAR-SDK-BUG.md — freeze works but unfreeze after freeze fails
-  it.skip('4-method: freeze then unfreeze (checkSig methods)', async () => {
+  it('4-method: freeze then unfreeze (checkSig methods)', async () => {
     const artifact = compileSource(FOUR_METHOD_SOURCE, 'RollupContract.runar.ts');
 
     const provider = createProvider();
@@ -225,8 +223,7 @@ describe('NULLFAIL multi-method reproduction', () => {
     expect(contract.state.frozen).toBe(0n);
   });
 
-  // Known bug: same as above — unfreeze after freeze fails
-  it.skip('4-method: advanceState then freeze then unfreeze then advanceState', async () => {
+  it('4-method: advanceState then freeze then unfreeze then advanceState', async () => {
     const artifact = compileSource(FOUR_METHOD_SOURCE, 'RollupContract.runar.ts');
 
     const provider = createProvider();

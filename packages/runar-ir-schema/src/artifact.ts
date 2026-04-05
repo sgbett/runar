@@ -70,6 +70,13 @@ export interface ConstructorSlot {
   byteOffset: number;
 }
 
+export interface CodeSepIndexSlot {
+  /** Byte offset of the OP_0 placeholder in the template script */
+  byteOffset: number;
+  /** The template-relative codeSeparatorIndex value this placeholder represents */
+  codeSepIndex: number;
+}
+
 // ---------------------------------------------------------------------------
 // Top-level artifact
 // ---------------------------------------------------------------------------
@@ -110,6 +117,10 @@ export interface RunarArtifact {
 
   /** Byte offsets of constructor parameter placeholders in the script */
   constructorSlots?: ConstructorSlot[];
+
+  /** Byte offsets of codeSepIndex placeholders in the script (OP_0 placeholders
+   *  that the SDK must replace with the adjusted codeSeparatorIndex). */
+  codeSepIndexSlots?: CodeSepIndexSlot[];
 
   /** Byte offset of OP_CODESEPARATOR in the locking script (for BIP-143 sighash) */
   codeSeparatorIndex?: number;

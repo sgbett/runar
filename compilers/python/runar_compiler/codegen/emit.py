@@ -149,6 +149,7 @@ class EmitResult:
     script_asm: str = ""
     source_map: list[SourceMapping] = field(default_factory=list)
     constructor_slots: list[ConstructorSlot] = field(default_factory=list)
+    code_sep_index_slots: list[dict] = field(default_factory=list)
     code_separator_index: int = -1
     code_separator_indices: list[int] = field(default_factory=list)
 
@@ -166,6 +167,7 @@ class _EmitContext:
         self.source_map: list[SourceMapping] = []
         self.pending_source_loc: Optional[SourceLocation] = None
         self.constructor_slots: list[ConstructorSlot] = []
+        self.code_sep_index_slots: list[dict] = []
         self.code_separator_index: int = -1
         self.code_separator_indices: list[int] = []
 
@@ -380,9 +382,18 @@ def _emit_stack_op(op: StackOp, ctx: _EmitContext) -> None:
     elif op.op == "placeholder":
         ctx.emit_placeholder(op.param_index)
     elif op.op == "push_codesep_index":
-        # Push the codeSeparatorIndex as a numeric constant.
-        idx = ctx.code_separator_index if ctx.code_separator_index >= 0 else 0
-        ctx.emit_push(PushValue(kind="bigint", big_int=idx))
+        # Emit an OP_0 placeholder that the SDK will replace with the
+        # adjusted codeSeparatorIndex at runtime.
+        code_sep_idx = ctx.code_separator_index if ctx.code_separator_index >= 0 else 0
+        byte_off = ctx.byte_length
+        ctx._record_source_mapping()
+        ctx.append_hex("00")  # OP_0 placeholder
+        ctx.append_asm("OP_0")
+        ctx.opcode_index += 1
+        ctx.code_sep_index_slots.append({
+            "byteOffset": byte_off,
+            "codeSepIndex": code_sep_idx,
+        })
     else:
         raise ValueError(f"unknown stack op: {op.op}")
 
@@ -472,6 +483,7 @@ def emit(methods: list[StackMethod]) -> EmitResult:
         script_asm=ctx.get_asm(),
         source_map=ctx.source_map,
         constructor_slots=ctx.constructor_slots,
+        code_sep_index_slots=ctx.code_sep_index_slots,
         code_separator_index=ctx.code_separator_index,
         code_separator_indices=ctx.code_separator_indices,
     )
@@ -487,6 +499,7 @@ def emit_method(method: StackMethod) -> EmitResult:
         script_asm=ctx.get_asm(),
         source_map=ctx.source_map,
         constructor_slots=ctx.constructor_slots,
+        code_sep_index_slots=ctx.code_sep_index_slots,
         code_separator_index=ctx.code_separator_index,
         code_separator_indices=ctx.code_separator_indices,
     )

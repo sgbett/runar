@@ -97,6 +97,7 @@ export type {
   SourceMap,
   StateField,
   ConstructorSlot,
+  CodeSepIndexSlot,
   RunarArtifact,
 } from './artifact.js';
 

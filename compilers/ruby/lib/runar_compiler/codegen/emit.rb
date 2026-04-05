@@ -137,12 +137,22 @@ module RunarCompiler
     # EmitResult
     # ------------------------------------------------------------------
 
+    # Records the byte offset of a codeSepIndex placeholder (OP_0) in the
+    # emitted script.  The SDK replaces it with the adjusted
+    # codeSeparatorIndex at deployment time.
+    CodeSepIndexSlot = Struct.new(:byte_offset, :code_sep_index, keyword_init: true) do
+      def initialize(byte_offset: 0, code_sep_index: 0)
+        super
+      end
+    end
+
     # Holds the outputs of the emission pass.
     EmitResult = Struct.new(
       :script_hex,
       :script_asm,
       :source_map,
       :constructor_slots,
+      :code_sep_index_slots,
       :code_separator_index,
       :code_separator_indices,
       keyword_init: true
@@ -152,6 +162,7 @@ module RunarCompiler
         script_asm: "",
         source_map: [],
         constructor_slots: [],
+        code_sep_index_slots: [],
         code_separator_index: -1,
         code_separator_indices: []
       )
@@ -339,7 +350,8 @@ module RunarCompiler
 
     # @api private
     class EmitContext
-      attr_reader :source_map, :constructor_slots, :code_separator_index, :code_separator_indices
+      attr_reader :source_map, :constructor_slots, :code_sep_index_slots,
+                  :code_separator_index, :code_separator_indices
 
       def initialize
         @hex_parts = []
@@ -349,6 +361,7 @@ module RunarCompiler
         @source_map = []
         @pending_source_loc = nil
         @constructor_slots = []
+        @code_sep_index_slots = []
         @code_separator_index = -1
         @code_separator_indices = []
       end
@@ -389,6 +402,18 @@ module RunarCompiler
         @constructor_slots << ConstructorSlot.new(
           param_index: param_index,
           byte_offset: byte_offset
+        )
+      end
+
+      def emit_code_sep_index_placeholder(code_sep_idx)
+        byte_offset = @byte_length
+        record_source_mapping
+        advance_opcode_index
+        append_hex("00") # OP_0 placeholder byte
+        append_asm("OP_0")
+        @code_sep_index_slots << CodeSepIndexSlot.new(
+          byte_offset: byte_offset,
+          code_sep_index: code_sep_idx
         )
       end
 
@@ -466,8 +491,10 @@ module RunarCompiler
       when "placeholder"
         ctx.emit_placeholder(op[:param_index] || 0)
       when "push_codesep_index"
-        idx = ctx.code_separator_index >= 0 ? ctx.code_separator_index : 0
-        ctx.emit_push({ kind: "bigint", big_int: idx })
+        # Emit an OP_0 placeholder that the SDK will replace with the
+        # adjusted codeSeparatorIndex at runtime.
+        code_sep_idx = ctx.code_separator_index >= 0 ? ctx.code_separator_index : 0
+        ctx.emit_code_sep_index_placeholder(code_sep_idx)
       else
         raise ArgumentError, "unknown stack op: #{op[:op]}"
       end
@@ -552,7 +579,8 @@ module RunarCompiler
           script_hex: "",
           script_asm: "",
           source_map: [],
-          constructor_slots: []
+          constructor_slots: [],
+          code_sep_index_slots: []
         )
       end
 
@@ -569,6 +597,7 @@ module RunarCompiler
         script_asm: ctx.get_asm,
         source_map: ctx.source_map,
         constructor_slots: ctx.constructor_slots,
+        code_sep_index_slots: ctx.code_sep_index_slots,
         code_separator_index: ctx.code_separator_index,
         code_separator_indices: ctx.code_separator_indices
       )
@@ -588,6 +617,7 @@ module RunarCompiler
         script_asm: ctx.get_asm,
         source_map: ctx.source_map,
         constructor_slots: ctx.constructor_slots,
+        code_sep_index_slots: ctx.code_sep_index_slots,
         code_separator_index: ctx.code_separator_index,
         code_separator_indices: ctx.code_separator_indices
       )

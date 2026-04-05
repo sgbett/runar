@@ -84,6 +84,7 @@ class Artifact:
     ir: dict | None = None  # {"anf": ..., "stack": ...}
     state_fields: list[StateField] = field(default_factory=list)
     constructor_slots: list[ConstructorSlot] = field(default_factory=list)
+    code_sep_index_slots: list[dict] = field(default_factory=list)
     code_separator_index: int | None = None
     code_separator_indices: list[int] | None = None
     build_timestamp: str = ""
@@ -255,6 +256,7 @@ def compile_from_program(program: ANFProgram, disable_constant_folding: bool = F
         emit_result.script_hex,
         emit_result.script_asm,
         emit_result.constructor_slots,
+        emit_result.code_sep_index_slots,
         emit_result.code_separator_index,
         emit_result.code_separator_indices,
         source_map=emit_result.source_map,
@@ -347,6 +349,7 @@ def _assemble_artifact(
     script_hex: str,
     script_asm: str,
     constructor_slots: list[ConstructorSlot],
+    code_sep_index_slots: list[dict] | None = None,
     code_separator_index: int = -1,
     code_separator_indices: list[int] | None = None,
     source_map: list | None = None,
@@ -425,6 +428,7 @@ def _assemble_artifact(
         ir=ir_snapshot,
         state_fields=state_fields,
         constructor_slots=constructor_slots,
+        code_sep_index_slots=code_sep_index_slots or [],
         code_separator_index=cs_index,
         code_separator_indices=cs_indices,
         build_timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -504,6 +508,8 @@ def artifact_to_json(artifact: Artifact) -> str:
             {"paramIndex": cs.param_index, "byteOffset": cs.byte_offset}
             for cs in artifact.constructor_slots
         ]
+    if artifact.code_sep_index_slots:
+        d["codeSepIndexSlots"] = artifact.code_sep_index_slots
     if artifact.code_separator_index is not None:
         d["codeSeparatorIndex"] = artifact.code_separator_index
     if artifact.code_separator_indices is not None:
@@ -885,6 +891,7 @@ def _compile_from_source_str_with_result(
         emit_result.script_hex,
         emit_result.script_asm,
         emit_result.constructor_slots,
+        emit_result.code_sep_index_slots,
         emit_result.code_separator_index,
         emit_result.code_separator_indices,
         source_map=emit_result.source_map,

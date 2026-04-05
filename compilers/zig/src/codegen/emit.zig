@@ -30,6 +30,9 @@ pub const EmitContext = struct {
     byte_offset: u32 = 0,
     /// Constructor slot positions: (param_index, byte_offset) pairs.
     constructor_slots: std.ArrayListUnmanaged(types.ConstructorSlot) = .empty,
+    /// CodeSepIndex placeholder slots: OP_0 placeholders that the SDK replaces
+    /// with the adjusted codeSeparatorIndex at deployment time.
+    code_sep_index_slots: std.ArrayListUnmanaged(types.CodeSepIndexSlot) = .empty,
     /// Byte offsets of OP_CODESEPARATOR instructions.
     code_separator_indices: std.ArrayListUnmanaged(u32) = .empty,
     /// Source map: records which opcode corresponds to which source location.
@@ -53,6 +56,7 @@ pub const EmitContext = struct {
         self.owned_asm_parts.deinit(self.allocator);
         self.asm_parts.deinit(self.allocator);
         self.constructor_slots.deinit(self.allocator);
+        self.code_sep_index_slots.deinit(self.allocator);
         self.code_separator_indices.deinit(self.allocator);
         self.source_map.deinit(self.allocator);
     }
@@ -249,13 +253,22 @@ pub fn emitStackInstruction(ctx: *EmitContext, inst: types.StackInstruction) !vo
         .push_int => |n| try ctx.emitScriptNumber(n),
         .push_bool => |b| try ctx.emitPushBool(b),
         .push_codesep_index => {
-            // Push the byte offset of the last OP_CODESEPARATOR as a numeric constant.
-            // This value is known at emit time (tracked when OP_CODESEPARATOR was emitted).
-            const idx: i64 = if (ctx.code_separator_indices.items.len > 0)
+            // Emit an OP_0 placeholder that the SDK will replace with the
+            // adjusted codeSeparatorIndex at runtime.
+            const code_sep_idx: usize = if (ctx.code_separator_indices.items.len > 0)
                 @intCast(ctx.code_separator_indices.items[ctx.code_separator_indices.items.len - 1])
             else
                 0;
-            try ctx.emitScriptNumber(idx);
+            const byte_off = ctx.byte_offset;
+            try ctx.recordSourceMapping();
+            try ctx.script_bytes.append(ctx.allocator, 0x00); // OP_0 placeholder byte
+            try ctx.asm_parts.append(ctx.allocator, "OP_0");
+            ctx.byte_offset += 1;
+            ctx.opcode_index += 1;
+            try ctx.code_sep_index_slots.append(ctx.allocator, .{
+                .byte_offset = byte_off,
+                .code_sep_index = code_sep_idx,
+            });
         },
         .placeholder => |ph| {
             try ctx.recordConstructorSlot(ph.param_index);
@@ -550,6 +563,16 @@ pub fn emitArtifact(
         try w.print("{{\"paramIndex\":{d},\"byteOffset\":{d}}}", .{ slot.param_index, slot.byte_offset });
     }
     try w.writeAll("],");
+
+    // codeSepIndexSlots — OP_0 placeholders for codeSeparatorIndex values
+    if (ctx.code_sep_index_slots.items.len > 0) {
+        try w.writeAll("\"codeSepIndexSlots\":[");
+        for (ctx.code_sep_index_slots.items, 0..) |slot, i| {
+            if (i > 0) try w.writeByte(',');
+            try w.print("{{\"byteOffset\":{d},\"codeSepIndex\":{d}}}", .{ slot.byte_offset, slot.code_sep_index });
+        }
+        try w.writeAll("],");
+    }
 
     // stateFields — mutable (non-readonly) properties
     try w.writeAll("\"stateFields\":[");

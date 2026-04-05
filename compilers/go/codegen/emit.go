@@ -123,6 +123,14 @@ type ConstructorSlot struct {
 	ByteOffset int `json:"byteOffset"`
 }
 
+// CodeSepIndexSlot records the byte offset of a codeSepIndex placeholder
+// (OP_0) in the emitted script. The SDK replaces it with the adjusted
+// codeSeparatorIndex at deployment time.
+type CodeSepIndexSlot struct {
+	ByteOffset  int `json:"byteOffset"`
+	CodeSepIndex int `json:"codeSepIndex"`
+}
+
 // ---------------------------------------------------------------------------
 // SourceMapping
 // ---------------------------------------------------------------------------
@@ -145,6 +153,7 @@ type EmitResult struct {
 	ScriptHex              string
 	ScriptAsm              string
 	ConstructorSlots       []ConstructorSlot
+	CodeSepIndexSlots      []CodeSepIndexSlot
 	CodeSeparatorIndex     int   // -1 if no OP_CODESEPARATOR was emitted
 	CodeSeparatorIndices   []int // per-method byte offsets
 	SourceMap              []SourceMapping
@@ -159,6 +168,7 @@ type emitContext struct {
 	asmParts               []string
 	byteLength             int
 	constructorSlots       []ConstructorSlot
+	codeSepIndexSlots      []CodeSepIndexSlot
 	codeSeparatorIndex     int
 	codeSeparatorIndices   []int
 	opcodeIndex            int
@@ -429,13 +439,21 @@ func emitStackOp(op *StackOp, ctx *emitContext) error {
 	case "placeholder":
 		ctx.emitPlaceholder(op.ParamIndex)
 	case "push_codesep_index":
-		// Push the codeSeparatorIndex as a numeric constant.
-		// This value is known at emit time (set when OP_CODESEPARATOR was emitted).
-		idx := ctx.codeSeparatorIndex
-		if idx < 0 {
-			idx = 0
+		// Emit an OP_0 placeholder that the SDK will replace with the adjusted
+		// codeSeparatorIndex at runtime.
+		codeSepIdx := ctx.codeSeparatorIndex
+		if codeSepIdx < 0 {
+			codeSepIdx = 0
 		}
-		ctx.emitPush(PushValue{Kind: "bigint", BigInt: big.NewInt(int64(idx))})
+		byteOff := ctx.byteLength
+		ctx.recordSourceMapping()
+		ctx.appendHex("00") // OP_0 placeholder
+		ctx.appendAsm("OP_0")
+		ctx.nextOpcodeIndex()
+		ctx.codeSepIndexSlots = append(ctx.codeSepIndexSlots, CodeSepIndexSlot{
+			ByteOffset:  byteOff,
+			CodeSepIndex: codeSepIdx,
+		})
 	default:
 		return fmt.Errorf("unknown stack op: %s", op.Op)
 	}
@@ -514,6 +532,7 @@ func Emit(methods []StackMethod) (*EmitResult, error) {
 		ScriptHex:            ctx.getHex(),
 		ScriptAsm:            ctx.getAsm(),
 		ConstructorSlots:     ctx.constructorSlots,
+		CodeSepIndexSlots:    ctx.codeSepIndexSlots,
 		CodeSeparatorIndex:   ctx.codeSeparatorIndex,
 		CodeSeparatorIndices: ctx.codeSeparatorIndices,
 		SourceMap:            ctx.sourceMap,
@@ -582,6 +601,7 @@ func EmitMethod(method *StackMethod) (*EmitResult, error) {
 		ScriptHex:            ctx.getHex(),
 		ScriptAsm:            ctx.getAsm(),
 		ConstructorSlots:     ctx.constructorSlots,
+		CodeSepIndexSlots:    ctx.codeSepIndexSlots,
 		CodeSeparatorIndex:   ctx.codeSeparatorIndex,
 		CodeSeparatorIndices: ctx.codeSeparatorIndices,
 		SourceMap:            ctx.sourceMap,

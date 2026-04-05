@@ -138,6 +138,13 @@ export interface ConstructorSlot {
   byteOffset: number;
 }
 
+export interface CodeSepIndexSlot {
+  /** Byte offset of the OP_0 placeholder in the template script */
+  byteOffset: number;
+  /** The template-relative codeSeparatorIndex value this placeholder represents */
+  codeSepIndex: number;
+}
+
 export interface EmitResult {
   /** Hex-encoded Bitcoin Script */
   scriptHex: string;
@@ -147,6 +154,9 @@ export interface EmitResult {
   sourceMap: SourceMapping[];
   /** Byte offsets of constructor parameter placeholders */
   constructorSlots: ConstructorSlot[];
+  /** Byte offsets of codeSepIndex placeholders in the script (OP_0 placeholders
+   *  that the SDK must replace with the adjusted codeSeparatorIndex). */
+  codeSepIndexSlots: CodeSepIndexSlot[];
   /** Byte offset of OP_CODESEPARATOR in the script (undefined if not present).
    *  For multi-method contracts, this is the LAST separator's offset. */
   codeSeparatorIndex?: number;
@@ -335,6 +345,7 @@ class EmitContext {
   private byteLength = 0;
   readonly sourceMap: SourceMapping[] = [];
   readonly constructorSlots: ConstructorSlot[] = [];
+  readonly codeSepIndexSlots: CodeSepIndexSlot[] = [];
   /** Byte offset of the last OP_CODESEPARATOR (undefined if none emitted) */
   codeSeparatorIndex?: number;
   /** Per-method OP_CODESEPARATOR byte offsets (in method emission order) */
@@ -401,6 +412,16 @@ class EmitContext {
     this.appendAsm('OP_0');
     this.nextOpcodeIndex();
     this.constructorSlots.push({ paramIndex, byteOffset });
+  }
+
+  emitCodeSepIndexPlaceholder(): void {
+    const byteOffset = this.byteLength;
+    const codeSepIndex = this.codeSeparatorIndex ?? 0;
+    this.recordSourceMapping();
+    this.appendHex('00'); // OP_0 placeholder byte
+    this.appendAsm('OP_0');
+    this.nextOpcodeIndex();
+    this.codeSepIndexSlots.push({ byteOffset, codeSepIndex });
   }
 
   getHex(): string {
@@ -477,9 +498,10 @@ function emitStackOp(op: StackOp, ctx: EmitContext): void {
       break;
 
     case 'push_codesep_index':
-      // Push the codeSeparatorIndex as a numeric constant.
-      // This value is known at emit time (set when OP_CODESEPARATOR was emitted).
-      ctx.emitPush(BigInt(ctx.codeSeparatorIndex ?? 0));
+      // Emit an OP_0 placeholder that the SDK will replace with the adjusted
+      // codeSeparatorIndex at runtime. The adjustment accounts for constructor
+      // arg substitution which can shift byte offsets in the script.
+      ctx.emitCodeSepIndexPlaceholder();
       break;
   }
 
@@ -556,6 +578,7 @@ export function emit(program: StackProgram): EmitResult {
     scriptAsm: ctx.getAsm(),
     sourceMap: ctx.sourceMap,
     constructorSlots: ctx.constructorSlots,
+    codeSepIndexSlots: ctx.codeSepIndexSlots,
     codeSeparatorIndex: ctx.codeSeparatorIndex,
     codeSeparatorIndices: ctx.codeSeparatorIndices.length > 0 ? ctx.codeSeparatorIndices : undefined,
   };

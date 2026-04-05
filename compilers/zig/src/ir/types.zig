@@ -353,6 +353,7 @@ pub const RunarArtifact = struct {
     abi: ABI, script: []const u8, asm_text: []const u8,
     source_map: ?SourceMap = null, anf: ?*const ANFProgram = null,
     state_fields: ?[]StateField = null, constructor_slots: ?[]ConstructorSlot = null,
+    code_sep_index_slots: ?[]CodeSepIndexSlot = null,
     code_separator_index: ?u32 = null, code_separator_indices: ?[]u32 = null,
     build_timestamp: []const u8,
 };
@@ -362,6 +363,7 @@ pub const ABIConstructor = struct { params: []ABIParam };
 pub const ABIMethod = struct { name: []const u8, params: []ABIParam, is_public: bool, is_terminal: bool = false };
 pub const ABIParam = struct { name: []const u8, type_name: []const u8 };
 pub const ConstructorSlot = struct { param_index: usize, byte_offset: usize };
+pub const CodeSepIndexSlot = struct { byte_offset: usize, code_sep_index: usize };
 pub const StateField = struct { name: []const u8, type_name: []const u8, index: usize, initial_value: ?ConstValue = null };
 pub const SourceMapping = struct { opcode_index: u32, source_file: []const u8, line: u32, column: u32 };
 pub const SourceMap = struct { mappings: []SourceMapping };

@@ -52,6 +52,9 @@ type StateField struct {
 // ConstructorSlot records a constructor parameter placeholder in the compiled script.
 type ConstructorSlot = codegen.ConstructorSlot
 
+// CodeSepIndexSlot records a codeSepIndex placeholder in the compiled script.
+type CodeSepIndexSlot = codegen.CodeSepIndexSlot
+
 // SourceMapping is re-exported from codegen.
 type SourceMapping = codegen.SourceMapping
 
@@ -75,8 +78,9 @@ type Artifact struct {
 	Script                 string            `json:"script"`
 	ASM                    string            `json:"asm"`
 	StateFields            []StateField      `json:"stateFields,omitempty"`
-	ConstructorSlots       []ConstructorSlot `json:"constructorSlots,omitempty"`
-	CodeSeparatorIndex     *int              `json:"codeSeparatorIndex,omitempty"`
+	ConstructorSlots       []ConstructorSlot  `json:"constructorSlots,omitempty"`
+	CodeSepIndexSlots      []CodeSepIndexSlot `json:"codeSepIndexSlots,omitempty"`
+	CodeSeparatorIndex     *int               `json:"codeSeparatorIndex,omitempty"`
 	CodeSeparatorIndices   []int             `json:"codeSeparatorIndices,omitempty"`
 	BuildTimestamp         string            `json:"buildTimestamp"`
 	ANF                    *ir.ANFProgram    `json:"anf,omitempty"`
@@ -145,12 +149,12 @@ func CompileFromProgram(program *ir.ANFProgram, opts ...CompileOptions) (*Artifa
 		return nil, fmt.Errorf("emit: %w", err)
 	}
 
-	artifact := assembleArtifact(program, emitResult.ScriptHex, emitResult.ScriptAsm, emitResult.ConstructorSlots, emitResult.CodeSeparatorIndex, emitResult.CodeSeparatorIndices, emitResult.SourceMap, stackMethods, o)
+	artifact := assembleArtifact(program, emitResult.ScriptHex, emitResult.ScriptAsm, emitResult.ConstructorSlots, emitResult.CodeSepIndexSlots, emitResult.CodeSeparatorIndex, emitResult.CodeSeparatorIndices, emitResult.SourceMap, stackMethods, o)
 	return artifact, nil
 }
 
 // assembleArtifact builds the final output artifact from the compilation products.
-func assembleArtifact(program *ir.ANFProgram, scriptHex, scriptAsm string, constructorSlots []ConstructorSlot, codeSeparatorIndex int, codeSeparatorIndices []int, sourceMap []codegen.SourceMapping, stackMethods []codegen.StackMethod, opts CompileOptions) *Artifact {
+func assembleArtifact(program *ir.ANFProgram, scriptHex, scriptAsm string, constructorSlots []ConstructorSlot, codeSepIndexSlots []CodeSepIndexSlot, codeSeparatorIndex int, codeSeparatorIndices []int, sourceMap []codegen.SourceMapping, stackMethods []codegen.StackMethod, opts CompileOptions) *Artifact {
 	// Build ABI
 	// Build constructor params, excluding properties with initializers
 	// (properties with default values are not constructor parameters).
@@ -235,6 +239,7 @@ func assembleArtifact(program *ir.ANFProgram, scriptHex, scriptAsm string, const
 		ASM:                  scriptAsm,
 		StateFields:          stateFields,
 		ConstructorSlots:     constructorSlots,
+		CodeSepIndexSlots:   codeSepIndexSlots,
 		CodeSeparatorIndex:   csIndex,
 		CodeSeparatorIndices: csIndices,
 		BuildTimestamp:       time.Now().UTC().Format(time.RFC3339),
@@ -509,7 +514,7 @@ func CompileFromSourceWithResult(sourcePath string, opts ...CompileOptions) *Com
 			return
 		}
 
-		artifact := assembleArtifact(result.ANF, emitResult.ScriptHex, emitResult.ScriptAsm, emitResult.ConstructorSlots, emitResult.CodeSeparatorIndex, emitResult.CodeSeparatorIndices, emitResult.SourceMap, stackMethods, o)
+		artifact := assembleArtifact(result.ANF, emitResult.ScriptHex, emitResult.ScriptAsm, emitResult.ConstructorSlots, emitResult.CodeSepIndexSlots, emitResult.CodeSeparatorIndex, emitResult.CodeSeparatorIndices, emitResult.SourceMap, stackMethods, o)
 		result.Artifact = artifact
 		result.ScriptHex = emitResult.ScriptHex
 		result.ScriptAsm = emitResult.ScriptAsm
@@ -640,7 +645,7 @@ func CompileFromSourceStrWithResult(source string, fileName string, opts ...Comp
 			return
 		}
 
-		artifact := assembleArtifact(result.ANF, emitResult.ScriptHex, emitResult.ScriptAsm, emitResult.ConstructorSlots, emitResult.CodeSeparatorIndex, emitResult.CodeSeparatorIndices, emitResult.SourceMap, stackMethods, o)
+		artifact := assembleArtifact(result.ANF, emitResult.ScriptHex, emitResult.ScriptAsm, emitResult.ConstructorSlots, emitResult.CodeSepIndexSlots, emitResult.CodeSeparatorIndex, emitResult.CodeSeparatorIndices, emitResult.SourceMap, stackMethods, o)
 		result.Artifact = artifact
 		result.ScriptHex = emitResult.ScriptHex
 		result.ScriptAsm = emitResult.ScriptAsm

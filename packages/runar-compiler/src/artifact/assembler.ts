@@ -67,6 +67,11 @@ export interface ConstructorSlot {
   byteOffset: number;
 }
 
+export interface CodeSepIndexSlot {
+  byteOffset: number;
+  codeSepIndex: number;
+}
+
 export interface RunarArtifact {
   /** Schema version, e.g. "runar-v0.1.0" */
   version: string;
@@ -104,6 +109,9 @@ export interface RunarArtifact {
   /** Byte offsets of constructor parameter placeholders in the script */
   constructorSlots?: ConstructorSlot[];
 
+  /** Byte offsets of codeSepIndex placeholders in the script */
+  codeSepIndexSlots?: CodeSepIndexSlot[];
+
   /** Byte offset of OP_CODESEPARATOR in the locking script (for BIP-143 sighash).
    *  For multi-method contracts, use codeSeparatorIndices instead. */
   codeSeparatorIndex?: number;
@@ -130,6 +138,8 @@ export interface AssembleOptions {
   compilerVersion?: string;
   /** Constructor parameter placeholder byte offsets from the emitter. */
   constructorSlots?: ConstructorSlot[];
+  /** CodeSepIndex placeholder byte offsets from the emitter. */
+  codeSepIndexSlots?: CodeSepIndexSlot[];
   /** Byte offset of OP_CODESEPARATOR in the locking script. */
   codeSeparatorIndex?: number;
   /** Per-method OP_CODESEPARATOR byte offsets. */
@@ -330,6 +340,11 @@ export function assembleArtifact(
   // Constructor slots (only if there are placeholder byte offsets)
   if (options?.constructorSlots && options.constructorSlots.length > 0) {
     artifact.constructorSlots = options.constructorSlots;
+  }
+
+  // CodeSepIndex slots (only if there are placeholder byte offsets)
+  if (options?.codeSepIndexSlots && options.codeSepIndexSlots.length > 0) {
+    artifact.codeSepIndexSlots = options.codeSepIndexSlots;
   }
 
   // OP_CODESEPARATOR byte offsets (only for stateful contracts)
