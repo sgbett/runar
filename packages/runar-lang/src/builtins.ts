@@ -591,6 +591,79 @@ export function bbFieldInv(_a: bigint): bigint {
 }
 
 // ---------------------------------------------------------------------------
+// Baby Bear quartic extension field (degree-4 over BabyBear, W = 11)
+// ---------------------------------------------------------------------------
+// The extension is F[X]/(X^4 - 11) where F is the Baby Bear base field.
+// Elements are (a0, a1, a2, a3) with each component a base field element.
+// SP1/Plonky3 uses this for FRI challenge sampling and DEEP quotient evaluation.
+//
+// Extension addition/subtraction are component-wise — use bbFieldAdd/bbFieldSub.
+// These builtins handle multiplication and inverse which involve cross-terms.
+// Each function returns one component of the result (index 0-3).
+// ---------------------------------------------------------------------------
+
+/**
+ * Component 0 of Baby Bear quartic extension multiplication.
+ * r0 = a0*b0 + 11*(a1*b3 + a2*b2 + a3*b1) mod p
+ */
+export function bbExt4Mul0(_a0: bigint, _a1: bigint, _a2: bigint, _a3: bigint, _b0: bigint, _b1: bigint, _b2: bigint, _b3: bigint): bigint {
+  return compilerStub('bbExt4Mul0');
+}
+
+/**
+ * Component 1 of Baby Bear quartic extension multiplication.
+ * r1 = a0*b1 + a1*b0 + 11*(a2*b3 + a3*b2) mod p
+ */
+export function bbExt4Mul1(_a0: bigint, _a1: bigint, _a2: bigint, _a3: bigint, _b0: bigint, _b1: bigint, _b2: bigint, _b3: bigint): bigint {
+  return compilerStub('bbExt4Mul1');
+}
+
+/**
+ * Component 2 of Baby Bear quartic extension multiplication.
+ * r2 = a0*b2 + a1*b1 + a2*b0 + 11*(a3*b3) mod p
+ */
+export function bbExt4Mul2(_a0: bigint, _a1: bigint, _a2: bigint, _a3: bigint, _b0: bigint, _b1: bigint, _b2: bigint, _b3: bigint): bigint {
+  return compilerStub('bbExt4Mul2');
+}
+
+/**
+ * Component 3 of Baby Bear quartic extension multiplication.
+ * r3 = a0*b3 + a1*b2 + a2*b1 + a3*b0 mod p
+ */
+export function bbExt4Mul3(_a0: bigint, _a1: bigint, _a2: bigint, _a3: bigint, _b0: bigint, _b1: bigint, _b2: bigint, _b3: bigint): bigint {
+  return compilerStub('bbExt4Mul3');
+}
+
+/**
+ * Component 0 of Baby Bear quartic extension inverse.
+ * Uses tower-of-quadratic-extensions algorithm.
+ */
+export function bbExt4Inv0(_a0: bigint, _a1: bigint, _a2: bigint, _a3: bigint): bigint {
+  return compilerStub('bbExt4Inv0');
+}
+
+/**
+ * Component 1 of Baby Bear quartic extension inverse.
+ */
+export function bbExt4Inv1(_a0: bigint, _a1: bigint, _a2: bigint, _a3: bigint): bigint {
+  return compilerStub('bbExt4Inv1');
+}
+
+/**
+ * Component 2 of Baby Bear quartic extension inverse.
+ */
+export function bbExt4Inv2(_a0: bigint, _a1: bigint, _a2: bigint, _a3: bigint): bigint {
+  return compilerStub('bbExt4Inv2');
+}
+
+/**
+ * Component 3 of Baby Bear quartic extension inverse.
+ */
+export function bbExt4Inv3(_a0: bigint, _a1: bigint, _a2: bigint, _a3: bigint): bigint {
+  return compilerStub('bbExt4Inv3');
+}
+
+// ---------------------------------------------------------------------------
 // Merkle proof verification
 // ---------------------------------------------------------------------------
 

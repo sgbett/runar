@@ -9,8 +9,12 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  typescript:
-    name: TypeScript (build + test)
+  # ---------------------------------------------------------------------------
+  # Compilers — build, unit test, upload artifacts
+  # ---------------------------------------------------------------------------
+
+  ts-compiler:
+    name: TypeScript Compiler
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,7 +37,7 @@ jobs:
         run: npx vitest run examples/ts/ examples/sol/ examples/move/
       - run: pnpm run typecheck
 
-  go:
+  go-compiler:
     name: Go Compiler
     runs-on: ubuntu-latest
     steps:
@@ -45,16 +49,12 @@ jobs:
       - run: cd compilers/go && go build ./...
       - run: cd compilers/go && go build -o runar-go .
       - run: cd compilers/go && go test -race -v ./...
-      - name: Go SDK tests
-        run: cd packages/runar-go && go test ./...
-      - name: Go example tests
-        run: cd examples/go && go test ./...
       - uses: actions/upload-artifact@v4
         with:
           name: runar-go
           path: compilers/go/runar-go
 
-  rust:
+  rust-compiler:
     name: Rust Compiler
     runs-on: ubuntu-latest
     steps:
@@ -62,16 +62,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cd compilers/rust && cargo build --release
       - run: cd compilers/rust && cargo test
-      - name: Rust example tests
-        run: cd examples/rust && cargo test
-      - name: Rust SDK tests
-        run: cd packages/runar-rs && cargo test
       - uses: actions/upload-artifact@v4
         with:
           name: runar-rust
           path: compilers/rust/target/release/runar-compiler-rust
 
-  python:
+  python-compiler:
     name: Python Compiler
     runs-on: ubuntu-latest
     steps:
@@ -81,10 +77,6 @@ jobs:
           python-version: '3.12'
       - run: pip install pytest
       - run: cd compilers/python && python -m pytest tests/ -v
-      - name: Python SDK tests
-        run: cd packages/runar-py && python -m pytest
-      - name: Python example tests
-        run: cd examples/python && PYTHONPATH=../../packages/runar-py python -m pytest
 
   zig-compiler:
     name: Zig Compiler
@@ -103,35 +95,6 @@ jobs:
         with:
           name: runar-zig
           path: compilers/zig/zig-out/bin/runar-zig
-
-  zig-sdk:
-    name: Zig SDK
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.15.0
-      - run: cd packages/runar-zig && zig build test
-      - name: Zig example tests
-        run: cd examples/zig && zig build test
-
-  ruby:
-    name: Ruby SDK
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: '3.3'
-          bundler-cache: true
-          working-directory: packages/runar-rb
-      - run: cd packages/runar-rb && bundle exec rspec
-      - name: Ruby example tests
-        run: |
-          cd examples/ruby
-          bundle install
-          bundle exec rspec **/*_spec.rb
 
   ruby-compiler:
     name: Ruby Compiler
@@ -192,9 +155,87 @@ jobs:
           done
           exit $fail
 
+  # ---------------------------------------------------------------------------
+  # SDKs — package tests + example tests
+  # ---------------------------------------------------------------------------
+
+  go-sdk:
+    name: Go SDK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache-dependency-path: packages/runar-go/go.sum
+      - name: SDK tests
+        run: cd packages/runar-go && go test ./...
+      - name: Example tests
+        run: cd examples/go && go test ./...
+
+  rust-sdk:
+    name: Rust SDK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: SDK tests
+        run: cd packages/runar-rs && cargo test
+      - name: Example tests
+        run: cd examples/rust && cargo test
+
+  python-sdk:
+    name: Python SDK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pytest
+      - name: SDK tests
+        run: cd packages/runar-py && python -m pytest
+      - name: Example tests
+        run: cd examples/python && PYTHONPATH=../../packages/runar-py python -m pytest
+
+  zig-sdk:
+    name: Zig SDK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.0
+      - name: SDK tests
+        run: cd packages/runar-zig && zig build test
+      - name: Example tests
+        run: cd examples/zig && zig build test
+
+  ruby-sdk:
+    name: Ruby SDK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+          working-directory: packages/runar-rb
+      - name: SDK tests
+        run: cd packages/runar-rb && bundle exec rspec
+      - name: Example tests
+        run: |
+          cd examples/ruby
+          bundle install
+          bundle exec rspec **/*_spec.rb
+
+  # ---------------------------------------------------------------------------
+  # Conformance — cross-compiler + SDK output
+  # ---------------------------------------------------------------------------
+
   conformance:
     name: Conformance Tests
-    needs: [typescript, go, rust, python, zig-compiler, ruby-compiler]
+    needs: [ts-compiler, go-compiler, rust-compiler, python-compiler, zig-compiler, ruby-compiler]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -260,9 +301,57 @@ jobs:
           done
           exit $fail
 
+  sdk-conformance:
+    name: SDK Output Conformance
+    needs: [ts-compiler, go-sdk, rust-sdk, python-sdk, zig-sdk, ruby-sdk]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache-dependency-path: packages/runar-go/go.sum
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+          working-directory: packages/runar-rb
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - name: Build Rust SDK tool
+        run: cd conformance/sdk-output/tools/rs-sdk-tool && cargo build --release
+      - name: Build Zig SDK tool
+        run: cd conformance/sdk-output/tools/zig-sdk-tool && zig build -Doptimize=ReleaseFast
+      - name: Run SDK output conformance (39 contracts x 6 SDKs)
+        run: cd conformance/sdk-output && npx tsx runner/sdk-runner.ts
+
+  # ---------------------------------------------------------------------------
+  # Integration — regtest node tests
+  # ---------------------------------------------------------------------------
+
   integration:
     name: Integration Tests
-    needs: [typescript, go, rust, python, ruby, zig-compiler, zig-sdk]
+    needs:
+      - ts-compiler
+      - go-compiler
+      - rust-compiler
+      - python-compiler
+      - zig-compiler
+      - zig-sdk
+      - ruby-compiler
+      - ruby-sdk
     runs-on: ubuntu-latest
     env:
       RPC_URL: http://localhost:18332

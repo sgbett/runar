@@ -259,18 +259,17 @@ fn lowerMethods(allocator: Allocator, contract: ContractNode) LowerError![]ANFMe
 }
 
 fn lowerConstructorBody(ctx: *LowerCtx, ctor: ConstructorNode) LowerError!void {
-    // Lower super() call if there are super args
-    if (ctor.super_args.len > 0) {
-        var arg_refs: std.ArrayListUnmanaged([]const u8) = .empty;
-        for (ctor.super_args) |arg| {
-            const ref = try lowerExprToRef(ctx, arg);
-            try arg_refs.append(ctx.allocator, ref);
-        }
-        _ = try ctx.emit(.{ .call = .{
-            .func = "super",
-            .args = try arg_refs.toOwnedSlice(ctx.allocator),
-        } });
+    // Always lower super() call — even with zero args, the call must appear in the
+    // constructor body to match the TypeScript reference compiler output.
+    var arg_refs: std.ArrayListUnmanaged([]const u8) = .empty;
+    for (ctor.super_args) |arg| {
+        const ref = try lowerExprToRef(ctx, arg);
+        try arg_refs.append(ctx.allocator, ref);
     }
+    _ = try ctx.emit(.{ .call = .{
+        .func = "super",
+        .args = try arg_refs.toOwnedSlice(ctx.allocator),
+    } });
 
     // Lower constructor assignments: this.x = param
     for (ctor.assignments) |assign| {

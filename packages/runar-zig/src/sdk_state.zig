@@ -142,17 +142,22 @@ fn encodeStateValue(
     field_type: []const u8,
 ) ![]u8 {
     if (std.mem.eql(u8, field_type, "int") or std.mem.eql(u8, field_type, "bigint")) {
+        switch (value) {
+            .big_int => |decimal_str| return encodeBigNum2Bin(allocator, decimal_str, 8),
+            else => {},
+        }
         const n: i64 = switch (value) {
             .int => |i| i,
             .boolean => |b| if (b) @as(i64, 1) else @as(i64, 0),
             .bytes => 0,
+            .big_int => unreachable, // handled above
         };
         return encodeNum2Bin(allocator, n, 8);
     } else if (std.mem.eql(u8, field_type, "bool")) {
         const b: bool = switch (value) {
             .boolean => |bv| bv,
             .int => |i| i != 0,
-            .bytes => false,
+            .bytes, .big_int => false,
         };
         return allocator.dupe(u8, if (b) "01" else "00");
     } else if (std.mem.eql(u8, field_type, "PubKey") or
@@ -194,6 +199,51 @@ pub fn encodeNum2Bin(allocator: std.mem.Allocator, n: i64, width: usize) ![]u8 {
         buf[i] = @truncate(abs_val & 0xff);
         abs_val >>= 8;
     }
+    if (negative) {
+        buf[width - 1] |= 0x80;
+    }
+
+    return bytesToHex(allocator, buf);
+}
+
+/// encodeBigNum2Bin encodes an arbitrary-precision integer (given as a decimal
+/// string) as a fixed-width LE sign-magnitude byte string, matching OP_NUM2BIN
+/// behaviour. Used for state field serialization of values exceeding i64.
+pub fn encodeBigNum2Bin(allocator: std.mem.Allocator, decimal_str: []const u8, width: usize) ![]u8 {
+    // Check for negative sign
+    const negative = decimal_str.len > 0 and decimal_str[0] == '-';
+    const digits = if (negative) decimal_str[1..] else decimal_str;
+
+    var buf = try allocator.alloc(u8, width);
+    defer allocator.free(buf);
+    @memset(buf, 0);
+
+    // Convert decimal digits to LE bytes via repeated division by 256
+    var work = try allocator.alloc(u8, digits.len);
+    defer allocator.free(work);
+    for (digits, 0..) |c, ci| {
+        work[ci] = c - '0';
+    }
+    var work_len = digits.len;
+
+    var byte_idx: usize = 0;
+    while (work_len > 0 and byte_idx < width) {
+        var remainder: u16 = 0;
+        var new_len: usize = 0;
+        for (0..work_len) |i| {
+            const val = remainder * 10 + @as(u16, work[i]);
+            const quotient_digit: u8 = @intCast(val / 256);
+            remainder = val % 256;
+            if (quotient_digit != 0 or new_len > 0) {
+                work[new_len] = quotient_digit;
+                new_len += 1;
+            }
+        }
+        buf[byte_idx] = @intCast(remainder);
+        byte_idx += 1;
+        work_len = new_len;
+    }
+
     if (negative) {
         buf[width - 1] |= 0x80;
     }
@@ -410,6 +460,7 @@ pub fn decodePushData(hex: []const u8, offset: usize) PushDataResult {
 pub fn encodeArg(allocator: std.mem.Allocator, value: types.StateValue) ![]u8 {
     return switch (value) {
         .int => |n| encodeScriptNumber(allocator, n),
+        .big_int => |decimal_str| encodeBigScriptNumber(allocator, decimal_str),
         .boolean => |b| allocator.dupe(u8, if (b) "51" else "00"),
         .bytes => |hex| encodePushData(allocator, hex),
     };
@@ -449,6 +500,72 @@ pub fn encodeScriptNumber(allocator: std.mem.Allocator, n: i64) ![]u8 {
     }
 
     const hex = try bytesToHex(allocator, byte_buf[0..byte_count]);
+    defer allocator.free(hex);
+    return encodePushData(allocator, hex);
+}
+
+/// encodeBigScriptNumber encodes an arbitrary-precision integer (given as a
+/// decimal string) into Bitcoin Script push data using LE sign-magnitude
+/// encoding. Falls back to encodeScriptNumber for values that fit in i64.
+pub fn encodeBigScriptNumber(allocator: std.mem.Allocator, decimal_str: []const u8) ![]u8 {
+    if (decimal_str.len == 0) return allocator.dupe(u8, "00");
+
+    // Check for negative sign
+    const negative = decimal_str[0] == '-';
+    const digits = if (negative) decimal_str[1..] else decimal_str;
+
+    // Try i64 first for small-number opcodes (OP_0, OP_1..16, OP_1NEGATE)
+    if (std.fmt.parseInt(i64, decimal_str, 10)) |n| {
+        return encodeScriptNumber(allocator, n);
+    } else |_| {}
+
+    // Big number path: convert decimal digits to bytes via repeated division by 256.
+    // We work with the absolute value digits, then apply the sign at the end.
+
+    // Copy digits to a mutable working buffer (array of digit values 0-9)
+    var work = try allocator.alloc(u8, digits.len);
+    defer allocator.free(work);
+    for (digits, 0..) |c, i| {
+        work[i] = c - '0';
+    }
+    var work_len = digits.len;
+
+    // Result bytes in little-endian order
+    var le_bytes = std.ArrayListUnmanaged(u8){};
+    defer le_bytes.deinit(allocator);
+
+    while (work_len > 0) {
+        // Divide the big number (in work[0..work_len]) by 256, collecting
+        // the remainder as the next LE byte.
+        var remainder: u16 = 0;
+        var new_len: usize = 0;
+        for (0..work_len) |i| {
+            const val = remainder * 10 + @as(u16, work[i]);
+            const quotient_digit: u8 = @intCast(val / 256);
+            remainder = val % 256;
+            if (quotient_digit != 0 or new_len > 0) {
+                work[new_len] = quotient_digit;
+                new_len += 1;
+            }
+        }
+        try le_bytes.append(allocator, @intCast(remainder));
+        work_len = new_len;
+    }
+
+    // Strip trailing zero bytes (they came from leading zeros in division)
+    while (le_bytes.items.len > 1 and le_bytes.items[le_bytes.items.len - 1] == 0) {
+        _ = le_bytes.pop();
+    }
+
+    // Apply sign bit (LE sign-magnitude encoding)
+    if (le_bytes.items[le_bytes.items.len - 1] & 0x80 != 0) {
+        // MSB is set; need an extra byte for the sign
+        try le_bytes.append(allocator, if (negative) 0x80 else 0x00);
+    } else if (negative) {
+        le_bytes.items[le_bytes.items.len - 1] |= 0x80;
+    }
+
+    const hex = try bytesToHex(allocator, le_bytes.items);
     defer allocator.free(hex);
     return encodePushData(allocator, hex);
 }

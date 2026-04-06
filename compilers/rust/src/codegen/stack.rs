@@ -94,6 +94,8 @@ fn is_bb_builtin(name: &str) -> bool {
     matches!(
         name,
         "bbFieldAdd" | "bbFieldSub" | "bbFieldMul" | "bbFieldInv"
+            | "bbExt4Mul0" | "bbExt4Mul1" | "bbExt4Mul2" | "bbExt4Mul3"
+            | "bbExt4Inv0" | "bbExt4Inv1" | "bbExt4Inv2" | "bbExt4Inv3"
     )
 }
 
@@ -3668,6 +3670,14 @@ impl LoweringContext {
             "bbFieldSub" => super::babybear::emit_bb_field_sub(emit),
             "bbFieldMul" => super::babybear::emit_bb_field_mul(emit),
             "bbFieldInv" => super::babybear::emit_bb_field_inv(emit),
+            "bbExt4Mul0" => super::babybear::emit_bb_ext4_mul_0(emit),
+            "bbExt4Mul1" => super::babybear::emit_bb_ext4_mul_1(emit),
+            "bbExt4Mul2" => super::babybear::emit_bb_ext4_mul_2(emit),
+            "bbExt4Mul3" => super::babybear::emit_bb_ext4_mul_3(emit),
+            "bbExt4Inv0" => super::babybear::emit_bb_ext4_inv_0(emit),
+            "bbExt4Inv1" => super::babybear::emit_bb_ext4_inv_1(emit),
+            "bbExt4Inv2" => super::babybear::emit_bb_ext4_inv_2(emit),
+            "bbExt4Inv3" => super::babybear::emit_bb_ext4_inv_3(emit),
             _ => panic!("unknown Baby Bear builtin: {}", func_name),
         }
 

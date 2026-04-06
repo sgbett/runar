@@ -434,12 +434,16 @@ pub const CodeSepIndexSlot = struct {
 /// StateValue is a tagged union for contract state values and method arguments.
 pub const StateValue = union(enum) {
     int: i64,
+    /// Arbitrary-precision integer stored as a decimal string (owned).
+    /// Used for values that exceed the i64 range.
+    big_int: []const u8,
     boolean: bool,
     bytes: []const u8, // hex-encoded
 
     pub fn deinit(self: StateValue, allocator: std.mem.Allocator) void {
         switch (self) {
             .bytes => |b| allocator.free(b),
+            .big_int => |s| allocator.free(s),
             else => {},
         }
     }
@@ -447,6 +451,7 @@ pub const StateValue = union(enum) {
     pub fn clone(self: StateValue, allocator: std.mem.Allocator) !StateValue {
         return switch (self) {
             .int => |n| .{ .int = n },
+            .big_int => |s| .{ .big_int = try allocator.dupe(u8, s) },
             .boolean => |b| .{ .boolean = b },
             .bytes => |b| .{ .bytes = try allocator.dupe(u8, b) },
         };

@@ -1127,6 +1127,15 @@ const LowerCtx = struct {
         bbFieldSub,
         bbFieldMul,
         bbFieldInv,
+        // Baby Bear quartic extension field arithmetic
+        bbExt4Mul0,
+        bbExt4Mul1,
+        bbExt4Mul2,
+        bbExt4Mul3,
+        bbExt4Inv0,
+        bbExt4Inv1,
+        bbExt4Inv2,
+        bbExt4Inv3,
         // Merkle proof verification
         merkleRootSha256,
         merkleRootHash256,
@@ -1209,6 +1218,14 @@ const LowerCtx = struct {
         .{ "bbFieldSub", .bbFieldSub },
         .{ "bbFieldMul", .bbFieldMul },
         .{ "bbFieldInv", .bbFieldInv },
+        .{ "bbExt4Mul0", .bbExt4Mul0 },
+        .{ "bbExt4Mul1", .bbExt4Mul1 },
+        .{ "bbExt4Mul2", .bbExt4Mul2 },
+        .{ "bbExt4Mul3", .bbExt4Mul3 },
+        .{ "bbExt4Inv0", .bbExt4Inv0 },
+        .{ "bbExt4Inv1", .bbExt4Inv1 },
+        .{ "bbExt4Inv2", .bbExt4Inv2 },
+        .{ "bbExt4Inv3", .bbExt4Inv3 },
         .{ "merkleRootSha256", .merkleRootSha256 },
         .{ "merkleRootHash256", .merkleRootHash256 },
         .{ "super", .super_call },
@@ -1290,6 +1307,15 @@ const LowerCtx = struct {
             .bbFieldSub => try self.lowerBBBuiltin(bind_name, args, .bb_field_sub),
             .bbFieldMul => try self.lowerBBBuiltin(bind_name, args, .bb_field_mul),
             .bbFieldInv => try self.lowerBBBuiltin(bind_name, args, .bb_field_inv),
+            // Baby Bear quartic extension field arithmetic
+            .bbExt4Mul0 => try self.lowerBBBuiltin(bind_name, args, .bb_ext4_mul0),
+            .bbExt4Mul1 => try self.lowerBBBuiltin(bind_name, args, .bb_ext4_mul1),
+            .bbExt4Mul2 => try self.lowerBBBuiltin(bind_name, args, .bb_ext4_mul2),
+            .bbExt4Mul3 => try self.lowerBBBuiltin(bind_name, args, .bb_ext4_mul3),
+            .bbExt4Inv0 => try self.lowerBBBuiltin(bind_name, args, .bb_ext4_inv0),
+            .bbExt4Inv1 => try self.lowerBBBuiltin(bind_name, args, .bb_ext4_inv1),
+            .bbExt4Inv2 => try self.lowerBBBuiltin(bind_name, args, .bb_ext4_inv2),
+            .bbExt4Inv3 => try self.lowerBBBuiltin(bind_name, args, .bb_ext4_inv3),
             // Merkle proof verification
             .merkleRootSha256 => try self.lowerMerkleBuiltin(bind_name, args, call.name, .merkle_root_sha256),
             .merkleRootHash256 => try self.lowerMerkleBuiltin(bind_name, args, call.name, .merkle_root_hash256),
@@ -1519,6 +1545,8 @@ const LowerCtx = struct {
         const required: usize = switch (builtin) {
             .bb_field_add, .bb_field_sub, .bb_field_mul => 2,
             .bb_field_inv => 1,
+            .bb_ext4_mul0, .bb_ext4_mul1, .bb_ext4_mul2, .bb_ext4_mul3 => 8,
+            .bb_ext4_inv0, .bb_ext4_inv1, .bb_ext4_inv2, .bb_ext4_inv3 => 4,
         };
         if (args.len < required) return LowerError.InvalidBuiltin;
 

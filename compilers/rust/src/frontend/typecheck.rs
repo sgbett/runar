@@ -88,6 +88,15 @@ fn builtin_functions() -> HashMap<&'static str, FuncSig> {
     m.insert("bbFieldSub", FuncSig { params: vec!["bigint", "bigint"], return_type: "bigint" });
     m.insert("bbFieldMul", FuncSig { params: vec!["bigint", "bigint"], return_type: "bigint" });
     m.insert("bbFieldInv", FuncSig { params: vec!["bigint"], return_type: "bigint" });
+    // Baby Bear ext4 field arithmetic
+    m.insert("bbExt4Mul0", FuncSig { params: vec!["bigint", "bigint", "bigint", "bigint", "bigint", "bigint", "bigint", "bigint"], return_type: "bigint" });
+    m.insert("bbExt4Mul1", FuncSig { params: vec!["bigint", "bigint", "bigint", "bigint", "bigint", "bigint", "bigint", "bigint"], return_type: "bigint" });
+    m.insert("bbExt4Mul2", FuncSig { params: vec!["bigint", "bigint", "bigint", "bigint", "bigint", "bigint", "bigint", "bigint"], return_type: "bigint" });
+    m.insert("bbExt4Mul3", FuncSig { params: vec!["bigint", "bigint", "bigint", "bigint", "bigint", "bigint", "bigint", "bigint"], return_type: "bigint" });
+    m.insert("bbExt4Inv0", FuncSig { params: vec!["bigint", "bigint", "bigint", "bigint"], return_type: "bigint" });
+    m.insert("bbExt4Inv1", FuncSig { params: vec!["bigint", "bigint", "bigint", "bigint"], return_type: "bigint" });
+    m.insert("bbExt4Inv2", FuncSig { params: vec!["bigint", "bigint", "bigint", "bigint"], return_type: "bigint" });
+    m.insert("bbExt4Inv3", FuncSig { params: vec!["bigint", "bigint", "bigint", "bigint"], return_type: "bigint" });
 
     // Merkle proof verification
     m.insert("merkleRootSha256", FuncSig { params: vec!["ByteString", "ByteString", "bigint", "bigint"], return_type: "ByteString" });

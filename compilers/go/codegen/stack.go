@@ -4014,6 +4014,10 @@ func (ctx *loweringContext) lowerEcBuiltin(bindingName, funcName string, args []
 var bbFieldBuiltinNames = map[string]bool{
 	"bbFieldAdd": true, "bbFieldSub": true,
 	"bbFieldMul": true, "bbFieldInv": true,
+	"bbExt4Mul0": true, "bbExt4Mul1": true,
+	"bbExt4Mul2": true, "bbExt4Mul3": true,
+	"bbExt4Inv0": true, "bbExt4Inv1": true,
+	"bbExt4Inv2": true, "bbExt4Inv3": true,
 }
 
 func isBBFieldBuiltin(name string) bool {
@@ -4041,6 +4045,22 @@ func (ctx *loweringContext) lowerBBFieldBuiltin(bindingName, funcName string, ar
 		EmitBBFieldMul(emitFn)
 	case "bbFieldInv":
 		EmitBBFieldInv(emitFn)
+	case "bbExt4Mul0":
+		EmitBBExt4Mul0(emitFn)
+	case "bbExt4Mul1":
+		EmitBBExt4Mul1(emitFn)
+	case "bbExt4Mul2":
+		EmitBBExt4Mul2(emitFn)
+	case "bbExt4Mul3":
+		EmitBBExt4Mul3(emitFn)
+	case "bbExt4Inv0":
+		EmitBBExt4Inv0(emitFn)
+	case "bbExt4Inv1":
+		EmitBBExt4Inv1(emitFn)
+	case "bbExt4Inv2":
+		EmitBBExt4Inv2(emitFn)
+	case "bbExt4Inv3":
+		EmitBBExt4Inv3(emitFn)
 	default:
 		panic(fmt.Sprintf("unknown Baby Bear builtin: %s", funcName))
 	}

@@ -20,6 +20,8 @@ use super::stack::{PushValue, StackOp};
 const BB_P: i64 = 2013265921;
 /// p - 2, used for Fermat's little theorem modular inverse
 const BB_P_MINUS_2: i64 = BB_P - 2;
+/// Quartic extension irreducible polynomial coefficient W = 11
+const BB_W: i64 = 11;
 
 // ===========================================================================
 // BBTracker -- named stack state tracker (mirrors ECTracker)
@@ -265,6 +267,246 @@ fn field_inv(t: &mut BBTracker, a_name: &str, result_name: &str) {
     t.rename(result_name);
 }
 
+/// fieldMulConst: (a * c) mod p where c is a compile-time constant
+fn field_mul_const(t: &mut BBTracker, a_name: &str, c: i64, result_name: &str) {
+    t.to_top(a_name);
+    t.raw_block(&[a_name], Some("_bb_mc"), |e| {
+        e(StackOp::Push(PushValue::Int(c as i128)));
+        e(StackOp::Opcode("OP_MUL".into()));
+    });
+    t.to_top("_bb_mc");
+    t.raw_block(&["_bb_mc"], Some(result_name), |e| {
+        e(StackOp::Push(PushValue::Int(BB_P as i128)));
+        e(StackOp::Opcode("OP_MOD".into()));
+    });
+}
+
+/// fieldNeg: (p - a) mod p  (field negation)
+fn field_neg(t: &mut BBTracker, a_name: &str, result_name: &str) {
+    t.push_int("_zero_neg", 0);
+    field_sub(t, "_zero_neg", a_name, result_name);
+}
+
+// ===========================================================================
+// Ext4 multiplication components
+// ===========================================================================
+
+/// Emit ext4 mul component.
+/// Stack in: [a0, a1, a2, a3, b0, b1, b2, b3]
+/// Stack out: [result]
+fn emit_ext4_mul_component(emit: &mut dyn FnMut(StackOp), component: usize) {
+    let t = &mut BBTracker::new(&["a0", "a1", "a2", "a3", "b0", "b1", "b2", "b3"], emit);
+
+    match component {
+        0 => {
+            // r0 = a0*b0 + 11*(a1*b3 + a2*b2 + a3*b1)
+            t.copy_to_top("a0", "_a0"); t.copy_to_top("b0", "_b0");
+            field_mul(t, "_a0", "_b0", "_t0");       // a0*b0
+            t.copy_to_top("a1", "_a1"); t.copy_to_top("b3", "_b3");
+            field_mul(t, "_a1", "_b3", "_t1");       // a1*b3
+            t.copy_to_top("a2", "_a2"); t.copy_to_top("b2", "_b2");
+            field_mul(t, "_a2", "_b2", "_t2");       // a2*b2
+            field_add(t, "_t1", "_t2", "_t12");      // a1*b3 + a2*b2
+            t.copy_to_top("a3", "_a3"); t.copy_to_top("b1", "_b1");
+            field_mul(t, "_a3", "_b1", "_t3");       // a3*b1
+            field_add(t, "_t12", "_t3", "_cross");   // a1*b3 + a2*b2 + a3*b1
+            field_mul_const(t, "_cross", BB_W, "_wcross"); // W * cross
+            field_add(t, "_t0", "_wcross", "_r");    // a0*b0 + W*cross
+        }
+        1 => {
+            // r1 = a0*b1 + a1*b0 + 11*(a2*b3 + a3*b2)
+            t.copy_to_top("a0", "_a0"); t.copy_to_top("b1", "_b1");
+            field_mul(t, "_a0", "_b1", "_t0");       // a0*b1
+            t.copy_to_top("a1", "_a1"); t.copy_to_top("b0", "_b0");
+            field_mul(t, "_a1", "_b0", "_t1");       // a1*b0
+            field_add(t, "_t0", "_t1", "_direct");   // a0*b1 + a1*b0
+            t.copy_to_top("a2", "_a2"); t.copy_to_top("b3", "_b3");
+            field_mul(t, "_a2", "_b3", "_t2");       // a2*b3
+            t.copy_to_top("a3", "_a3"); t.copy_to_top("b2", "_b2");
+            field_mul(t, "_a3", "_b2", "_t3");       // a3*b2
+            field_add(t, "_t2", "_t3", "_cross");    // a2*b3 + a3*b2
+            field_mul_const(t, "_cross", BB_W, "_wcross"); // W * cross
+            field_add(t, "_direct", "_wcross", "_r");
+        }
+        2 => {
+            // r2 = a0*b2 + a1*b1 + a2*b0 + 11*(a3*b3)
+            t.copy_to_top("a0", "_a0"); t.copy_to_top("b2", "_b2");
+            field_mul(t, "_a0", "_b2", "_t0");       // a0*b2
+            t.copy_to_top("a1", "_a1"); t.copy_to_top("b1", "_b1");
+            field_mul(t, "_a1", "_b1", "_t1");       // a1*b1
+            field_add(t, "_t0", "_t1", "_sum01");
+            t.copy_to_top("a2", "_a2"); t.copy_to_top("b0", "_b0");
+            field_mul(t, "_a2", "_b0", "_t2");       // a2*b0
+            field_add(t, "_sum01", "_t2", "_direct");
+            t.copy_to_top("a3", "_a3"); t.copy_to_top("b3", "_b3");
+            field_mul(t, "_a3", "_b3", "_t3");       // a3*b3
+            field_mul_const(t, "_t3", BB_W, "_wcross"); // W * a3*b3
+            field_add(t, "_direct", "_wcross", "_r");
+        }
+        3 => {
+            // r3 = a0*b3 + a1*b2 + a2*b1 + a3*b0
+            t.copy_to_top("a0", "_a0"); t.copy_to_top("b3", "_b3");
+            field_mul(t, "_a0", "_b3", "_t0");       // a0*b3
+            t.copy_to_top("a1", "_a1"); t.copy_to_top("b2", "_b2");
+            field_mul(t, "_a1", "_b2", "_t1");       // a1*b2
+            field_add(t, "_t0", "_t1", "_sum01");
+            t.copy_to_top("a2", "_a2"); t.copy_to_top("b1", "_b1");
+            field_mul(t, "_a2", "_b1", "_t2");       // a2*b1
+            field_add(t, "_sum01", "_t2", "_sum012");
+            t.copy_to_top("a3", "_a3"); t.copy_to_top("b0", "_b0");
+            field_mul(t, "_a3", "_b0", "_t3");       // a3*b0
+            field_add(t, "_sum012", "_t3", "_r");
+        }
+        _ => panic!("Invalid ext4 component: {}", component),
+    }
+
+    // Clean up: drop the 8 input values, keep only _r
+    for name in &["a0", "a1", "a2", "a3", "b0", "b1", "b2", "b3"] {
+        t.to_top(name);
+        t.drop();
+    }
+    t.to_top("_r");
+    t.rename("result");
+}
+
+// ===========================================================================
+// Ext4 inverse components
+// ===========================================================================
+
+/// Emit ext4 inv component.
+/// Tower-of-quadratic-extensions algorithm (matches Plonky3):
+///
+/// norm_0 = a0^2 + W*a2^2 - 2*W*a1*a3
+/// norm_1 = 2*a0*a2 - a1^2 - W*a3^2
+/// det = norm_0^2 - W*norm_1^2
+/// scalar = det^(-1)
+/// inv_n0 = norm_0 * scalar
+/// inv_n1 = -norm_1 * scalar
+///
+/// r0 = a0*inv_n0 + W*a2*inv_n1
+/// r1 = -(a1*inv_n0 + W*a3*inv_n1)
+/// r2 = a0*inv_n1 + a2*inv_n0
+/// r3 = -(a1*inv_n1 + a3*inv_n0)
+///
+/// Stack in: [a0, a1, a2, a3]
+/// Stack out: [result]
+fn emit_ext4_inv_component(emit: &mut dyn FnMut(StackOp), component: usize) {
+    let t = &mut BBTracker::new(&["a0", "a1", "a2", "a3"], emit);
+
+    // Step 1: Compute norm_0 = a0^2 + W*a2^2 - 2*W*a1*a3
+    t.copy_to_top("a0", "_a0c");
+    field_sqr(t, "_a0c", "_a0sq");              // a0^2
+    t.copy_to_top("a2", "_a2c");
+    field_sqr(t, "_a2c", "_a2sq");              // a2^2
+    field_mul_const(t, "_a2sq", BB_W, "_wa2sq");   // W*a2^2
+    field_add(t, "_a0sq", "_wa2sq", "_n0a");       // a0^2 + W*a2^2
+    t.copy_to_top("a1", "_a1c");
+    t.copy_to_top("a3", "_a3c");
+    field_mul(t, "_a1c", "_a3c", "_a1a3");      // a1*a3
+    // 2*W mod p = 22 (since 22 < p)
+    field_mul_const(t, "_a1a3", (BB_W * 2) % BB_P, "_2wa1a3"); // 2*W*a1*a3
+    field_sub(t, "_n0a", "_2wa1a3", "_norm0");     // norm_0
+
+    // Step 2: Compute norm_1 = 2*a0*a2 - a1^2 - W*a3^2
+    t.copy_to_top("a0", "_a0d");
+    t.copy_to_top("a2", "_a2d");
+    field_mul(t, "_a0d", "_a2d", "_a0a2");      // a0*a2
+    field_mul_const(t, "_a0a2", 2, "_2a0a2");      // 2*a0*a2
+    t.copy_to_top("a1", "_a1d");
+    field_sqr(t, "_a1d", "_a1sq");              // a1^2
+    field_sub(t, "_2a0a2", "_a1sq", "_n1a");       // 2*a0*a2 - a1^2
+    t.copy_to_top("a3", "_a3d");
+    field_sqr(t, "_a3d", "_a3sq");              // a3^2
+    field_mul_const(t, "_a3sq", BB_W, "_wa3sq");   // W*a3^2
+    field_sub(t, "_n1a", "_wa3sq", "_norm1");      // norm_1
+
+    // Step 3: Quadratic inverse: scalar = (norm_0^2 - W*norm_1^2)^(-1)
+    t.copy_to_top("_norm0", "_n0copy");
+    field_sqr(t, "_n0copy", "_n0sq");           // norm_0^2
+    t.copy_to_top("_norm1", "_n1copy");
+    field_sqr(t, "_n1copy", "_n1sq");           // norm_1^2
+    field_mul_const(t, "_n1sq", BB_W, "_wn1sq");   // W*norm_1^2
+    field_sub(t, "_n0sq", "_wn1sq", "_det");       // norm_0^2 - W*norm_1^2
+    field_inv(t, "_det", "_scalar");            // scalar = det^(-1)
+
+    // Step 4: inv_n0 = norm_0 * scalar, inv_n1 = -norm_1 * scalar
+    t.copy_to_top("_scalar", "_sc0");
+    field_mul(t, "_norm0", "_sc0", "_inv_n0");     // inv_n0 = norm_0 * scalar
+
+    // -norm_1 = (p - norm_1) mod p
+    t.copy_to_top("_norm1", "_neg_n1_pre");
+    t.push_int("_pval", BB_P);
+    t.to_top("_neg_n1_pre");
+    t.raw_block(&["_pval", "_neg_n1_pre"], Some("_neg_n1_sub"), |e| {
+        e(StackOp::Opcode("OP_SUB".into()));
+    });
+    field_mod(t, "_neg_n1_sub", "_neg_norm1");
+    field_mul(t, "_neg_norm1", "_scalar", "_inv_n1");
+
+    // Step 5: Compute result components using quad_mul
+    match component {
+        0 => {
+            // r0 = a0*inv_n0 + W*a2*inv_n1
+            t.copy_to_top("a0", "_ea0");
+            t.copy_to_top("_inv_n0", "_ein0");
+            field_mul(t, "_ea0", "_ein0", "_ep0");       // a0*inv_n0
+            t.copy_to_top("a2", "_ea2");
+            t.copy_to_top("_inv_n1", "_ein1");
+            field_mul(t, "_ea2", "_ein1", "_ep1");       // a2*inv_n1
+            field_mul_const(t, "_ep1", BB_W, "_wep1");      // W*a2*inv_n1
+            field_add(t, "_ep0", "_wep1", "_r");
+        }
+        1 => {
+            // r1 = -(a1*inv_n0 + W*a3*inv_n1)
+            t.copy_to_top("a1", "_oa1");
+            t.copy_to_top("_inv_n0", "_oin0");
+            field_mul(t, "_oa1", "_oin0", "_op0");       // a1*inv_n0
+            t.copy_to_top("a3", "_oa3");
+            t.copy_to_top("_inv_n1", "_oin1");
+            field_mul(t, "_oa3", "_oin1", "_op1");       // a3*inv_n1
+            field_mul_const(t, "_op1", BB_W, "_wop1");      // W*a3*inv_n1
+            field_add(t, "_op0", "_wop1", "_odd0");
+            // Negate: r = (0 - odd0) mod p
+            field_neg(t, "_odd0", "_r");
+        }
+        2 => {
+            // r2 = a0*inv_n1 + a2*inv_n0
+            t.copy_to_top("a0", "_ea0");
+            t.copy_to_top("_inv_n1", "_ein1");
+            field_mul(t, "_ea0", "_ein1", "_ep0");       // a0*inv_n1
+            t.copy_to_top("a2", "_ea2");
+            t.copy_to_top("_inv_n0", "_ein0");
+            field_mul(t, "_ea2", "_ein0", "_ep1");       // a2*inv_n0
+            field_add(t, "_ep0", "_ep1", "_r");
+        }
+        3 => {
+            // r3 = -(a1*inv_n1 + a3*inv_n0)
+            t.copy_to_top("a1", "_oa1");
+            t.copy_to_top("_inv_n1", "_oin1");
+            field_mul(t, "_oa1", "_oin1", "_op0");       // a1*inv_n1
+            t.copy_to_top("a3", "_oa3");
+            t.copy_to_top("_inv_n0", "_oin0");
+            field_mul(t, "_oa3", "_oin0", "_op1");       // a3*inv_n0
+            field_add(t, "_op0", "_op1", "_odd1");
+            // Negate: r = (0 - odd1) mod p
+            field_neg(t, "_odd1", "_r");
+        }
+        _ => panic!("Invalid ext4 component: {}", component),
+    }
+
+    // Clean up: drop all intermediate and input values, keep only _r
+    let remaining: Vec<String> = t.nm.iter()
+        .filter(|n| !n.is_empty() && n.as_str() != "_r")
+        .cloned()
+        .collect();
+    for name in &remaining {
+        t.to_top(name);
+        t.drop();
+    }
+    t.to_top("_r");
+    t.rename("result");
+}
+
 // ===========================================================================
 // Public emit functions -- entry points called from stack.rs
 // ===========================================================================
@@ -301,3 +543,43 @@ pub fn emit_bb_field_inv(emit: &mut dyn FnMut(StackOp)) {
     let t = &mut BBTracker::new(&["a"], emit);
     field_inv(t, "a", "result");
 }
+
+/// emitBBExt4Mul0: Ext4 multiplication component 0.
+/// Stack in: [..., a0, a1, a2, a3, b0, b1, b2, b3]
+/// Stack out: [..., r0]   where r0 = a0*b0 + W*(a1*b3 + a2*b2 + a3*b1) mod p
+pub fn emit_bb_ext4_mul_0(emit: &mut dyn FnMut(StackOp)) { emit_ext4_mul_component(emit, 0); }
+
+/// emitBBExt4Mul1: Ext4 multiplication component 1.
+/// Stack in: [..., a0, a1, a2, a3, b0, b1, b2, b3]
+/// Stack out: [..., r1]   where r1 = a0*b1 + a1*b0 + W*(a2*b3 + a3*b2) mod p
+pub fn emit_bb_ext4_mul_1(emit: &mut dyn FnMut(StackOp)) { emit_ext4_mul_component(emit, 1); }
+
+/// emitBBExt4Mul2: Ext4 multiplication component 2.
+/// Stack in: [..., a0, a1, a2, a3, b0, b1, b2, b3]
+/// Stack out: [..., r2]   where r2 = a0*b2 + a1*b1 + a2*b0 + W*(a3*b3) mod p
+pub fn emit_bb_ext4_mul_2(emit: &mut dyn FnMut(StackOp)) { emit_ext4_mul_component(emit, 2); }
+
+/// emitBBExt4Mul3: Ext4 multiplication component 3.
+/// Stack in: [..., a0, a1, a2, a3, b0, b1, b2, b3]
+/// Stack out: [..., r3]   where r3 = a0*b3 + a1*b2 + a2*b1 + a3*b0 mod p
+pub fn emit_bb_ext4_mul_3(emit: &mut dyn FnMut(StackOp)) { emit_ext4_mul_component(emit, 3); }
+
+/// emitBBExt4Inv0: Ext4 inverse component 0.
+/// Stack in: [..., a0, a1, a2, a3]
+/// Stack out: [..., r0]
+pub fn emit_bb_ext4_inv_0(emit: &mut dyn FnMut(StackOp)) { emit_ext4_inv_component(emit, 0); }
+
+/// emitBBExt4Inv1: Ext4 inverse component 1.
+/// Stack in: [..., a0, a1, a2, a3]
+/// Stack out: [..., r1]
+pub fn emit_bb_ext4_inv_1(emit: &mut dyn FnMut(StackOp)) { emit_ext4_inv_component(emit, 1); }
+
+/// emitBBExt4Inv2: Ext4 inverse component 2.
+/// Stack in: [..., a0, a1, a2, a3]
+/// Stack out: [..., r2]
+pub fn emit_bb_ext4_inv_2(emit: &mut dyn FnMut(StackOp)) { emit_ext4_inv_component(emit, 2); }
+
+/// emitBBExt4Inv3: Ext4 inverse component 3.
+/// Stack in: [..., a0, a1, a2, a3]
+/// Stack out: [..., r3]
+pub fn emit_bb_ext4_inv_3(emit: &mut dyn FnMut(StackOp)) { emit_ext4_inv_component(emit, 3); }

@@ -118,7 +118,7 @@
   "constructorArgs": [
     {
       "type": "ByteString",
-      "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      "value": "0000000000000000000000000000000000000000000000000000000000000001"
     },
     {
       "type": "bigint",
@@ -126,7 +126,7 @@
     },
     {
       "type": "ByteString",
-      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      "value": "0000000000000000000000000000000000000000000000000000000000000001"
     }
   ]
 }

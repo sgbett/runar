@@ -22,8 +22,13 @@ struct Input {
 fn convert_arg(arg: &TypedArg) -> SdkValue {
     match arg.arg_type.as_str() {
         "bigint" | "int" => {
-            let n: i64 = arg.value.parse().expect("invalid bigint");
-            SdkValue::Int(n)
+            // Try i64 first; fall back to BigInt for values exceeding i64 range
+            if let Ok(n) = arg.value.parse::<i64>() {
+                SdkValue::Int(n)
+            } else {
+                let n: num_bigint::BigInt = arg.value.parse().expect("invalid bigint");
+                SdkValue::BigInt(n)
+            }
         }
         "bool" => SdkValue::Bool(arg.value == "true"),
         _ => {

@@ -350,6 +350,32 @@ module RunarCompiler
       end
 
       # =================================================================
+      # Ext4 constants and additional field helpers
+      # =================================================================
+
+      # Quadratic non-residue W = 11 for BabyBear quartic extension.
+      BB_W = 11
+
+      # fieldMulConst: (a * c) mod p where c is a small constant.
+      #
+      # @param t [BBTracker]
+      # @param a_name [String]
+      # @param c [Integer]
+      # @param result_name [String]
+      def self.bb_field_mul_const(t, a_name, c, result_name)
+        t.to_top(a_name)
+        t.raw_block([a_name], "_bb_mc") do |e|
+          e.call(make_stack_op(op: "push", value: big_int_push(c)))
+          e.call(make_stack_op(op: "opcode", code: "OP_MUL"))
+        end
+        t.to_top("_bb_mc")
+        t.raw_block(["_bb_mc"], result_name) do |e|
+          e.call(make_stack_op(op: "push", value: big_int_push(BB_P)))
+          e.call(make_stack_op(op: "opcode", code: "OP_MOD"))
+        end
+      end
+
+      # =================================================================
       # Public emit functions -- entry points called from stack.rb
       # =================================================================
 
@@ -395,6 +421,313 @@ module RunarCompiler
       end
 
       # =================================================================
+      # Ext4 multiplication component emit functions
+      # =================================================================
+      # Quartic extension multiplication over BabyBear (p=2013265921, W=11).
+      # Given a = (a0, a1, a2, a3) and b = (b0, b1, b2, b3):
+      #   r0 = a0*b0 + W*(a1*b3 + a2*b2 + a3*b1)
+      #   r1 = a0*b1 + a1*b0 + W*(a2*b3 + a3*b2)
+      #   r2 = a0*b2 + a1*b1 + a2*b0 + W*(a3*b3)
+      #   r3 = a0*b3 + a1*b2 + a2*b1 + a3*b0
+      # Each emit function takes 8 args on stack and produces one component.
+
+      # Ext4 mul component 0: r0 = a0*b0 + W*(a1*b3 + a2*b2 + a3*b1) mod p.
+      # Stack in: [..., a0, a1, a2, a3, b0, b1, b2, b3] (b3 on top)
+      # Stack out: [..., r0]
+      #
+      # @param emit [Proc] callback receiving a StackOp hash
+      def self.emit_bb_ext4_mul_0(emit)
+        t = BBTracker.new(%w[a0 a1 a2 a3 b0 b1 b2 b3], emit)
+
+        # r0 = a0*b0 + 11*(a1*b3 + a2*b2 + a3*b1)
+        t.copy_to_top("a0", "_a0"); t.copy_to_top("b0", "_b0")
+        bb_field_mul(t, "_a0", "_b0", "_t0")     # a0*b0
+        t.copy_to_top("a1", "_a1"); t.copy_to_top("b3", "_b3")
+        bb_field_mul(t, "_a1", "_b3", "_t1")     # a1*b3
+        t.copy_to_top("a2", "_a2"); t.copy_to_top("b2", "_b2")
+        bb_field_mul(t, "_a2", "_b2", "_t2")     # a2*b2
+        bb_field_add(t, "_t1", "_t2", "_t12")    # a1*b3 + a2*b2
+        t.copy_to_top("a3", "_a3"); t.copy_to_top("b1", "_b1")
+        bb_field_mul(t, "_a3", "_b1", "_t3")     # a3*b1
+        bb_field_add(t, "_t12", "_t3", "_cross") # a1*b3 + a2*b2 + a3*b1
+        bb_field_mul_const(t, "_cross", BB_W, "_wcross") # W * cross
+        bb_field_add(t, "_t0", "_wcross", "_r")  # a0*b0 + W*cross
+
+        # Clean up: drop the 8 input values, keep only _r
+        %w[a0 a1 a2 a3 b0 b1 b2 b3].each { |n| t.to_top(n); t.drop }
+        t.to_top("_r")
+        t.rename("result")
+      end
+
+      # Ext4 mul component 1: r1 = a0*b1 + a1*b0 + W*(a2*b3 + a3*b2) mod p.
+      # Stack in: [..., a0, a1, a2, a3, b0, b1, b2, b3] (b3 on top)
+      # Stack out: [..., r1]
+      #
+      # @param emit [Proc] callback receiving a StackOp hash
+      def self.emit_bb_ext4_mul_1(emit)
+        t = BBTracker.new(%w[a0 a1 a2 a3 b0 b1 b2 b3], emit)
+
+        # r1 = a0*b1 + a1*b0 + 11*(a2*b3 + a3*b2)
+        t.copy_to_top("a0", "_a0"); t.copy_to_top("b1", "_b1")
+        bb_field_mul(t, "_a0", "_b1", "_t0")     # a0*b1
+        t.copy_to_top("a1", "_a1"); t.copy_to_top("b0", "_b0")
+        bb_field_mul(t, "_a1", "_b0", "_t1")     # a1*b0
+        bb_field_add(t, "_t0", "_t1", "_direct") # a0*b1 + a1*b0
+        t.copy_to_top("a2", "_a2"); t.copy_to_top("b3", "_b3")
+        bb_field_mul(t, "_a2", "_b3", "_t2")     # a2*b3
+        t.copy_to_top("a3", "_a3"); t.copy_to_top("b2", "_b2")
+        bb_field_mul(t, "_a3", "_b2", "_t3")     # a3*b2
+        bb_field_add(t, "_t2", "_t3", "_cross")  # a2*b3 + a3*b2
+        bb_field_mul_const(t, "_cross", BB_W, "_wcross") # W * cross
+        bb_field_add(t, "_direct", "_wcross", "_r")
+
+        # Clean up: drop the 8 input values, keep only _r
+        %w[a0 a1 a2 a3 b0 b1 b2 b3].each { |n| t.to_top(n); t.drop }
+        t.to_top("_r")
+        t.rename("result")
+      end
+
+      # Ext4 mul component 2: r2 = a0*b2 + a1*b1 + a2*b0 + W*(a3*b3) mod p.
+      # Stack in: [..., a0, a1, a2, a3, b0, b1, b2, b3] (b3 on top)
+      # Stack out: [..., r2]
+      #
+      # @param emit [Proc] callback receiving a StackOp hash
+      def self.emit_bb_ext4_mul_2(emit)
+        t = BBTracker.new(%w[a0 a1 a2 a3 b0 b1 b2 b3], emit)
+
+        # r2 = a0*b2 + a1*b1 + a2*b0 + 11*(a3*b3)
+        t.copy_to_top("a0", "_a0"); t.copy_to_top("b2", "_b2")
+        bb_field_mul(t, "_a0", "_b2", "_t0")     # a0*b2
+        t.copy_to_top("a1", "_a1"); t.copy_to_top("b1", "_b1")
+        bb_field_mul(t, "_a1", "_b1", "_t1")     # a1*b1
+        bb_field_add(t, "_t0", "_t1", "_sum01")
+        t.copy_to_top("a2", "_a2"); t.copy_to_top("b0", "_b0")
+        bb_field_mul(t, "_a2", "_b0", "_t2")     # a2*b0
+        bb_field_add(t, "_sum01", "_t2", "_direct")
+        t.copy_to_top("a3", "_a3"); t.copy_to_top("b3", "_b3")
+        bb_field_mul(t, "_a3", "_b3", "_t3")     # a3*b3
+        bb_field_mul_const(t, "_t3", BB_W, "_wcross") # W * a3*b3
+        bb_field_add(t, "_direct", "_wcross", "_r")
+
+        # Clean up: drop the 8 input values, keep only _r
+        %w[a0 a1 a2 a3 b0 b1 b2 b3].each { |n| t.to_top(n); t.drop }
+        t.to_top("_r")
+        t.rename("result")
+      end
+
+      # Ext4 mul component 3: r3 = a0*b3 + a1*b2 + a2*b1 + a3*b0 mod p.
+      # Stack in: [..., a0, a1, a2, a3, b0, b1, b2, b3] (b3 on top)
+      # Stack out: [..., r3]
+      #
+      # @param emit [Proc] callback receiving a StackOp hash
+      def self.emit_bb_ext4_mul_3(emit)
+        t = BBTracker.new(%w[a0 a1 a2 a3 b0 b1 b2 b3], emit)
+
+        # r3 = a0*b3 + a1*b2 + a2*b1 + a3*b0
+        t.copy_to_top("a0", "_a0"); t.copy_to_top("b3", "_b3")
+        bb_field_mul(t, "_a0", "_b3", "_t0")     # a0*b3
+        t.copy_to_top("a1", "_a1"); t.copy_to_top("b2", "_b2")
+        bb_field_mul(t, "_a1", "_b2", "_t1")     # a1*b2
+        bb_field_add(t, "_t0", "_t1", "_sum01")
+        t.copy_to_top("a2", "_a2"); t.copy_to_top("b1", "_b1")
+        bb_field_mul(t, "_a2", "_b1", "_t2")     # a2*b1
+        bb_field_add(t, "_sum01", "_t2", "_sum012")
+        t.copy_to_top("a3", "_a3"); t.copy_to_top("b0", "_b0")
+        bb_field_mul(t, "_a3", "_b0", "_t3")     # a3*b0
+        bb_field_add(t, "_sum012", "_t3", "_r")
+
+        # Clean up: drop the 8 input values, keep only _r
+        %w[a0 a1 a2 a3 b0 b1 b2 b3].each { |n| t.to_top(n); t.drop }
+        t.to_top("_r")
+        t.rename("result")
+      end
+
+      # =================================================================
+      # Ext4 inverse component emit functions
+      # =================================================================
+      # Tower-of-quadratic-extensions algorithm (matches Plonky3):
+      #
+      # View element as (even, odd) where even = (a0, a2), odd = (a1, a3)
+      # in the quadratic extension F[X^2]/(X^4-W) = F'[Y]/(Y^2-W) where Y = X^2.
+      #
+      # norm_0 = a0^2 + W*a2^2 - 2*W*a1*a3
+      # norm_1 = 2*a0*a2 - a1^2 - W*a3^2
+      #
+      # Quadratic inverse of (norm_0, norm_1):
+      #   scalar = (norm_0^2 - W*norm_1^2)^(-1)
+      #   inv_n0 = norm_0 * scalar
+      #   inv_n1 = -norm_1 * scalar (i.e. (p - norm_1) * scalar)
+      #
+      # Then: result = conjugate(a) * inv_norm
+      #   conjugate(a) = (a0, -a1, a2, -a3)
+      #   out_even = quad_mul((a0, a2), (inv_n0, inv_n1))
+      #   out_odd  = quad_mul((-a1, -a3), (inv_n0, inv_n1))
+      #   r0 = out_even[0], r1 = -out_odd[0], r2 = out_even[1], r3 = -out_odd[1]
+
+      # Shared inline preamble for ext4 inv: compute _inv_n0 and _inv_n1.
+      # Matches the TypeScript emitExt4InvComponent steps 1-4 exactly.
+      #
+      # @param t [BBTracker]
+      def self.bb_ext4_inv_preamble(t)
+        # Step 1: Compute norm_0 = a0^2 + W*a2^2 - 2*W*a1*a3
+        t.copy_to_top("a0", "_a0c")
+        bb_field_sqr(t, "_a0c", "_a0sq")           # a0^2
+        t.copy_to_top("a2", "_a2c")
+        bb_field_sqr(t, "_a2c", "_a2sq")           # a2^2
+        bb_field_mul_const(t, "_a2sq", BB_W, "_wa2sq") # W*a2^2
+        bb_field_add(t, "_a0sq", "_wa2sq", "_n0a")    # a0^2 + W*a2^2
+        t.copy_to_top("a1", "_a1c")
+        t.copy_to_top("a3", "_a3c")
+        bb_field_mul(t, "_a1c", "_a3c", "_a1a3")   # a1*a3
+        bb_field_mul_const(t, "_a1a3", (BB_W * 2) % BB_P, "_2wa1a3") # 2*W*a1*a3
+        bb_field_sub(t, "_n0a", "_2wa1a3", "_norm0") # norm_0
+
+        # Step 2: Compute norm_1 = 2*a0*a2 - a1^2 - W*a3^2
+        t.copy_to_top("a0", "_a0d")
+        t.copy_to_top("a2", "_a2d")
+        bb_field_mul(t, "_a0d", "_a2d", "_a0a2")   # a0*a2
+        bb_field_mul_const(t, "_a0a2", 2, "_2a0a2") # 2*a0*a2
+        t.copy_to_top("a1", "_a1d")
+        bb_field_sqr(t, "_a1d", "_a1sq")           # a1^2
+        bb_field_sub(t, "_2a0a2", "_a1sq", "_n1a") # 2*a0*a2 - a1^2
+        t.copy_to_top("a3", "_a3d")
+        bb_field_sqr(t, "_a3d", "_a3sq")           # a3^2
+        bb_field_mul_const(t, "_a3sq", BB_W, "_wa3sq") # W*a3^2
+        bb_field_sub(t, "_n1a", "_wa3sq", "_norm1") # norm_1
+
+        # Step 3: Quadratic inverse: scalar = (norm_0^2 - W*norm_1^2)^(-1)
+        t.copy_to_top("_norm0", "_n0copy")
+        bb_field_sqr(t, "_n0copy", "_n0sq")        # norm_0^2
+        t.copy_to_top("_norm1", "_n1copy")
+        bb_field_sqr(t, "_n1copy", "_n1sq")        # norm_1^2
+        bb_field_mul_const(t, "_n1sq", BB_W, "_wn1sq") # W*norm_1^2
+        bb_field_sub(t, "_n0sq", "_wn1sq", "_det") # norm_0^2 - W*norm_1^2
+        bb_field_inv(t, "_det", "_scalar")         # scalar = det^(-1)
+
+        # Step 4: inv_n0 = norm_0 * scalar, inv_n1 = -norm_1 * scalar
+        t.copy_to_top("_scalar", "_sc0")
+        bb_field_mul(t, "_norm0", "_sc0", "_inv_n0") # inv_n0 = norm_0 * scalar
+
+        # -norm_1 = (p - norm_1) mod p
+        t.copy_to_top("_norm1", "_neg_n1_pre")
+        t.push_int("_pval", BB_P)
+        t.to_top("_neg_n1_pre")
+        t.raw_block(["_pval", "_neg_n1_pre"], "_neg_n1_sub") do |e|
+          e.call(make_stack_op(op: "opcode", code: "OP_SUB"))
+        end
+        bb_field_mod(t, "_neg_n1_sub", "_neg_norm1")
+        bb_field_mul(t, "_neg_norm1", "_scalar", "_inv_n1")
+      end
+
+      # Ext4 inv component 0: r0 = a0*inv_n0 + W*a2*inv_n1 mod p.
+      # Stack in: [..., a0, a1, a2, a3] (a3 on top)
+      # Stack out: [..., r0]
+      #
+      # @param emit [Proc] callback receiving a StackOp hash
+      def self.emit_bb_ext4_inv_0(emit)
+        t = BBTracker.new(%w[a0 a1 a2 a3], emit)
+        bb_ext4_inv_preamble(t)
+
+        # r0 = out_even[0] = a0*inv_n0 + W*a2*inv_n1
+        t.copy_to_top("a0", "_ea0")
+        t.copy_to_top("_inv_n0", "_ein0")
+        bb_field_mul(t, "_ea0", "_ein0", "_ep0")   # a0*inv_n0
+        t.copy_to_top("a2", "_ea2")
+        t.copy_to_top("_inv_n1", "_ein1")
+        bb_field_mul(t, "_ea2", "_ein1", "_ep1")   # a2*inv_n1
+        bb_field_mul_const(t, "_ep1", BB_W, "_wep1") # W*a2*inv_n1
+        bb_field_add(t, "_ep0", "_wep1", "_r")
+
+        # Clean up: drop all intermediate and input values, keep only _r
+        remaining = t.nm.select { |n| !n.nil? && n != "_r" }
+        remaining.each { |n| t.to_top(n); t.drop }
+        t.to_top("_r")
+        t.rename("result")
+      end
+
+      # Ext4 inv component 1: r1 = -odd_part[0] where odd0 = a1*inv_n0 + W*a3*inv_n1.
+      # Stack in: [..., a0, a1, a2, a3] (a3 on top)
+      # Stack out: [..., r1]
+      #
+      # @param emit [Proc] callback receiving a StackOp hash
+      def self.emit_bb_ext4_inv_1(emit)
+        t = BBTracker.new(%w[a0 a1 a2 a3], emit)
+        bb_ext4_inv_preamble(t)
+
+        # odd0 = a1*inv_n0 + W*a3*inv_n1
+        t.copy_to_top("a1", "_oa1")
+        t.copy_to_top("_inv_n0", "_oin0")
+        bb_field_mul(t, "_oa1", "_oin0", "_op0")   # a1*inv_n0
+        t.copy_to_top("a3", "_oa3")
+        t.copy_to_top("_inv_n1", "_oin1")
+        bb_field_mul(t, "_oa3", "_oin1", "_op1")   # a3*inv_n1
+        bb_field_mul_const(t, "_op1", BB_W, "_wop1") # W*a3*inv_n1
+        bb_field_add(t, "_op0", "_wop1", "_odd0")
+        # Negate: r = (0 - odd0) mod p
+        t.push_int("_zero1", 0)
+        bb_field_sub(t, "_zero1", "_odd0", "_r")
+
+        # Clean up: drop all intermediate and input values, keep only _r
+        remaining = t.nm.select { |n| !n.nil? && n != "_r" }
+        remaining.each { |n| t.to_top(n); t.drop }
+        t.to_top("_r")
+        t.rename("result")
+      end
+
+      # Ext4 inv component 2: r2 = a0*inv_n1 + a2*inv_n0 mod p.
+      # Stack in: [..., a0, a1, a2, a3] (a3 on top)
+      # Stack out: [..., r2]
+      #
+      # @param emit [Proc] callback receiving a StackOp hash
+      def self.emit_bb_ext4_inv_2(emit)
+        t = BBTracker.new(%w[a0 a1 a2 a3], emit)
+        bb_ext4_inv_preamble(t)
+
+        # r2 = out_even[1] = a0*inv_n1 + a2*inv_n0
+        t.copy_to_top("a0", "_ea0")
+        t.copy_to_top("_inv_n1", "_ein1")
+        bb_field_mul(t, "_ea0", "_ein1", "_ep0")   # a0*inv_n1
+        t.copy_to_top("a2", "_ea2")
+        t.copy_to_top("_inv_n0", "_ein0")
+        bb_field_mul(t, "_ea2", "_ein0", "_ep1")   # a2*inv_n0
+        bb_field_add(t, "_ep0", "_ep1", "_r")
+
+        # Clean up: drop all intermediate and input values, keep only _r
+        remaining = t.nm.select { |n| !n.nil? && n != "_r" }
+        remaining.each { |n| t.to_top(n); t.drop }
+        t.to_top("_r")
+        t.rename("result")
+      end
+
+      # Ext4 inv component 3: r3 = -odd_part[1] where odd1 = a1*inv_n1 + a3*inv_n0.
+      # Stack in: [..., a0, a1, a2, a3] (a3 on top)
+      # Stack out: [..., r3]
+      #
+      # @param emit [Proc] callback receiving a StackOp hash
+      def self.emit_bb_ext4_inv_3(emit)
+        t = BBTracker.new(%w[a0 a1 a2 a3], emit)
+        bb_ext4_inv_preamble(t)
+
+        # odd1 = a1*inv_n1 + a3*inv_n0
+        t.copy_to_top("a1", "_oa1")
+        t.copy_to_top("_inv_n1", "_oin1")
+        bb_field_mul(t, "_oa1", "_oin1", "_op0")   # a1*inv_n1
+        t.copy_to_top("a3", "_oa3")
+        t.copy_to_top("_inv_n0", "_oin0")
+        bb_field_mul(t, "_oa3", "_oin0", "_op1")   # a3*inv_n0
+        bb_field_add(t, "_op0", "_op1", "_odd1")
+        # Negate: r = (0 - odd1) mod p
+        t.push_int("_zero3", 0)
+        bb_field_sub(t, "_zero3", "_odd1", "_r")
+
+        # Clean up: drop all intermediate and input values, keep only _r
+        remaining = t.nm.select { |n| !n.nil? && n != "_r" }
+        remaining.each { |n| t.to_top(n); t.drop }
+        t.to_top("_r")
+        t.rename("result")
+      end
+
+      # =================================================================
       # Dispatch
       # =================================================================
 
@@ -403,11 +736,21 @@ module RunarCompiler
         "bbFieldSub" => method(:emit_bb_field_sub),
         "bbFieldMul" => method(:emit_bb_field_mul),
         "bbFieldInv" => method(:emit_bb_field_inv),
+        "bbExt4Mul0" => method(:emit_bb_ext4_mul_0),
+        "bbExt4Mul1" => method(:emit_bb_ext4_mul_1),
+        "bbExt4Mul2" => method(:emit_bb_ext4_mul_2),
+        "bbExt4Mul3" => method(:emit_bb_ext4_mul_3),
+        "bbExt4Inv0" => method(:emit_bb_ext4_inv_0),
+        "bbExt4Inv1" => method(:emit_bb_ext4_inv_1),
+        "bbExt4Inv2" => method(:emit_bb_ext4_inv_2),
+        "bbExt4Inv3" => method(:emit_bb_ext4_inv_3),
       }.freeze
 
       # BB builtin function names.
       BB_BUILTIN_NAMES = Set.new(%w[
         bbFieldAdd bbFieldSub bbFieldMul bbFieldInv
+        bbExt4Mul0 bbExt4Mul1 bbExt4Mul2 bbExt4Mul3
+        bbExt4Inv0 bbExt4Inv1 bbExt4Inv2 bbExt4Inv3
       ]).freeze
 
       # Return true if +name+ is a Baby Bear builtin.

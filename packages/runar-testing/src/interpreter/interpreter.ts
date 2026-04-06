@@ -1076,6 +1076,63 @@ export class RunarInterpreter {
         return { kind: 'bigint', value: result };
       }
 
+      // Baby Bear quartic extension field (W = 11)
+      case 'bbExt4Mul0': case 'bbExt4Mul1': case 'bbExt4Mul2': case 'bbExt4Mul3': {
+        const p = 2013265921n;
+        const W = 11n;
+        const a0 = this.toBigInt(args[0]!), a1 = this.toBigInt(args[1]!);
+        const a2 = this.toBigInt(args[2]!), a3 = this.toBigInt(args[3]!);
+        const b0 = this.toBigInt(args[4]!), b1 = this.toBigInt(args[5]!);
+        const b2 = this.toBigInt(args[6]!), b3 = this.toBigInt(args[7]!);
+        const fm = (x: bigint, y: bigint) => (x * y) % p;
+        const fa = (x: bigint, y: bigint) => (x + y) % p;
+        const r0 = fa(fm(a0, b0), fm(W, fa(fa(fm(a1, b3), fm(a2, b2)), fm(a3, b1))));
+        const r1 = fa(fa(fm(a0, b1), fm(a1, b0)), fm(W, fa(fm(a2, b3), fm(a3, b2))));
+        const r2 = fa(fa(fa(fm(a0, b2), fm(a1, b1)), fm(a2, b0)), fm(W, fm(a3, b3)));
+        const r3 = fa(fa(fa(fm(a0, b3), fm(a1, b2)), fm(a2, b1)), fm(a3, b0));
+        const components = [r0, r1, r2, r3];
+        const idx = parseInt(funcName.slice(-1));
+        return { kind: 'bigint', value: components[idx]! };
+      }
+      case 'bbExt4Inv0': case 'bbExt4Inv1': case 'bbExt4Inv2': case 'bbExt4Inv3': {
+        const p = 2013265921n;
+        const W = 11n;
+        const a0 = this.toBigInt(args[0]!), a1 = this.toBigInt(args[1]!);
+        const a2 = this.toBigInt(args[2]!), a3 = this.toBigInt(args[3]!);
+        const fm = (x: bigint, y: bigint) => (x * y) % p;
+        const fa = (x: bigint, y: bigint) => (x + y) % p;
+        const fs = (x: bigint, y: bigint) => ((x - y) % p + p) % p;
+        const finv = (a: bigint): bigint => {
+          let result = 1n, base = ((a % p) + p) % p, exp = p - 2n;
+          while (exp > 0n) {
+            if (exp & 1n) result = (result * base) % p;
+            base = (base * base) % p;
+            exp >>= 1n;
+          }
+          return result;
+        };
+        // Tower of quadratic extensions
+        const norm0 = fs(fa(fm(a0, a0), fm(W, fm(a2, a2))), fm(2n * W % p, fm(a1, a3)));
+        const norm1 = fs(fs(fm(2n, fm(a0, a2)), fm(a1, a1)), fm(W, fm(a3, a3)));
+        const det = fs(fm(norm0, norm0), fm(W, fm(norm1, norm1)));
+        const scalar = finv(det);
+        const invN0 = fm(norm0, scalar);
+        const invN1 = fm(fs(0n, norm1), scalar); // -norm1 * scalar
+        // quad_mul for even part: (a0, a2) * (invN0, invN1)
+        const even0 = fa(fm(a0, invN0), fm(W, fm(a2, invN1)));
+        const even1 = fa(fm(a0, invN1), fm(a2, invN0));
+        // quad_mul for odd part: (a1, a3) * (invN0, invN1), then negate
+        // odd0 = a1*invN0 + W*a3*invN1, odd1 = a1*invN1 + a3*invN0
+        // r1 = -odd0, r3 = -odd1  (from: result = even - odd*X)
+        const odd0 = fa(fm(a1, invN0), fm(W, fm(a3, invN1)));
+        const odd1 = fa(fm(a1, invN1), fm(a3, invN0));
+        const r1 = fs(0n, odd0); // negate
+        const r3 = fs(0n, odd1); // negate
+        const components = [even0, r1, even1, r3];
+        const idx = parseInt(funcName.slice(-1));
+        return { kind: 'bigint', value: components[idx]! };
+      }
+
       // Merkle proof verification
       case 'merkleRootSha256':
       case 'merkleRootHash256': {

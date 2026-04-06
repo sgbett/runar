@@ -897,6 +897,7 @@ dependencies = [
 name = "rs-sdk-tool"
 version = "0.1.0"
 dependencies = [
+ "num-bigint",
  "runar-lang",
  "serde",
  "serde_json",

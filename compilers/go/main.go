@@ -122,6 +122,11 @@ func ensureIRFields(v interface{}) {
 					val["else"] = []interface{}{}
 				}
 			}
+			if kind == "call" || kind == "method_call" {
+				if _, hasArgs := val["args"]; !hasArgs {
+					val["args"] = []interface{}{}
+				}
+			}
 			if kind == "add_output" {
 				if _, hasPreimage := val["preimage"]; !hasPreimage {
 					val["preimage"] = ""

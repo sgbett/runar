@@ -1152,6 +1152,10 @@ pub const RunarContract = struct {
 fn stateValueToAnf(sv: types.StateValue) anf_interp.ANFValue {
     return switch (sv) {
         .int => |n| .{ .int = n },
+        .big_int => |s| {
+            // Best effort: try to fit into i64 for the ANF interpreter
+            return .{ .int = std.fmt.parseInt(i64, s, 10) catch 0 };
+        },
         .boolean => |b| .{ .boolean = b },
         .bytes => |hex| .{ .bytes = hex },
     };
@@ -1177,8 +1181,12 @@ fn parseInitialValue(allocator: std.mem.Allocator, init_str: []const u8, type_na
         if (std.mem.endsWith(u8, s, "n")) {
             s = s[0 .. s.len - 1];
         }
-        const n = std.fmt.parseInt(i64, s, 10) catch return .{ .int = 0 };
-        return .{ .int = n };
+        if (std.fmt.parseInt(i64, s, 10)) |n| {
+            return .{ .int = n };
+        } else |_| {
+            // Value exceeds i64 range; store as big_int decimal string
+            return .{ .big_int = try allocator.dupe(u8, s) };
+        }
     } else if (std.mem.eql(u8, type_name, "bool")) {
         return .{ .boolean = std.mem.eql(u8, init_str, "true") };
     } else {

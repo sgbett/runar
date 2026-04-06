@@ -1,0 +1,74 @@
+{
+  "artifact": {
+    "version": "runar-v0.4.4",
+    "compilerVersion": "0.4.4",
+    "contractName": "CovenantVault",
+    "abi": {
+      "constructor": {
+        "params": [
+          {
+            "name": "owner",
+            "type": "PubKey"
+          },
+          {
+            "name": "recipient",
+            "type": "Addr"
+          },
+          {
+            "name": "minAmount",
+            "type": "bigint"
+          }
+        ]
+      },
+      "methods": [
+        {
+          "name": "spend",
+          "params": [
+            {
+              "name": "sig",
+              "type": "Sig"
+            },
+            {
+              "name": "txPreimage",
+              "type": "SigHashPreimage"
+            }
+          ],
+          "isPublic": true
+        }
+      ]
+    },
+    "script": "7c00ad76ab7b210279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798ad69041976a914007e0288ac7e0058807c7eaa7c820128947f7701207f7587",
+    "constructorSlots": [
+      {
+        "paramIndex": 0,
+        "byteOffset": 1
+      },
+      {
+        "paramIndex": 1,
+        "byteOffset": 47
+      },
+      {
+        "paramIndex": 2,
+        "byteOffset": 53
+      }
+    ],
+    "codeSeparatorIndex": 4,
+    "codeSeparatorIndices": [
+      4
+    ]
+  },
+  "constructorArgs": [
+    {
+      "type": "PubKey",
+      "value": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+    },
+    {
+      "type": "Addr",
+      "value": "751e76e8199196d454941c45d1b3a323f1433bd6"
+    },
+    {
+      "type": "bigint",
+      "value": "10000"
+    }
+  ]
+}

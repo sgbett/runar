@@ -76,7 +76,7 @@
   "constructorArgs": [
     {
       "type": "bigint",
-      "value": "42"
+      "value": "0"
     }
   ]
 }

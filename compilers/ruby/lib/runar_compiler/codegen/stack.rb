@@ -80,6 +80,8 @@ module RunarCompiler::Codegen
   # Baby Bear field arithmetic builtin function names
   BB_BUILTIN_NAMES = Set.new(%w[
     bbFieldAdd bbFieldSub bbFieldMul bbFieldInv
+    bbExt4Mul0 bbExt4Mul1 bbExt4Mul2 bbExt4Mul3
+    bbExt4Inv0 bbExt4Inv1 bbExt4Inv2 bbExt4Inv3
   ]).freeze
 
   # Merkle proof verification builtin function names

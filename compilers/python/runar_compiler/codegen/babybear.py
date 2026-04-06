@@ -267,6 +267,16 @@ def _bb_field_inv(t: BBTracker, a_name: str, result_name: str) -> None:
 
 
 # ===========================================================================
+# Field negation helper
+# ===========================================================================
+
+def _bb_field_neg(t: BBTracker, a_name: str, result_name: str) -> None:
+    """Compute (p - a) mod p (field negation)."""
+    t.push_int("_zero", 0)
+    _bb_field_sub(t, "_zero", a_name, result_name)
+
+
+# ===========================================================================
 # Public emit functions -- entry points called from stack.py
 # ===========================================================================
 
@@ -311,6 +321,340 @@ def emit_bb_field_inv(emit: Callable[["StackOp"], None]) -> None:
 
 
 # ===========================================================================
+# Ext4 field multiplication -- component emit functions
+# ===========================================================================
+# Quartic extension over BabyBear using irreducible x^4 - 11 (W = 11).
+# Given a = (a0, a1, a2, a3) and b = (b0, b1, b2, b3):
+#   r0 = a0*b0 + W*(a1*b3 + a2*b2 + a3*b1)
+#   r1 = a0*b1 + a1*b0 + W*(a2*b3 + a3*b2)
+#   r2 = a0*b2 + a1*b1 + a2*b0 + W*(a3*b3)
+#   r3 = a0*b3 + a1*b2 + a2*b1 + a3*b0
+# Each emit function takes 8 args on stack: [a0, a1, a2, a3, b0, b1, b2, b3]
+# and produces one component.
+
+W_VAL: int = 11
+
+
+def _bb_field_mul_const(t: BBTracker, a_name: str, c: int, result_name: str) -> None:
+    """Compute (a * c) mod p where c is a constant."""
+    t.to_top(a_name)
+    t.raw_block([a_name], "_bb_mc", lambda e: (
+        e(_make_stack_op(op="push", value=_big_int_push(c))),
+        e(_make_stack_op(op="opcode", code="OP_MUL")),
+    ))
+    t.to_top("_bb_mc")
+    t.raw_block(["_bb_mc"], result_name, lambda e: (
+        e(_make_stack_op(op="push", value=_big_int_push(BB_P))),
+        e(_make_stack_op(op="opcode", code="OP_MOD")),
+    ))
+
+
+def emit_bb_ext4_mul_0(emit: Callable[["StackOp"], None]) -> None:
+    """Ext4 mul component 0: r0 = a0*b0 + W*(a1*b3 + a2*b2 + a3*b1) mod p.
+
+    Stack in:  [..., a0, a1, a2, a3, b0, b1, b2, b3]
+    Stack out: [..., r0]
+    """
+    t = BBTracker(["a0", "a1", "a2", "a3", "b0", "b1", "b2", "b3"], emit)
+
+    # r0 = a0*b0 + 11*(a1*b3 + a2*b2 + a3*b1)
+    t.copy_to_top("a0", "_a0"); t.copy_to_top("b0", "_b0")
+    _bb_field_mul(t, "_a0", "_b0", "_t0")     # a0*b0
+    t.copy_to_top("a1", "_a1"); t.copy_to_top("b3", "_b3")
+    _bb_field_mul(t, "_a1", "_b3", "_t1")     # a1*b3
+    t.copy_to_top("a2", "_a2"); t.copy_to_top("b2", "_b2")
+    _bb_field_mul(t, "_a2", "_b2", "_t2")     # a2*b2
+    _bb_field_add(t, "_t1", "_t2", "_t12")    # a1*b3 + a2*b2
+    t.copy_to_top("a3", "_a3"); t.copy_to_top("b1", "_b1")
+    _bb_field_mul(t, "_a3", "_b1", "_t3")     # a3*b1
+    _bb_field_add(t, "_t12", "_t3", "_cross") # a1*b3 + a2*b2 + a3*b1
+    _bb_field_mul_const(t, "_cross", W_VAL, "_wcross")  # W * cross
+    _bb_field_add(t, "_t0", "_wcross", "_r")  # a0*b0 + W*cross
+
+    # Clean up: drop the 8 input values, keep only _r
+    for name in ["a0", "a1", "a2", "a3", "b0", "b1", "b2", "b3"]:
+        t.to_top(name)
+        t.drop()
+    t.to_top("_r")
+    t.rename("result")
+
+
+def emit_bb_ext4_mul_1(emit: Callable[["StackOp"], None]) -> None:
+    """Ext4 mul component 1: r1 = a0*b1 + a1*b0 + W*(a2*b3 + a3*b2) mod p.
+
+    Stack in:  [..., a0, a1, a2, a3, b0, b1, b2, b3]
+    Stack out: [..., r1]
+    """
+    t = BBTracker(["a0", "a1", "a2", "a3", "b0", "b1", "b2", "b3"], emit)
+
+    # r1 = a0*b1 + a1*b0 + 11*(a2*b3 + a3*b2)
+    t.copy_to_top("a0", "_a0"); t.copy_to_top("b1", "_b1")
+    _bb_field_mul(t, "_a0", "_b1", "_t0")     # a0*b1
+    t.copy_to_top("a1", "_a1"); t.copy_to_top("b0", "_b0")
+    _bb_field_mul(t, "_a1", "_b0", "_t1")     # a1*b0
+    _bb_field_add(t, "_t0", "_t1", "_direct") # a0*b1 + a1*b0
+    t.copy_to_top("a2", "_a2"); t.copy_to_top("b3", "_b3")
+    _bb_field_mul(t, "_a2", "_b3", "_t2")     # a2*b3
+    t.copy_to_top("a3", "_a3"); t.copy_to_top("b2", "_b2")
+    _bb_field_mul(t, "_a3", "_b2", "_t3")     # a3*b2
+    _bb_field_add(t, "_t2", "_t3", "_cross")  # a2*b3 + a3*b2
+    _bb_field_mul_const(t, "_cross", W_VAL, "_wcross")  # W * cross
+    _bb_field_add(t, "_direct", "_wcross", "_r")
+
+    # Clean up: drop the 8 input values, keep only _r
+    for name in ["a0", "a1", "a2", "a3", "b0", "b1", "b2", "b3"]:
+        t.to_top(name)
+        t.drop()
+    t.to_top("_r")
+    t.rename("result")
+
+
+def emit_bb_ext4_mul_2(emit: Callable[["StackOp"], None]) -> None:
+    """Ext4 mul component 2: r2 = a0*b2 + a1*b1 + a2*b0 + W*(a3*b3) mod p.
+
+    Stack in:  [..., a0, a1, a2, a3, b0, b1, b2, b3]
+    Stack out: [..., r2]
+    """
+    t = BBTracker(["a0", "a1", "a2", "a3", "b0", "b1", "b2", "b3"], emit)
+
+    # r2 = a0*b2 + a1*b1 + a2*b0 + 11*(a3*b3)
+    t.copy_to_top("a0", "_a0"); t.copy_to_top("b2", "_b2")
+    _bb_field_mul(t, "_a0", "_b2", "_t0")     # a0*b2
+    t.copy_to_top("a1", "_a1"); t.copy_to_top("b1", "_b1")
+    _bb_field_mul(t, "_a1", "_b1", "_t1")     # a1*b1
+    _bb_field_add(t, "_t0", "_t1", "_sum01")
+    t.copy_to_top("a2", "_a2"); t.copy_to_top("b0", "_b0")
+    _bb_field_mul(t, "_a2", "_b0", "_t2")     # a2*b0
+    _bb_field_add(t, "_sum01", "_t2", "_direct")
+    t.copy_to_top("a3", "_a3"); t.copy_to_top("b3", "_b3")
+    _bb_field_mul(t, "_a3", "_b3", "_t3")     # a3*b3
+    _bb_field_mul_const(t, "_t3", W_VAL, "_wcross")  # W * a3*b3
+    _bb_field_add(t, "_direct", "_wcross", "_r")
+
+    # Clean up: drop the 8 input values, keep only _r
+    for name in ["a0", "a1", "a2", "a3", "b0", "b1", "b2", "b3"]:
+        t.to_top(name)
+        t.drop()
+    t.to_top("_r")
+    t.rename("result")
+
+
+def emit_bb_ext4_mul_3(emit: Callable[["StackOp"], None]) -> None:
+    """Ext4 mul component 3: r3 = a0*b3 + a1*b2 + a2*b1 + a3*b0 mod p.
+
+    Stack in:  [..., a0, a1, a2, a3, b0, b1, b2, b3]
+    Stack out: [..., r3]
+    """
+    t = BBTracker(["a0", "a1", "a2", "a3", "b0", "b1", "b2", "b3"], emit)
+
+    # r3 = a0*b3 + a1*b2 + a2*b1 + a3*b0
+    t.copy_to_top("a0", "_a0"); t.copy_to_top("b3", "_b3")
+    _bb_field_mul(t, "_a0", "_b3", "_t0")     # a0*b3
+    t.copy_to_top("a1", "_a1"); t.copy_to_top("b2", "_b2")
+    _bb_field_mul(t, "_a1", "_b2", "_t1")     # a1*b2
+    _bb_field_add(t, "_t0", "_t1", "_sum01")
+    t.copy_to_top("a2", "_a2"); t.copy_to_top("b1", "_b1")
+    _bb_field_mul(t, "_a2", "_b1", "_t2")     # a2*b1
+    _bb_field_add(t, "_sum01", "_t2", "_sum012")
+    t.copy_to_top("a3", "_a3"); t.copy_to_top("b0", "_b0")
+    _bb_field_mul(t, "_a3", "_b0", "_t3")     # a3*b0
+    _bb_field_add(t, "_sum012", "_t3", "_r")
+
+    # Clean up: drop the 8 input values, keep only _r
+    for name in ["a0", "a1", "a2", "a3", "b0", "b1", "b2", "b3"]:
+        t.to_top(name)
+        t.drop()
+    t.to_top("_r")
+    t.rename("result")
+
+
+# ===========================================================================
+# Ext4 field inverse -- component emit functions
+# ===========================================================================
+# Inverse via tower of quadratic extensions.
+# Given a = (a0, a1, a2, a3):
+#   norm0 = a0^2 + W*a2^2 - 2*W*a1*a3
+#   norm1 = 2*a0*a2 - a1^2 - W*a3^2
+#   det   = norm0^2 - W*norm1^2
+#   scalar = inv(det)
+#   invN0  = norm0 * scalar
+#   invN1  = -norm1 * scalar    (field negation)
+# Then:
+#   r0 =  a0*invN0 + W*a2*invN1
+#   r1 = -(a1*invN0 + W*a3*invN1)
+#   r2 =  a0*invN1 + a2*invN0
+#   r3 = -(a1*invN1 + a3*invN0)
+
+
+def _bb_ext4_inv_common(t: BBTracker) -> None:
+    """Shared inverse preamble: compute _inv_n0 and _inv_n1 from a0..a3.
+
+    Expects stack names: a0, a1, a2, a3.
+    After this call, the tracker has: a0, a1, a2, a3, _inv_n0, _inv_n1
+    (plus intermediate values).
+
+    IMPORTANT: All uses of a0..a3 go through copy_to_top so the originals
+    are preserved for the per-component functions.
+    """
+    # Step 1: Compute norm_0 = a0^2 + W*a2^2 - 2*W*a1*a3
+    t.copy_to_top("a0", "_a0c")
+    _bb_field_sqr(t, "_a0c", "_a0sq")           # a0^2
+    t.copy_to_top("a2", "_a2c")
+    _bb_field_sqr(t, "_a2c", "_a2sq")           # a2^2
+    _bb_field_mul_const(t, "_a2sq", W_VAL, "_wa2sq")  # W*a2^2
+    _bb_field_add(t, "_a0sq", "_wa2sq", "_n0a")       # a0^2 + W*a2^2
+    t.copy_to_top("a1", "_a1c")
+    t.copy_to_top("a3", "_a3c")
+    _bb_field_mul(t, "_a1c", "_a3c", "_a1a3")   # a1*a3
+    _bb_field_mul_const(t, "_a1a3", (W_VAL * 2) % BB_P, "_2wa1a3")  # 2*W*a1*a3
+    _bb_field_sub(t, "_n0a", "_2wa1a3", "_norm0")  # norm_0
+
+    # Step 2: Compute norm_1 = 2*a0*a2 - a1^2 - W*a3^2
+    t.copy_to_top("a0", "_a0d")
+    t.copy_to_top("a2", "_a2d")
+    _bb_field_mul(t, "_a0d", "_a2d", "_a0a2")   # a0*a2
+    _bb_field_mul_const(t, "_a0a2", 2, "_2a0a2")  # 2*a0*a2
+    t.copy_to_top("a1", "_a1d")
+    _bb_field_sqr(t, "_a1d", "_a1sq")           # a1^2
+    _bb_field_sub(t, "_2a0a2", "_a1sq", "_n1a")  # 2*a0*a2 - a1^2
+    t.copy_to_top("a3", "_a3d")
+    _bb_field_sqr(t, "_a3d", "_a3sq")           # a3^2
+    _bb_field_mul_const(t, "_a3sq", W_VAL, "_wa3sq")  # W*a3^2
+    _bb_field_sub(t, "_n1a", "_wa3sq", "_norm1")  # norm_1
+
+    # Step 3: Quadratic inverse: scalar = (norm_0^2 - W*norm_1^2)^(-1)
+    t.copy_to_top("_norm0", "_n0copy")
+    _bb_field_sqr(t, "_n0copy", "_n0sq")        # norm_0^2
+    t.copy_to_top("_norm1", "_n1copy")
+    _bb_field_sqr(t, "_n1copy", "_n1sq")        # norm_1^2
+    _bb_field_mul_const(t, "_n1sq", W_VAL, "_wn1sq")  # W*norm_1^2
+    _bb_field_sub(t, "_n0sq", "_wn1sq", "_det")  # norm_0^2 - W*norm_1^2
+    _bb_field_inv(t, "_det", "_scalar")          # scalar = det^(-1)
+
+    # Step 4: inv_n0 = norm_0 * scalar, inv_n1 = -norm_1 * scalar
+    t.copy_to_top("_scalar", "_sc0")
+    _bb_field_mul(t, "_norm0", "_sc0", "_inv_n0")  # inv_n0 = norm_0 * scalar
+
+    # -norm_1 = (p - norm_1) mod p
+    t.copy_to_top("_norm1", "_neg_n1_pre")
+    t.push_int("_pval", BB_P)
+    t.to_top("_neg_n1_pre")
+    t.raw_block(["_pval", "_neg_n1_pre"], "_neg_n1_sub", lambda e: (
+        e(_make_stack_op(op="opcode", code="OP_SUB")),
+    ))
+    _bb_field_mod(t, "_neg_n1_sub", "_neg_norm1")
+    _bb_field_mul(t, "_neg_norm1", "_scalar", "_inv_n1")
+
+
+def emit_bb_ext4_inv_0(emit: Callable[["StackOp"], None]) -> None:
+    """Ext4 inv component 0: r0 = a0*inv_n0 + W*a2*inv_n1 mod p.
+
+    Stack in:  [..., a0, a1, a2, a3]
+    Stack out: [..., r0]
+    """
+    t = BBTracker(["a0", "a1", "a2", "a3"], emit)
+    _bb_ext4_inv_common(t)
+    # r0 = out_even[0] = a0*inv_n0 + W*a2*inv_n1
+    t.copy_to_top("a0", "_ea0")
+    t.copy_to_top("_inv_n0", "_ein0")
+    _bb_field_mul(t, "_ea0", "_ein0", "_ep0")   # a0*inv_n0
+    t.copy_to_top("a2", "_ea2")
+    t.copy_to_top("_inv_n1", "_ein1")
+    _bb_field_mul(t, "_ea2", "_ein1", "_ep1")   # a2*inv_n1
+    _bb_field_mul_const(t, "_ep1", W_VAL, "_wep1")  # W*a2*inv_n1
+    _bb_field_add(t, "_ep0", "_wep1", "_r")
+    # Clean up: drop all remaining except _r
+    remaining = [n for n in t.nm if n is not None and n != "_r"]
+    for name in remaining:
+        t.to_top(name)
+        t.drop()
+    t.to_top("_r")
+    t.rename("result")
+
+
+def emit_bb_ext4_inv_1(emit: Callable[["StackOp"], None]) -> None:
+    """Ext4 inv component 1: r1 = -(a1*inv_n0 + W*a3*inv_n1) mod p.
+
+    Stack in:  [..., a0, a1, a2, a3]
+    Stack out: [..., r1]
+    """
+    t = BBTracker(["a0", "a1", "a2", "a3"], emit)
+    _bb_ext4_inv_common(t)
+    # odd0 = a1*inv_n0 + W*a3*inv_n1
+    t.copy_to_top("a1", "_oa1")
+    t.copy_to_top("_inv_n0", "_oin0")
+    _bb_field_mul(t, "_oa1", "_oin0", "_op0")   # a1*inv_n0
+    t.copy_to_top("a3", "_oa3")
+    t.copy_to_top("_inv_n1", "_oin1")
+    _bb_field_mul(t, "_oa3", "_oin1", "_op1")   # a3*inv_n1
+    _bb_field_mul_const(t, "_op1", W_VAL, "_wop1")  # W*a3*inv_n1
+    _bb_field_add(t, "_op0", "_wop1", "_odd0")
+    # Negate: r = (0 - odd0) mod p
+    t.push_int("_zero1", 0)
+    _bb_field_sub(t, "_zero1", "_odd0", "_r")
+    # Clean up: drop all remaining except _r
+    remaining = [n for n in t.nm if n is not None and n != "_r"]
+    for name in remaining:
+        t.to_top(name)
+        t.drop()
+    t.to_top("_r")
+    t.rename("result")
+
+
+def emit_bb_ext4_inv_2(emit: Callable[["StackOp"], None]) -> None:
+    """Ext4 inv component 2: r2 = a0*inv_n1 + a2*inv_n0 mod p.
+
+    Stack in:  [..., a0, a1, a2, a3]
+    Stack out: [..., r2]
+    """
+    t = BBTracker(["a0", "a1", "a2", "a3"], emit)
+    _bb_ext4_inv_common(t)
+    # r2 = out_even[1] = a0*inv_n1 + a2*inv_n0
+    t.copy_to_top("a0", "_ea0")
+    t.copy_to_top("_inv_n1", "_ein1")
+    _bb_field_mul(t, "_ea0", "_ein1", "_ep0")   # a0*inv_n1
+    t.copy_to_top("a2", "_ea2")
+    t.copy_to_top("_inv_n0", "_ein0")
+    _bb_field_mul(t, "_ea2", "_ein0", "_ep1")   # a2*inv_n0
+    _bb_field_add(t, "_ep0", "_ep1", "_r")
+    # Clean up: drop all remaining except _r
+    remaining = [n for n in t.nm if n is not None and n != "_r"]
+    for name in remaining:
+        t.to_top(name)
+        t.drop()
+    t.to_top("_r")
+    t.rename("result")
+
+
+def emit_bb_ext4_inv_3(emit: Callable[["StackOp"], None]) -> None:
+    """Ext4 inv component 3: r3 = -(a1*inv_n1 + a3*inv_n0) mod p.
+
+    Stack in:  [..., a0, a1, a2, a3]
+    Stack out: [..., r3]
+    """
+    t = BBTracker(["a0", "a1", "a2", "a3"], emit)
+    _bb_ext4_inv_common(t)
+    # odd1 = a1*inv_n1 + a3*inv_n0
+    t.copy_to_top("a1", "_oa1")
+    t.copy_to_top("_inv_n1", "_oin1")
+    _bb_field_mul(t, "_oa1", "_oin1", "_op0")   # a1*inv_n1
+    t.copy_to_top("a3", "_oa3")
+    t.copy_to_top("_inv_n0", "_oin0")
+    _bb_field_mul(t, "_oa3", "_oin0", "_op1")   # a3*inv_n0
+    _bb_field_add(t, "_op0", "_op1", "_odd1")
+    # Negate: r = (0 - odd1) mod p
+    t.push_int("_zero3", 0)
+    _bb_field_sub(t, "_zero3", "_odd1", "_r")
+    # Clean up: drop all remaining except _r
+    remaining = [n for n in t.nm if n is not None and n != "_r"]
+    for name in remaining:
+        t.to_top(name)
+        t.drop()
+    t.to_top("_r")
+    t.rename("result")
+
+
+# ===========================================================================
 # Dispatch table
 # ===========================================================================
 
@@ -319,6 +663,14 @@ BB_DISPATCH: dict[str, Callable[[Callable[["StackOp"], None]], None]] = {
     "bbFieldSub": emit_bb_field_sub,
     "bbFieldMul": emit_bb_field_mul,
     "bbFieldInv": emit_bb_field_inv,
+    "bbExt4Mul0": emit_bb_ext4_mul_0,
+    "bbExt4Mul1": emit_bb_ext4_mul_1,
+    "bbExt4Mul2": emit_bb_ext4_mul_2,
+    "bbExt4Mul3": emit_bb_ext4_mul_3,
+    "bbExt4Inv0": emit_bb_ext4_inv_0,
+    "bbExt4Inv1": emit_bb_ext4_inv_1,
+    "bbExt4Inv2": emit_bb_ext4_inv_2,
+    "bbExt4Inv3": emit_bb_ext4_inv_3,
 }
 
 

@@ -1,0 +1,276 @@
+{
+  "artifact": {
+    "version": "runar-v0.4.4",
+    "compilerVersion": "0.4.4",
+    "contractName": "FunctionPatterns",
+    "abi": {
+      "constructor": {
+        "params": [
+          {
+            "name": "owner",
+            "type": "PubKey"
+          },
+          {
+            "name": "balance",
+            "type": "bigint"
+          }
+        ]
+      },
+      "methods": [
+        {
+          "name": "deposit",
+          "params": [
+            {
+              "name": "sig",
+              "type": "Sig"
+            },
+            {
+              "name": "amount",
+              "type": "bigint"
+            },
+            {
+              "name": "_changePKH",
+              "type": "Ripemd160"
+            },
+            {
+              "name": "_changeAmount",
+              "type": "bigint"
+            },
+            {
+              "name": "_newAmount",
+              "type": "bigint"
+            },
+            {
+              "name": "txPreimage",
+              "type": "SigHashPreimage"
+            }
+          ],
+          "isPublic": true
+        },
+        {
+          "name": "withdraw",
+          "params": [
+            {
+              "name": "sig",
+              "type": "Sig"
+            },
+            {
+              "name": "amount",
+              "type": "bigint"
+            },
+            {
+              "name": "feeBps",
+              "type": "bigint"
+            },
+            {
+              "name": "_changePKH",
+              "type": "Ripemd160"
+            },
+            {
+              "name": "_changeAmount",
+              "type": "bigint"
+            },
+            {
+              "name": "_newAmount",
+              "type": "bigint"
+            },
+            {
+              "name": "txPreimage",
+              "type": "SigHashPreimage"
+            }
+          ],
+          "isPublic": true
+        },
+        {
+          "name": "scale",
+          "params": [
+            {
+              "name": "sig",
+              "type": "Sig"
+            },
+            {
+              "name": "numerator",
+              "type": "bigint"
+            },
+            {
+              "name": "denominator",
+              "type": "bigint"
+            },
+            {
+              "name": "_changePKH",
+              "type": "Ripemd160"
+            },
+            {
+              "name": "_changeAmount",
+              "type": "bigint"
+            },
+            {
+              "name": "_newAmount",
+              "type": "bigint"
+            },
+            {
+              "name": "txPreimage",
+              "type": "SigHashPreimage"
+            }
+          ],
+          "isPublic": true
+        },
+        {
+          "name": "normalize",
+          "params": [
+            {
+              "name": "sig",
+              "type": "Sig"
+            },
+            {
+              "name": "lo",
+              "type": "bigint"
+            },
+            {
+              "name": "hi",
+              "type": "bigint"
+            },
+            {
+              "name": "step",
+              "type": "bigint"
+            },
+            {
+              "name": "_changePKH",
+              "type": "Ripemd160"
+            },
+            {
+              "name": "_changeAmount",
+              "type": "bigint"
+            },
+            {
+              "name": "_newAmount",
+              "type": "bigint"
+            },
+            {
+              "name": "txPreimage",
+              "type": "SigHashPreimage"
+            }
+          ],
+          "isPublic": true
+        },
+        {
+          "name": "requireOwner",
+          "params": [
+            {
+              "name": "sig",
+              "type": "Sig"
+            }
+          ],
+          "isPublic": false
+        },
+        {
+          "name": "computeFee",
+          "params": [
+            {
+              "name": "amount",
+              "type": "bigint"
+            },
+            {
+              "name": "feeBps",
+              "type": "bigint"
+            }
+          ],
+          "isPublic": false
+        },
+        {
+          "name": "scaleValue",
+          "params": [
+            {
+              "name": "value",
+              "type": "bigint"
+            },
+            {
+              "name": "numerator",
+              "type": "bigint"
+            },
+            {
+              "name": "denominator",
+              "type": "bigint"
+            }
+          ],
+          "isPublic": false
+        },
+        {
+          "name": "clampValue",
+          "params": [
+            {
+              "name": "value",
+              "type": "bigint"
+            },
+            {
+              "name": "lo",
+              "type": "bigint"
+            },
+            {
+              "name": "hi",
+              "type": "bigint"
+            }
+          ],
+          "isPublic": false
+        },
+        {
+          "name": "roundDown",
+          "params": [
+            {
+              "name": "value",
+              "type": "bigint"
+            },
+            {
+              "name": "step",
+              "type": "bigint"
+            }
+          ],
+          "isPublic": false
+        }
+      ]
+    },
+    "script": "76009c637576ab577a210279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798ad697601687f7782012c947f758258947f758258947f7781567a00ad557900a06976567a9377547a547a041976a9147b7e0288ac7e7c58807c7e7c58805279547a7c7558806b5379016a7e7c7e827602fd009f635280517f75675480527f7501fd7c7e687c7e6c7c7e7c7eaa7c820128947f7701207f7587776776519c637576ab587a210279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798ad697601687f7782012c947f758258947f758258947f7781577a00ad567900a0695679567a950210279676577a7c93765379787ca16953797c94537a75567a567a041976a9147b7e0288ac7e7c58807c7e7c58805479567a7c7558806b5579016a7e7c7e827602fd009f635280517f75675480527f7501fd7c7e687c7e6c7c7e7c7eaa537a820128947f7701207f75877777776776529c637576ab587a210279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798ad697601687f7782012c947f758258947f758258947f7781577a00ad76577a577a7b7b7b7b7b7b7b7b957c9677547a547a041976a9147b7e0288ac7e7c58807c7e7c58805279547a7c7558806b5379016a7e7c7e827602fd009f635280517f75675480527f7501fd7c7e687c7e6c7c7e7c7eaa7c820128947f7701207f75877767539d76ab597a210279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798ad697601687f7782012c947f758258947f758258947f7781587a00ad76587a587a7b7b7b7b7b7b7b7ba47ca376577a787c7692699794527a75557a557a041976a9147b7e0288ac7e7c58807c7e7c58805379557a7c7558806b5479016a7e7c7e827602fd009f635280517f75675480527f7501fd7c7e687c7e6c7c7e7c7eaa7b820128947f7701207f75877777686868",
+    "stateFields": [
+      {
+        "name": "balance",
+        "type": "bigint",
+        "index": 1
+      }
+    ],
+    "constructorSlots": [
+      {
+        "paramIndex": 0,
+        "byteOffset": 69
+      },
+      {
+        "paramIndex": 0,
+        "byteOffset": 234
+      },
+      {
+        "paramIndex": 0,
+        "byteOffset": 425
+      },
+      {
+        "paramIndex": 0,
+        "byteOffset": 594
+      }
+    ],
+    "codeSeparatorIndex": 531,
+    "codeSeparatorIndices": [
+      6,
+      171,
+      362,
+      531
+    ]
+  },
+  "constructorArgs": [
+    {
+      "type": "PubKey",
+      "value": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+    },
+    {
+      "type": "bigint",
+      "value": "1000"
+    }
+  ]
+}

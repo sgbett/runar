@@ -1,0 +1,50 @@
+{
+  "artifact": {
+    "version": "runar-v0.4.4",
+    "compilerVersion": "0.4.4",
+    "contractName": "IfWithoutElse",
+    "abi": {
+      "constructor": {
+        "params": [
+          {
+            "name": "threshold",
+            "type": "bigint"
+          }
+        ]
+      },
+      "methods": [
+        {
+          "name": "check",
+          "params": [
+            {
+              "name": "a",
+              "type": "bigint"
+            },
+            {
+              "name": "b",
+              "type": "bigint"
+            }
+          ],
+          "isPublic": true
+        }
+      ]
+    },
+    "script": "007b00a06351787c93677668777c00a06351787c936776687700a0",
+    "constructorSlots": [
+      {
+        "paramIndex": 0,
+        "byteOffset": 2
+      },
+      {
+        "paramIndex": 0,
+        "byteOffset": 14
+      }
+    ]
+  },
+  "constructorArgs": [
+    {
+      "type": "bigint",
+      "value": "5"
+    }
+  ]
+}

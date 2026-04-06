@@ -29,6 +29,8 @@ import { emitSha256Compress, emitSha256Finalize } from './sha256-codegen.js';
 import { emitBlake3Compress, emitBlake3Hash } from './blake3-codegen.js';
 import {
   emitBBFieldAdd, emitBBFieldSub, emitBBFieldMul, emitBBFieldInv,
+  emitBBExt4Mul0, emitBBExt4Mul1, emitBBExt4Mul2, emitBBExt4Mul3,
+  emitBBExt4Inv0, emitBBExt4Inv1, emitBBExt4Inv2, emitBBExt4Inv3,
 } from './babybear-codegen.js';
 import { emitMerkleRootSha256, emitMerkleRootHash256 } from './merkle-codegen.js';
 
@@ -1203,7 +1205,11 @@ class LoweringContext {
 
     // Baby Bear field arithmetic builtins
     if (func === 'bbFieldAdd' || func === 'bbFieldSub' ||
-        func === 'bbFieldMul' || func === 'bbFieldInv') {
+        func === 'bbFieldMul' || func === 'bbFieldInv' ||
+        func === 'bbExt4Mul0' || func === 'bbExt4Mul1' ||
+        func === 'bbExt4Mul2' || func === 'bbExt4Mul3' ||
+        func === 'bbExt4Inv0' || func === 'bbExt4Inv1' ||
+        func === 'bbExt4Inv2' || func === 'bbExt4Inv3') {
       this.lowerBBFieldBuiltin(bindingName, func, args, bindingIndex, lastUses);
       return;
     }
@@ -4180,6 +4186,14 @@ class LoweringContext {
       case 'bbFieldSub': emitBBFieldSub(emitFn); break;
       case 'bbFieldMul': emitBBFieldMul(emitFn); break;
       case 'bbFieldInv': emitBBFieldInv(emitFn); break;
+      case 'bbExt4Mul0': emitBBExt4Mul0(emitFn); break;
+      case 'bbExt4Mul1': emitBBExt4Mul1(emitFn); break;
+      case 'bbExt4Mul2': emitBBExt4Mul2(emitFn); break;
+      case 'bbExt4Mul3': emitBBExt4Mul3(emitFn); break;
+      case 'bbExt4Inv0': emitBBExt4Inv0(emitFn); break;
+      case 'bbExt4Inv1': emitBBExt4Inv1(emitFn); break;
+      case 'bbExt4Inv2': emitBBExt4Inv2(emitFn); break;
+      case 'bbExt4Inv3': emitBBExt4Inv3(emitFn); break;
       default: throw new Error(`Unknown Baby Bear builtin: ${func}`);
     }
 

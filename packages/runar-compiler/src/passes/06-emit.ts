@@ -557,6 +557,7 @@ export function emit(program: StackProgram): EmitResult {
       scriptAsm: '',
       sourceMap: [],
       constructorSlots: [],
+      codeSepIndexSlots: [],
     };
   }
 
@@ -642,5 +643,6 @@ export function emitMethod(method: StackMethod): EmitResult {
     scriptAsm: ctx.getAsm(),
     sourceMap: ctx.sourceMap,
     constructorSlots: ctx.constructorSlots,
+    codeSepIndexSlots: ctx.codeSepIndexSlots,
   };
 }

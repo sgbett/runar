@@ -134,6 +134,16 @@ const BUILTIN_FUNCTIONS: Map<string, FuncSig> = new Map([
   ['bbFieldMul',         { params: ['bigint', 'bigint'], returnType: 'bigint' }],
   ['bbFieldInv',         { params: ['bigint'], returnType: 'bigint' }],
 
+  // Baby Bear quartic extension field (W = 11)
+  ['bbExt4Mul0',         { params: ['bigint', 'bigint', 'bigint', 'bigint', 'bigint', 'bigint', 'bigint', 'bigint'], returnType: 'bigint' }],
+  ['bbExt4Mul1',         { params: ['bigint', 'bigint', 'bigint', 'bigint', 'bigint', 'bigint', 'bigint', 'bigint'], returnType: 'bigint' }],
+  ['bbExt4Mul2',         { params: ['bigint', 'bigint', 'bigint', 'bigint', 'bigint', 'bigint', 'bigint', 'bigint'], returnType: 'bigint' }],
+  ['bbExt4Mul3',         { params: ['bigint', 'bigint', 'bigint', 'bigint', 'bigint', 'bigint', 'bigint', 'bigint'], returnType: 'bigint' }],
+  ['bbExt4Inv0',         { params: ['bigint', 'bigint', 'bigint', 'bigint'], returnType: 'bigint' }],
+  ['bbExt4Inv1',         { params: ['bigint', 'bigint', 'bigint', 'bigint'], returnType: 'bigint' }],
+  ['bbExt4Inv2',         { params: ['bigint', 'bigint', 'bigint', 'bigint'], returnType: 'bigint' }],
+  ['bbExt4Inv3',         { params: ['bigint', 'bigint', 'bigint', 'bigint'], returnType: 'bigint' }],
+
   // Merkle proof verification
   ['merkleRootSha256',   { params: ['ByteString', 'ByteString', 'bigint', 'bigint'], returnType: 'ByteString' }],
   ['merkleRootHash256',  { params: ['ByteString', 'ByteString', 'bigint', 'bigint'], returnType: 'ByteString' }],

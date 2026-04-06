@@ -78,8 +78,12 @@ fn convertArg(allocator: std.mem.Allocator, type_str: []const u8, value: std.jso
             .integer => |n| return .{ .int = n },
             else => return .{ .int = 0 },
         };
-        const n = try std.fmt.parseInt(i64, str, 10);
-        return .{ .int = n };
+        // Try i64 first; fall back to big_int for values exceeding i64 range
+        if (std.fmt.parseInt(i64, str, 10)) |n| {
+            return .{ .int = n };
+        } else |_| {
+            return .{ .big_int = try allocator.dupe(u8, str) };
+        }
     } else if (std.mem.eql(u8, type_str, "bool")) {
         const str = switch (value) {
             .string => |s| s,

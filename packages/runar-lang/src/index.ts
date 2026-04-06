@@ -116,6 +116,15 @@ export {
   bbFieldSub,
   bbFieldMul,
   bbFieldInv,
+  // Baby Bear quartic extension field
+  bbExt4Mul0,
+  bbExt4Mul1,
+  bbExt4Mul2,
+  bbExt4Mul3,
+  bbExt4Inv0,
+  bbExt4Inv1,
+  bbExt4Inv2,
+  bbExt4Inv3,
   // Merkle proof verification
   merkleRootSha256,
   merkleRootHash256,
