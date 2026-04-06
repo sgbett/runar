@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 
 	"github.com/bsv-blockchain/go-sdk/transaction"
 	runar "github.com/icellan/runar/packages/runar-go"
@@ -80,7 +81,7 @@ func (p *RPCProvider) GetUtxos(address string) ([]runar.UTXO, error) {
 		utxos = append(utxos, runar.UTXO{
 			Txid:        txid,
 			OutputIndex: int(vout),
-			Satoshis:    int64(amount * 1e8),
+			Satoshis:    int64(math.Round(amount * 1e8)),
 			Script:      scriptPubKey,
 		})
 	}

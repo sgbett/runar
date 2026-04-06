@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -688,4 +689,44 @@ func readVI(h string, pos int) (int, int) {
 func sha256Sum(data []byte) []byte {
 	h := sha256.Sum256(data)
 	return h[:]
+}
+
+// CompileWithTSCompiler compiles a source string using the TypeScript compiler
+// via the Node CLI. Returns the raw artifact JSON bytes.
+func CompileWithTSCompiler(source, fileName string) ([]byte, error) {
+	// Write source to temp file
+	tmpDir, err := os.MkdirTemp("", "runar-ts-compile-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(tmpDir)
+
+	srcPath := filepath.Join(tmpDir, fileName)
+	if err := os.WriteFile(srcPath, []byte(source), 0644); err != nil {
+		return nil, err
+	}
+
+	outDir := filepath.Join(tmpDir, "out")
+	os.MkdirAll(outDir, 0755)
+
+	// Run TS compiler
+	root := projectRoot()
+	cmd := fmt.Sprintf("npx tsx %s/packages/runar-cli/src/bin.ts compile %s -o %s",
+		root, srcPath, outDir)
+	out, err := runCmd(cmd, root, 30*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("TS compile: %s: %w", out, err)
+	}
+
+	// Read the artifact JSON (filename without the extension + .json)
+	baseName := fileName[:len(fileName)-3] // strip .ts
+	artifactPath := filepath.Join(outDir, baseName+".json")
+	return os.ReadFile(artifactPath)
+}
+
+func runCmd(cmdStr, dir string, timeout time.Duration) (string, error) {
+	cmd := exec.Command("sh", "-c", cmdStr)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	return string(out), err
 }
