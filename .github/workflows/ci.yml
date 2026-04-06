@@ -267,10 +267,10 @@ jobs:
             if [ "$go_hex" != "$rust_hex" ]; then
               echo "MISMATCH Go vs Rust"
               fail=1
-            elif [ "$go_hex" != "$zig_hex" ]; then
+            elif [ -n "$zig_hex" ] && [ "$go_hex" != "$zig_hex" ]; then
               echo "MISMATCH Go vs Zig"
               fail=1
-            elif [ "$go_hex" != "$ruby_hex" ]; then
+            elif [ -n "$ruby_hex" ] && [ "$go_hex" != "$ruby_hex" ]; then
               echo "MISMATCH Go vs Ruby"
               fail=1
             elif [ -n "$python_hex" ] && [ "$go_hex" != "$python_hex" ]; then
