@@ -374,9 +374,40 @@ func CompileSourceStringToSDKArtifact(source, fileName string, constructorArgs m
 		})
 	}
 
+	contract := parseResult.Contract
 	var ctorParams []runar.ABIParam
-	for _, p := range program.Properties {
-		ctorParams = append(ctorParams, runar.ABIParam{Name: p.Name, Type: p.Type})
+	for _, p := range contract.Constructor.Params {
+		typeName := "bigint"
+		if p.Type != nil {
+			typeName = AstTypeName(p.Type)
+		}
+		ctorParams = append(ctorParams, runar.ABIParam{Name: p.Name, Type: typeName})
+	}
+
+	// Build state fields for stateful contracts
+	var stateFields []runar.StateField
+	if contract.ParentClass == "StatefulSmartContract" {
+		for i, p := range contract.Properties {
+			if p.Readonly {
+				continue
+			}
+			typeName := "bigint"
+			if p.Type != nil {
+				typeName = AstTypeName(p.Type)
+			}
+			field := runar.StateField{
+				Name:  p.Name,
+				Type:  typeName,
+				Index: i,
+			}
+			for _, anfProp := range program.Properties {
+				if anfProp.Name == p.Name && anfProp.InitialValue != nil {
+					field.InitialValue = anfProp.InitialValue
+					break
+				}
+			}
+			stateFields = append(stateFields, field)
+		}
 	}
 
 	var cSlots []runar.ConstructorSlot
@@ -387,6 +418,8 @@ func CompileSourceStringToSDKArtifact(source, fileName string, constructorArgs m
 		})
 	}
 
+	sdkANF := ConvertIRANFToSDK(program)
+
 	artifact := &runar.RunarArtifact{
 		Version:          "runar-v0.1.0",
 		CompilerVersion:  "integration-test",
@@ -394,6 +427,8 @@ func CompileSourceStringToSDKArtifact(source, fileName string, constructorArgs m
 		Script:           emitResult.ScriptHex,
 		ASM:              emitResult.ScriptAsm,
 		ConstructorSlots: cSlots,
+		StateFields:      stateFields,
+		ANF:              sdkANF,
 		ABI: runar.ABI{
 			Constructor: runar.ABIConstructor{Params: ctorParams},
 			Methods:     abiMethods,
