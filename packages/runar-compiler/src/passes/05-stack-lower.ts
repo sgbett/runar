@@ -957,7 +957,10 @@ class LoweringContext {
     } else {
       // Property value will be provided at deployment time; emit a placeholder.
       // The emitter records byte offsets so the SDK can splice in real values.
-      const paramIndex = this._properties.findIndex(p => p.name === propName);
+      // Find the constructor param index: count only properties without initializers,
+      // since initialized properties are excluded from the constructor.
+      const ctorProps = this._properties.filter(p => p.initialValue === undefined);
+      const paramIndex = ctorProps.findIndex(p => p.name === propName);
       this.emitOp({
         op: 'placeholder',
         paramIndex: paramIndex >= 0 ? paramIndex : 0,

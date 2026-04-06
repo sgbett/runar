@@ -946,11 +946,12 @@ module RunarCompiler::Codegen
       else
         # Property value will be provided at deployment time; emit placeholder
         param_index = 0
-        @properties.each_with_index do |p, i|
+        @properties.each do |p|
+          next if p.initial_value
           if p.name == prop_name
-            param_index = i
             break
           end
+          param_index += 1
         end
         emit_op({ op: "placeholder", param_index: param_index, param_name: prop_name })
       end

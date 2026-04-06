@@ -56,16 +56,23 @@ def compute_new_state(
     # Initialize the environment with property values and method params
     env: Dict[str, Any] = {}
 
-    # Load properties: mutable fields from current_state, readonly fields
-    # from constructor_args (matched by declaration index).
-    for i, prop in enumerate(anf.get('properties', [])):
+    # Load properties: mutable fields from current_state, non-initialized fields
+    # from constructor_args (matched by constructor param index, which excludes
+    # initialized properties).
+    ctor_idx = {}
+    ci = 0
+    for p in anf.get('properties', []):
+        if p.get('initialValue') is None:
+            ctor_idx[p['name']] = ci
+            ci += 1
+    for prop in anf.get('properties', []):
         name = prop['name']
         if name in current_state:
             env[name] = current_state[name]
         elif prop.get('initialValue') is not None:
             env[name] = prop['initialValue']
-        elif prop.get('readonly', False) and i < len(constructor_args):
-            env[name] = constructor_args[i]
+        elif name in ctor_idx and ctor_idx[name] < len(constructor_args):
+            env[name] = constructor_args[ctor_idx[name]]
 
     # Load method params (skip implicit ones injected by the compiler)
     implicit_params = {'_changePKH', '_changeAmount', '_newAmount', 'txPreimage'}

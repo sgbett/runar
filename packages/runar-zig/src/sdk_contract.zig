@@ -887,8 +887,14 @@ pub const RunarContract = struct {
             }
         }
 
+        // Convert constructor_args to ANFValue slice for the interpreter
+        var ctor_anf_args = try work.alloc(anf_interp.ANFValue, self.constructor_args.len);
+        for (self.constructor_args, 0..) |arg, i| {
+            ctor_anf_args[i] = stateValueToAnf(arg);
+        }
+
         // Compute new state
-        var computed = anf_interp.computeNewState(work, &anf_program, method_name, current_state, named_args) catch return;
+        var computed = anf_interp.computeNewState(work, &anf_program, method_name, current_state, named_args, ctor_anf_args) catch return;
         defer computed.deinit();
 
         // Apply computed state back to self.state

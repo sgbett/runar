@@ -888,7 +888,8 @@ impl LoweringContext {
                 let param_index = self
                     .properties
                     .iter()
-                    .position(|p2| p2.name == prop_name)
+                    .filter(|p| p.initial_value.is_none())
+                    .position(|p| p.name == prop_name)
                     .unwrap_or(0);
                 self.emit_op(StackOp::Placeholder {
                     param_index,
@@ -900,7 +901,8 @@ impl LoweringContext {
             let param_index = self
                 .properties
                 .iter()
-                .position(|p2| p2.name == prop_name)
+                .filter(|p| p.initial_value.is_none())
+                .position(|p| p.name == prop_name)
                 .unwrap_or(0);
             self.emit_op(StackOp::Placeholder {
                 param_index,

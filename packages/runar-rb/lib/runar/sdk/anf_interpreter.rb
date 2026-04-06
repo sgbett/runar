@@ -42,10 +42,11 @@ module Runar
       # @param method_name  [String] the method to execute (must be a public method)
       # @param current_state [Hash]  current contract state (property name → value)
       # @param args         [Hash]   method arguments (param name → value)
+      # @param constructor_args [Array] constructor arg values (declaration order) for readonly fields
       # @param max_loop_iterations [Integer] optional override for the loop iteration limit
       # @return [Hash] the updated state (merged with current_state)
       # @raise [ArgumentError] when method_name is not found as a public method in the ANF IR
-      def compute_new_state(anf, method_name, current_state, args, max_loop_iterations: MAX_LOOP_ITERATIONS)
+      def compute_new_state(anf, method_name, current_state, args, constructor_args: [], max_loop_iterations: MAX_LOOP_ITERATIONS)
         method = find_public_method(anf, method_name)
 
         unless method
@@ -56,11 +57,29 @@ module Runar
         # Store the configurable loop limit for use in eval_value.
         Thread.current[:runar_max_loop_iterations] = max_loop_iterations
 
+        # Build constructor param index: position among non-initialized properties.
+        # Properties with initialValue are excluded from the constructor, so
+        # constructor_args[i] corresponds to the i-th property without initialValue.
+        ctor_idx = {}
+        ci = 0
+        Array(anf['properties']).each do |prop|
+          if prop['initialValue'].nil?
+            ctor_idx[prop['name']] = ci
+            ci += 1
+          end
+        end
+
         # Initialize environment with property values.
         env = {}
         Array(anf['properties']).each do |prop|
           name = prop['name']
-          env[name] = current_state.fetch(name, prop['initialValue'])
+          if current_state.key?(name)
+            env[name] = current_state[name]
+          elsif !prop['initialValue'].nil?
+            env[name] = prop['initialValue']
+          elsif ctor_idx.key?(name) && ctor_idx[name] < constructor_args.length
+            env[name] = constructor_args[ctor_idx[name]]
+          end
         end
 
         # Load method params, skipping implicit compiler-injected ones.

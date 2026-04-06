@@ -831,11 +831,14 @@ func (ctx *loweringContext) lowerLoadProp(bindingName, propName string) {
 		// Property value will be provided at deployment time; emit a placeholder.
 		// The emitter records byte offsets so the SDK can splice in real values.
 		paramIndex := 0
-		for i, p := range ctx.properties {
+		for _, p := range ctx.properties {
+			if p.InitialValue != nil {
+				continue
+			}
 			if p.Name == propName {
-				paramIndex = i
 				break
 			}
+			paramIndex++
 		}
 		ctx.emitOp(StackOp{Op: "placeholder", ParamIndex: paramIndex, ParamName: propName})
 	}

@@ -758,10 +758,12 @@ class _LoweringContext:
         else:
             # Property value will be provided at deployment time; emit placeholder
             param_index = 0
-            for i, p in enumerate(self.properties):
+            for p in self.properties:
+                if p.initial_value is not None:
+                    continue
                 if p.name == prop_name:
-                    param_index = i
                     break
+                param_index += 1
             self.emit_op(StackOp(op="placeholder", param_index=param_index, param_name=prop_name))
         self.sm.push(binding_name)
 

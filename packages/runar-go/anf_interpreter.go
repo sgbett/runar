@@ -79,15 +79,25 @@ func ComputeNewState(
 	}
 
 	// Initialize environment with property values: mutable fields from
-	// currentState, readonly fields from constructorArgs (by index).
+	// currentState, non-initialized fields from constructorArgs (by constructor
+	// param index, which excludes initialized properties).
 	env := make(map[string]interface{})
-	for i, prop := range anf.Properties {
+	// Build constructor param name→index map (non-initialized properties only)
+	ctorIdx := make(map[string]int)
+	ci := 0
+	for _, p := range anf.Properties {
+		if p.InitialValue == nil {
+			ctorIdx[p.Name] = ci
+			ci++
+		}
+	}
+	for _, prop := range anf.Properties {
 		if v, ok := currentState[prop.Name]; ok {
 			env[prop.Name] = v
 		} else if prop.InitialValue != nil {
 			env[prop.Name] = prop.InitialValue
-		} else if prop.Readonly && i < len(constructorArgs) {
-			env[prop.Name] = constructorArgs[i]
+		} else if idx, ok := ctorIdx[prop.Name]; ok && idx < len(constructorArgs) {
+			env[prop.Name] = constructorArgs[idx]
 		}
 	}
 

@@ -180,16 +180,29 @@ pub fn compute_new_state(
 
     let mut env: HashMap<String, Val> = HashMap::new();
 
-    // Load properties: mutable fields from current_state, readonly fields
-    // from constructor_args (matched by declaration index).
-    for (i, prop) in anf.properties.iter().enumerate() {
+    // Load properties: mutable fields from current_state, non-initialized fields
+    // from constructor_args (matched by constructor param index, which excludes
+    // initialized properties).
+    let ctor_idx: std::collections::HashMap<String, usize> = {
+        let mut map = std::collections::HashMap::new();
+        let mut ci = 0usize;
+        for p in &anf.properties {
+            if p.initial_value.is_none() {
+                map.insert(p.name.clone(), ci);
+                ci += 1;
+            }
+        }
+        map
+    };
+    for prop in &anf.properties {
         if let Some(sv) = current_state.get(&prop.name) {
             env.insert(prop.name.clone(), Val::from_sdk(sv));
         } else if let Some(ref init) = prop.initial_value {
             env.insert(prop.name.clone(), json_to_val(init));
-        } else if prop.readonly && i < constructor_args.len() {
-            // Readonly property set at deploy time — use constructor arg value.
-            env.insert(prop.name.clone(), Val::from_sdk(&constructor_args[i]));
+        } else if let Some(&idx) = ctor_idx.get(&prop.name) {
+            if idx < constructor_args.len() {
+                env.insert(prop.name.clone(), Val::from_sdk(&constructor_args[idx]));
+            }
         }
     }
 

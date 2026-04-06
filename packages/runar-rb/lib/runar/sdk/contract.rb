@@ -310,7 +310,8 @@ module Runar
           named_args = build_named_args(user_params, resolved_args)
           opts = opts.dup
           opts.new_state = ANFInterpreter.compute_new_state(
-            @artifact.anf, method_name, @state, named_args
+            @artifact.anf, method_name, @state, named_args,
+            constructor_args: @constructor_args
           )
         end
 

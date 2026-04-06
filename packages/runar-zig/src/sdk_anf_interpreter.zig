@@ -129,6 +129,7 @@ pub fn computeNewState(
     method_name: []const u8,
     current_state: std.StringHashMap(ANFValue),
     args: std.StringHashMap(ANFValue),
+    constructor_args: []const ANFValue,
 ) !std.StringHashMap(ANFValue) {
     // Use an arena for all intermediate allocations during interpretation
     var arena = std.heap.ArenaAllocator.init(allocator);
@@ -150,11 +151,29 @@ pub fn computeNewState(
     // Initialize environment with property values
     var env = std.StringHashMap(ANFValue).init(arena_alloc);
 
+    // Build constructor param index: position among non-initialized properties.
+    // Properties with initialValue are excluded from the constructor, so
+    // constructor_args[i] corresponds to the i-th property without initialValue.
+    var ctor_idx = std.StringHashMap(usize).init(arena_alloc);
+    {
+        var ci: usize = 0;
+        for (anf.properties) |prop| {
+            if (prop.initial_value == null) {
+                try ctor_idx.put(prop.name, ci);
+                ci += 1;
+            }
+        }
+    }
+
     for (anf.properties) |prop| {
         if (current_state.get(prop.name)) |val| {
             try env.put(prop.name, val);
         } else if (prop.initial_value) |iv| {
             try env.put(prop.name, iv);
+        } else if (ctor_idx.get(prop.name)) |ci| {
+            if (ci < constructor_args.len) {
+                try env.put(prop.name, constructor_args[ci]);
+            }
         }
     }
 
@@ -1270,7 +1289,7 @@ test "computeNewState with simple increment" {
     var args = std.StringHashMap(ANFValue).init(allocator);
     defer args.deinit();
 
-    var new_state = try computeNewState(allocator, &anf, "increment", current_state, args);
+    var new_state = try computeNewState(allocator, &anf, "increment", current_state, args, &.{});
     defer new_state.deinit();
 
     const count = new_state.get("count").?;
@@ -1304,7 +1323,7 @@ test "computeNewState with update_prop and if" {
     var args = std.StringHashMap(ANFValue).init(allocator);
     defer args.deinit();
 
-    var new_state = try computeNewState(allocator, &anf, "set", current_state, args);
+    var new_state = try computeNewState(allocator, &anf, "set", current_state, args, &.{});
     defer new_state.deinit();
 
     const val = new_state.get("value").?;
@@ -1325,7 +1344,7 @@ test "computeNewState returns error for unknown method" {
     var args = std.StringHashMap(ANFValue).init(allocator);
     defer args.deinit();
 
-    const result = computeNewState(allocator, &anf, "nonexistent", current_state, args);
+    const result = computeNewState(allocator, &anf, "nonexistent", current_state, args, &.{});
     try std.testing.expectError(InterpreterError.MethodNotFound, result);
 }
 

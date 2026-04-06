@@ -53,15 +53,22 @@ export function computeNewState(
   const env: Record<string, unknown> = {};
 
   // Load properties: mutable fields from currentState, readonly fields
-  // from constructorArgs (matched by declaration index).
-  for (let i = 0; i < anf.properties.length; i++) {
-    const prop = anf.properties[i]!;
+  // from constructorArgs (matched by constructor param index, which excludes
+  // initialized properties).
+  // Build the constructor param index: position among non-initialized properties.
+  const ctorParamNames = anf.properties
+    .filter((p: { initialValue?: unknown }) => p.initialValue === undefined)
+    .map((p: { name: string }) => p.name);
+  for (const prop of anf.properties) {
     if (prop.name in currentState) {
       env[prop.name] = currentState[prop.name];
     } else if (prop.initialValue !== undefined) {
       env[prop.name] = prop.initialValue;
-    } else if (prop.readonly && i < constructorArgs.length) {
-      env[prop.name] = constructorArgs[i];
+    } else {
+      const ctorIdx = ctorParamNames.indexOf(prop.name);
+      if (ctorIdx >= 0 && ctorIdx < constructorArgs.length) {
+        env[prop.name] = constructorArgs[ctorIdx];
+      }
     }
   }
 
