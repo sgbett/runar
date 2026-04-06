@@ -1774,3 +1774,227 @@ impl<'a> GoParser<'a> {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -----------------------------------------------------------------------
+    // Test: basic stateless P2PKH contract
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_parse_go_p2pkh() {
+        let source = r#"package contract
+
+import runar "github.com/icellan/runar/packages/runar-go"
+
+type P2PKH struct {
+    runar.SmartContract
+    PubKeyHash runar.Addr `runar:"readonly"`
+}
+
+func (c *P2PKH) Unlock(sig runar.Sig, pubKey runar.PubKey) {
+    runar.Assert(runar.Hash160(pubKey) == c.PubKeyHash)
+    runar.Assert(runar.CheckSig(sig, pubKey))
+}
+"#;
+
+        let result = parse_go_contract(source, Some("P2PKH.runar.go"));
+        assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+        let contract = result.contract.expect("should produce a contract");
+        assert_eq!(contract.name, "P2PKH");
+        assert_eq!(contract.parent_class, "SmartContract");
+        assert_eq!(contract.properties.len(), 1);
+        assert_eq!(contract.properties[0].name, "pubKeyHash");
+        assert!(contract.properties[0].readonly);
+        assert_eq!(contract.methods.len(), 1);
+        assert_eq!(contract.methods[0].name, "unlock");
+        assert_eq!(contract.methods[0].visibility, Visibility::Public);
+        assert_eq!(contract.methods[0].params.len(), 2);
+        assert_eq!(contract.methods[0].params[0].name, "sig");
+        assert_eq!(contract.methods[0].params[1].name, "pubKey");
+    }
+
+    // -----------------------------------------------------------------------
+    // Test: stateful counter contract
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_parse_go_stateful_counter() {
+        let source = r#"package contract
+
+import runar "github.com/icellan/runar/packages/runar-go"
+
+type Counter struct {
+    runar.StatefulSmartContract
+    Count runar.Bigint
+}
+
+func (c *Counter) Increment() {
+    c.Count++
+}
+
+func (c *Counter) Decrement() {
+    runar.Assert(c.Count > 0)
+    c.Count--
+}
+"#;
+
+        let result = parse_go_contract(source, Some("Counter.runar.go"));
+        assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+        let contract = result.contract.expect("should produce a contract");
+        assert_eq!(contract.name, "Counter");
+        assert_eq!(contract.parent_class, "StatefulSmartContract");
+        assert_eq!(contract.properties.len(), 1);
+        assert!(!contract.properties[0].readonly, "count should be mutable");
+        assert_eq!(contract.methods.len(), 2);
+    }
+
+    // -----------------------------------------------------------------------
+    // Test: multiple readonly properties (Escrow-style)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_parse_go_multiple_properties() {
+        let source = r#"package contract
+
+import runar "github.com/icellan/runar/packages/runar-go"
+
+type Escrow struct {
+    runar.SmartContract
+    Buyer   runar.PubKey `runar:"readonly"`
+    Seller  runar.PubKey `runar:"readonly"`
+    Arbiter runar.PubKey `runar:"readonly"`
+}
+
+func (c *Escrow) Release(sellerSig runar.Sig, arbiterSig runar.Sig) {
+    runar.Assert(runar.CheckSig(sellerSig, c.Seller))
+    runar.Assert(runar.CheckSig(arbiterSig, c.Arbiter))
+}
+
+func (c *Escrow) Refund(buyerSig runar.Sig, arbiterSig runar.Sig) {
+    runar.Assert(runar.CheckSig(buyerSig, c.Buyer))
+    runar.Assert(runar.CheckSig(arbiterSig, c.Arbiter))
+}
+"#;
+
+        let result = parse_go_contract(source, Some("Escrow.runar.go"));
+        assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+        let contract = result.contract.expect("should produce a contract");
+        assert_eq!(contract.name, "Escrow");
+        assert_eq!(contract.properties.len(), 3);
+        assert_eq!(contract.properties[0].name, "buyer");
+        assert_eq!(contract.properties[1].name, "seller");
+        assert_eq!(contract.properties[2].name, "arbiter");
+        assert!(contract.properties[0].readonly);
+        assert!(contract.properties[1].readonly);
+        assert!(contract.properties[2].readonly);
+        assert_eq!(contract.methods.len(), 2);
+        let names: Vec<&str> = contract.methods.iter().map(|m| m.name.as_str()).collect();
+        assert!(names.contains(&"release"), "expected method 'release'");
+        assert!(names.contains(&"refund"), "expected method 'refund'");
+    }
+
+    // -----------------------------------------------------------------------
+    // Test: exported identifiers are lowercased (camelCase conversion)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_go_identifier_camel_case() {
+        let source = r#"package contract
+
+import runar "github.com/icellan/runar/packages/runar-go"
+
+type MyContract struct {
+    runar.SmartContract
+    PubKeyHash runar.Addr `runar:"readonly"`
+}
+
+func (c *MyContract) CheckHash(sig runar.Sig, pubKey runar.PubKey) {
+    runar.Assert(runar.Hash160(pubKey) == c.PubKeyHash)
+}
+"#;
+
+        let result = parse_go_contract(source, Some("MyContract.runar.go"));
+        assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+        let contract = result.contract.expect("should produce a contract");
+        // Exported field name PubKeyHash -> pubKeyHash
+        assert_eq!(contract.properties[0].name, "pubKeyHash");
+        // Exported method name CheckHash -> checkHash
+        assert_eq!(contract.methods[0].name, "checkHash");
+        // Exported param name PubKey -> pubKey (params stay as provided)
+        assert_eq!(contract.methods[0].params[1].name, "pubKey");
+    }
+
+    // -----------------------------------------------------------------------
+    // Test: invalid/empty source produces an error or no contract
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_parse_go_invalid_syntax() {
+        // No struct definition at all
+        let source = r#"package contract
+// no type definition here
+"#;
+
+        let result = parse_go_contract(source, Some("bad.runar.go"));
+        // Should produce no contract (empty source with no struct)
+        let is_bad = !result.errors.is_empty() || result.contract.is_none();
+        assert!(
+            is_bad,
+            "expected errors or no contract for source with no struct definition"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Test: property initializers via init() method
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_parse_go_property_initializers() {
+        let source = r#"package contract
+
+import runar "github.com/icellan/runar/packages/runar-go"
+
+type BoundedCounter struct {
+    runar.StatefulSmartContract
+    Count    runar.Bigint
+    MaxCount runar.Bigint `runar:"readonly"`
+    Active   runar.Bool   `runar:"readonly"`
+}
+
+func (c *BoundedCounter) init() {
+    c.Count = 0
+    c.Active = true
+}
+
+func (c *BoundedCounter) Increment(amount runar.Bigint) {
+    runar.Assert(c.Active)
+    c.Count = c.Count + amount
+    runar.Assert(c.Count <= c.MaxCount)
+}
+"#;
+
+        let result = parse_go_contract(source, Some("BoundedCounter.runar.go"));
+        assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+        let contract = result.contract.expect("should produce a contract");
+        assert_eq!(contract.name, "BoundedCounter");
+        assert_eq!(contract.parent_class, "StatefulSmartContract");
+        // init() should NOT appear as a regular method
+        let method_names: Vec<&str> = contract.methods.iter().map(|m| m.name.as_str()).collect();
+        assert!(
+            !method_names.contains(&"init"),
+            "init() should be consumed as initializers, not emitted as a method"
+        );
+        // Increment should be present
+        assert!(
+            method_names.contains(&"increment"),
+            "expected method 'increment'"
+        );
+    }
+}

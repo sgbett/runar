@@ -57,6 +57,19 @@ if (hasRust) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Visibility warnings for skipped compilers
+// ---------------------------------------------------------------------------
+
+if (!hasGo) console.warn('WARNING: Go compiler not found — skipping Go cross-compiler tests');
+if (!hasRust) console.warn('WARNING: Rust compiler not found — skipping Rust cross-compiler tests');
+
+// TODO: Add cross-compiler tests for Python, Zig, and Ruby compilers
+
+// ---------------------------------------------------------------------------
+// Helper functions
+// ---------------------------------------------------------------------------
+
 function tsCompileErrors(sourceName: string, diagnostics: { severity?: string; message?: string }[]): string {
   const errors = diagnostics
     .filter((d) => d.severity === 'error')

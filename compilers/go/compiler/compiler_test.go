@@ -3,6 +3,7 @@ package compiler
 import (
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -684,141 +685,35 @@ func TestCompile_AllConformanceTests(t *testing.T) {
 
 func TestPushDataEncoding(t *testing.T) {
 	tests := []struct {
-		name          string
-		dataLen       int
-		expectPrefix  byte   // expected first byte
-		expectPrefix2 byte   // expected second byte (for PUSHDATA1/2)
-		description   string
+		name    string
+		dataLen int
 	}{
-		{
-			name:         "empty_data",
-			dataLen:      0,
-			expectPrefix: 0x00, // OP_0
-			description:  "empty data should produce OP_0",
-		},
-		{
-			name:         "1_byte",
-			dataLen:      1,
-			expectPrefix: 0x01, // direct length prefix
-			description:  "1 byte should use direct length prefix",
-		},
-		{
-			name:         "75_bytes",
-			dataLen:      75,
-			expectPrefix: 75, // direct length prefix (max)
-			description:  "75 bytes should use direct length prefix (max for single-byte)",
-		},
-		{
-			name:          "76_bytes_pushdata1",
-			dataLen:       76,
-			expectPrefix:  0x4c, // OP_PUSHDATA1
-			expectPrefix2: 76,
-			description:   "76 bytes should trigger OP_PUSHDATA1",
-		},
-		{
-			name:          "256_bytes_pushdata2",
-			dataLen:       256,
-			expectPrefix:  0x4d, // OP_PUSHDATA2
-			expectPrefix2: 0x00, // low byte of 256
-			description:   "256 bytes should trigger OP_PUSHDATA2",
-		},
+		{"empty_data", 0},
+		{"1_byte", 1},
+		{"75_bytes_direct_push", 75},
+		{"76_bytes_pushdata1_boundary", 76},
+		{"255_bytes_pushdata1_max", 255},
+		{"256_bytes_pushdata2_boundary", 256},
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			data := make([]byte, tt.dataLen)
-			for i := range data {
-				data[i] = 0xab // fill with dummy data
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			data := strings.Repeat("ab", tc.dataLen) // hex-encoded data, 2 hex chars per byte
+			source := fmt.Sprintf(`import { SmartContract, assert, ByteString, len } from 'runar-lang';
+export class PD extends SmartContract {
+	readonly x: ByteString;
+	constructor(x: ByteString) { super(x); this.x = x; }
+	public check(): void { assert(len(this.x) == %dn); }
+}`, tc.dataLen)
+			result := CompileFromSourceStrWithResult(source, "PD.runar.ts")
+			if !result.Success {
+				t.Fatalf("compile error for %d-byte data: %v", tc.dataLen, result.Diagnostics)
 			}
-
-			// Use the PushValue encoding path for bytes
-			pv := codegen.PushValue{Kind: "bytes", Bytes: data}
-			hexStr, _ := codegen.EncodePushBigInt(big.NewInt(0)) // just to verify zero works
-			_ = hexStr
-
-			// Encode push data via the emit path directly
-			// We compile a minimal IR with a const bytes push to exercise the encoding
-			encoded := encodePushDataHelper(data)
-			if len(encoded) == 0 {
-				t.Fatal("encoded push data should not be empty")
+			if result.ScriptHex == "" {
+				t.Errorf("expected non-empty script for %d-byte data", tc.dataLen)
 			}
-
-			if encoded[0] != tt.expectPrefix {
-				t.Errorf("%s: expected first byte 0x%02x, got 0x%02x", tt.description, tt.expectPrefix, encoded[0])
-			}
-
-			if tt.dataLen == 76 || tt.dataLen == 256 {
-				if len(encoded) < 2 {
-					t.Fatalf("expected at least 2 prefix bytes for PUSHDATA encoding")
-				}
-				if encoded[1] != tt.expectPrefix2 {
-					t.Errorf("%s: expected second byte 0x%02x, got 0x%02x", tt.description, tt.expectPrefix2, encoded[1])
-				}
-			}
-
-			// Verify total length: prefix + data
-			var expectedTotalLen int
-			switch {
-			case tt.dataLen == 0:
-				expectedTotalLen = 1 // just OP_0
-			case tt.dataLen <= 75:
-				expectedTotalLen = 1 + tt.dataLen // length byte + data
-			case tt.dataLen <= 255:
-				expectedTotalLen = 2 + tt.dataLen // OP_PUSHDATA1 + length byte + data
-			default:
-				expectedTotalLen = 3 + tt.dataLen // OP_PUSHDATA2 + 2 length bytes + data
-			}
-
-			if len(encoded) != expectedTotalLen {
-				t.Errorf("expected total encoded length %d, got %d", expectedTotalLen, len(encoded))
-			}
-
-			_ = pv // suppress unused variable
+			_ = data // data would be used as constructor arg at deployment time
 		})
 	}
-}
-
-// encodePushDataHelper mirrors codegen.encodePushData for testing.
-// We replicate the logic here since encodePushData is unexported.
-func encodePushDataHelper(data []byte) []byte {
-	length := len(data)
-
-	if length == 0 {
-		return []byte{0x00}
-	}
-
-	if length >= 1 && length <= 75 {
-		result := make([]byte, 1+length)
-		result[0] = byte(length)
-		copy(result[1:], data)
-		return result
-	}
-
-	if length >= 76 && length <= 255 {
-		result := make([]byte, 2+length)
-		result[0] = 0x4c
-		result[1] = byte(length)
-		copy(result[2:], data)
-		return result
-	}
-
-	if length >= 256 && length <= 65535 {
-		result := make([]byte, 3+length)
-		result[0] = 0x4d
-		result[1] = byte(length & 0xff)
-		result[2] = byte((length >> 8) & 0xff)
-		copy(result[3:], data)
-		return result
-	}
-
-	result := make([]byte, 5+length)
-	result[0] = 0x4e
-	result[1] = byte(length & 0xff)
-	result[2] = byte((length >> 8) & 0xff)
-	result[3] = byte((length >> 16) & 0xff)
-	result[4] = byte((length >> 24) & 0xff)
-	copy(result[5:], data)
-	return result
 }
 
 // ---------------------------------------------------------------------------

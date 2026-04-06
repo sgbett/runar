@@ -36,6 +36,21 @@ ConstEnv = dict[str, ConstValue]
 
 
 # ---------------------------------------------------------------------------
+# Integer division helper
+# ---------------------------------------------------------------------------
+
+def _trunc_div(a: int, b: int) -> int | None:
+    """Integer division with truncation toward zero (matches Bitcoin Script OP_DIV)."""
+    if b == 0:
+        return None
+    # Python's // floors toward negative infinity; we need truncation toward zero
+    q = abs(a) // abs(b)
+    if (a < 0) != (b < 0):
+        q = -q
+    return q
+
+
+# ---------------------------------------------------------------------------
 # Binary operation evaluation
 # ---------------------------------------------------------------------------
 
@@ -51,15 +66,16 @@ def _eval_bin_op(op: str, left: ConstValue, right: ConstValue) -> ConstValue | N
         if op == "*":
             return ("int", a * b)
         if op == "/":
-            if b == 0:
+            q = _trunc_div(a, b)
+            if q is None:
                 return None
-            # Truncated division (toward zero), matching JS BigInt semantics
-            return ("int", int(a / b))
+            return ("int", q)
         if op == "%":
-            if b == 0:
+            q = _trunc_div(a, b)
+            if q is None:
                 return None
             # Remainder matching JS BigInt (sign follows dividend)
-            return ("int", a - int(a / b) * b)
+            return ("int", a - q * b)
         if op == "===":
             return ("bool", a == b)
         if op == "!==":
@@ -182,15 +198,21 @@ def _eval_builtin_call(func_name: str, args: list[ConstValue]) -> ConstValue | N
         return ("int", max(int_args[0], int_args[1]))
 
     if func_name == "safediv":
-        if len(int_args) != 2 or int_args[1] == 0:
+        if len(int_args) != 2:
             return None
-        return ("int", int(int_args[0] / int_args[1]))
+        q = _trunc_div(int_args[0], int_args[1])
+        if q is None:
+            return None
+        return ("int", q)
 
     if func_name == "safemod":
-        if len(int_args) != 2 or int_args[1] == 0:
+        if len(int_args) != 2:
             return None
         a, b = int_args[0], int_args[1]
-        return ("int", a - int(a / b) * b)
+        q = _trunc_div(a, b)
+        if q is None:
+            return None
+        return ("int", a - q * b)
 
     if func_name == "clamp":
         if len(int_args) != 3:
@@ -221,16 +243,22 @@ def _eval_builtin_call(func_name: str, args: list[ConstValue]) -> ConstValue | N
         return ("int", result)
 
     if func_name == "mulDiv":
-        if len(int_args) != 3 or int_args[2] == 0:
+        if len(int_args) != 3:
             return None
         tmp = int_args[0] * int_args[1]
-        return ("int", int(tmp / int_args[2]))
+        q = _trunc_div(tmp, int_args[2])
+        if q is None:
+            return None
+        return ("int", q)
 
     if func_name == "percentOf":
         if len(int_args) != 2:
             return None
         tmp = int_args[0] * int_args[1]
-        return ("int", int(tmp / 10000))
+        q = _trunc_div(tmp, 10000)
+        if q is None:
+            return None
+        return ("int", q)
 
     if func_name == "sqrt":
         if len(int_args) != 1:
@@ -257,9 +285,12 @@ def _eval_builtin_call(func_name: str, args: list[ConstValue]) -> ConstValue | N
         return ("int", a)
 
     if func_name == "divmod":
-        if len(int_args) != 2 or int_args[1] == 0:
+        if len(int_args) != 2:
             return None
-        return ("int", int(int_args[0] / int_args[1]))
+        q = _trunc_div(int_args[0], int_args[1])
+        if q is None:
+            return None
+        return ("int", q)
 
     if func_name == "log2":
         if len(int_args) != 1:

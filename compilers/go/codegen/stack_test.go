@@ -113,10 +113,7 @@ func TestLowerToStack_P2PKH_HasPlaceholderOps(t *testing.T) {
 		}
 	}
 	if !hasPlaceholder {
-		// Alternatively, the property might be pushed as OP_0 placeholder via "push"
-		// Check for any reference to the property in the ops
-		t.Logf("stack ops for unlock: %v", opsToString(unlock.Ops))
-		t.Log("Note: placeholder ops may be implemented differently — checking for property load")
+		t.Errorf("expected at least one placeholder op (prop_load or similar) in unlock method, got ops: %v", opsToString(unlock.Ops))
 	}
 }
 

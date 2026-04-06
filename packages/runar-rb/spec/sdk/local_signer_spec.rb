@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'runar/sdk'
+require 'runar/ecdsa'
 
 RSpec.describe Runar::SDK::LocalSigner do
   # ---------------------------------------------------------------------------
@@ -129,6 +130,28 @@ RSpec.describe Runar::SDK::LocalSigner do
 
     it 'defines sign' do
       expect(described_class.method_defined?(:sign)).to be true
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # BIP-62 low-S enforcement (uses the pure-Ruby ECDSA implementation)
+  # ---------------------------------------------------------------------------
+  describe 'BIP-62 low-S enforcement' do
+    it 'produces low-S signatures per BIP-62' do
+      half_n = Runar::ECDSA::CURVE_N >> 1
+      priv_key = 1  # well-known test key: private key = 1 (public key = G)
+
+      20.times do |i|
+        # Produce a distinct 32-byte message hash for each iteration
+        msg_hash = ([i] + [0] * 31).pack('C*')
+        der = Runar::ECDSA.ecdsa_sign(priv_key, msg_hash)
+
+        result = Runar::ECDSA.parse_der_signature_bytes(der)
+        expect(result).not_to be_nil, "iteration #{i}: could not parse DER signature"
+        _r, s = result
+        expect(s).to be <= half_n,
+          "iteration #{i}: S value 0x#{s.to_s(16)} exceeds N/2 (BIP-62 low-S violation)"
+      end
     end
   end
 end

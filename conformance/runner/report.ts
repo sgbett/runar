@@ -216,15 +216,16 @@ export function formatReportAsMarkdown(report: ConformanceReport): string {
   // Timing details
   lines.push('## Timing Details');
   lines.push('');
-  lines.push('| Test | TS (ms) | Go (ms) | Rust (ms) | Python (ms) | Zig (ms) |');
-  lines.push('|------|---------|---------|-----------|-------------|----------|');
+  lines.push('| Test | TS (ms) | Go (ms) | Rust (ms) | Python (ms) | Zig (ms) | Ruby (ms) |');
+  lines.push('|------|---------|---------|-----------|-------------|----------|-----------|');
   for (const r of report.results) {
     const ts = r.timings.ts !== undefined ? r.timings.ts.toFixed(1) : '-';
     const go = r.timings.go !== undefined ? r.timings.go.toFixed(1) : '-';
     const rust = r.timings.rust !== undefined ? r.timings.rust.toFixed(1) : '-';
     const python = r.timings.python !== undefined ? r.timings.python.toFixed(1) : '-';
     const zig = r.timings.zig !== undefined ? r.timings.zig.toFixed(1) : '-';
-    lines.push(`| ${r.testName} | ${ts} | ${go} | ${rust} | ${python} | ${zig} |`);
+    const ruby = r.timings.ruby !== undefined ? r.timings.ruby.toFixed(1) : '-';
+    lines.push(`| ${r.testName} | ${ts} | ${go} | ${rust} | ${python} | ${zig} | ${ruby} |`);
   }
   lines.push('');
 

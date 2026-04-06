@@ -41,7 +41,12 @@ export async function rpcCall(method: string, ...params: unknown[]): Promise<unk
 }
 
 export async function mine(blocks: number): Promise<void> {
-  await rpcCall('generate', blocks);
+  try {
+    await rpcCall('generate', blocks);
+  } catch {
+    const addr = (await rpcCall('getnewaddress')) as string;
+    await rpcCall('generatetoaddress', blocks, addr);
+  }
 }
 
 export async function getBlockCount(): Promise<number> {

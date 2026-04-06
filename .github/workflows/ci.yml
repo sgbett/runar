@@ -261,8 +261,9 @@ jobs:
             echo -n "=== $name === "
             go_hex=$(./runar-go --ir "$test" --hex)
             rust_hex=$(./runar-compiler-rust --ir "$test" --hex)
-            zig_hex=$(./runar-zig compile-ir "$test" --hex 2>/dev/null | head -1)
-            ruby_hex=$(ruby compilers/ruby/bin/runar-compiler-ruby --ir "$test" --hex --disable-constant-folding 2>&1 | tr -d '[:space:]')
+            zig_hex=$(./runar-zig compile-ir "$test" --hex 2>/dev/null | head -1 | tr -d '[:space:]')
+            ruby_hex=$(ruby compilers/ruby/bin/runar-compiler-ruby --ir "$test" --hex --disable-constant-folding 2>/dev/null | tr -d '[:space:]')
+            python_hex=$(cd compilers/python && python3 -m runar_compiler --ir "../$test" --hex --disable-constant-folding 2>/dev/null | tr -d '[:space:]')
             if [ "$go_hex" != "$rust_hex" ]; then
               echo "MISMATCH Go vs Rust"
               fail=1
@@ -272,8 +273,21 @@ jobs:
             elif [ "$go_hex" != "$ruby_hex" ]; then
               echo "MISMATCH Go vs Ruby"
               fail=1
+            elif [ -n "$python_hex" ] && [ "$go_hex" != "$python_hex" ]; then
+              echo "MISMATCH Go vs Python"
+              fail=1
             else
               echo "OK (${#go_hex} hex chars)"
+            fi
+            expected_hex_file="${test%/*}/expected-script.hex"
+            if [ -f "$expected_hex_file" ]; then
+              expected_hex=$(tr -d '[:space:]' < "$expected_hex_file")
+              if [ -n "$expected_hex" ] && [ "$go_hex" != "$expected_hex" ]; then
+                echo "FAIL: $name — Go output does not match golden file"
+                echo "  Go:       $go_hex"
+                echo "  Expected: $expected_hex"
+                fail=1
+              fi
             fi
           done
           exit $fail

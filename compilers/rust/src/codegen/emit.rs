@@ -1263,4 +1263,71 @@ mod tests {
             result.script_asm
         );
     }
+
+    // -------------------------------------------------------------------------
+    // encode_script_number: Bitcoin Script sign-magnitude boundary values
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_encode_script_number_boundaries() {
+        // (value, expected_hex_of_raw_bytes)
+        // Zero returns an empty Vec (the push layer maps that to OP_0 = 0x00),
+        // so its expected hex is the empty string.
+        let cases: &[(i128, &str)] = &[
+            (0, ""),
+            (1, "01"),
+            (-1, "81"),
+            (127, "7f"),
+            (-127, "ff"),
+            (128, "8000"),
+            (-128, "8080"),
+            (32767, "ff7f"),
+            (32768, "008000"),
+            (2147483647, "ffffff7f"),
+            (2147483648, "0000008000"),
+        ];
+
+        for &(val, expected_hex) in cases {
+            let raw = encode_script_number(val);
+            let got_hex = hex::encode(&raw);
+            assert_eq!(
+                got_hex, expected_hex,
+                "encode_script_number({}) = {:?} (hex: {:?}), want {:?}",
+                val, raw, got_hex, expected_hex
+            );
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // encode_push_data: boundary values
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_encode_push_data_boundaries() {
+        // (data_len, expected_prefix_hex)
+        let cases: &[(usize, &str)] = &[
+            // 75 bytes: direct push — single length byte 0x4b = 75
+            (75, "4b"),
+            // 76 bytes: OP_PUSHDATA1 (0x4c) + length byte 0x4c = 76
+            (76, "4c4c"),
+            // 255 bytes: OP_PUSHDATA1 (0x4c) + length byte 0xff = 255
+            (255, "4cff"),
+            // 256 bytes: OP_PUSHDATA2 (0x4d) + 2-byte LE length 0x0001 = 256
+            (256, "4d0001"),
+        ];
+
+        for &(data_len, want_prefix) in cases {
+            let data = vec![0xabu8; data_len];
+            let encoded = encode_push_data(&data);
+            let got = hex::encode(&encoded);
+            assert!(
+                got.starts_with(want_prefix),
+                "encode_push_data({} bytes) hex prefix = {:?}, want prefix {:?} (full hex starts: {})",
+                data_len,
+                &got[..got.len().min(20)],
+                want_prefix,
+                &got[..got.len().min(12)],
+            );
+        }
+    }
 }

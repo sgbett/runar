@@ -178,6 +178,18 @@ pub fn compileSourceToHex(
     return result.script_hex;
 }
 
+/// Check that a hex string contains a given opcode hex byte at a byte-aligned boundary.
+/// Steps by 2 chars (1 byte) to avoid matching bytes that are part of push data values.
+fn hexContainsOpcode(hex: []const u8, opcode: []const u8) bool {
+    std.debug.assert(opcode.len == 2);
+    if (hex.len < 2) return false;
+    var i: usize = 0;
+    while (i + 1 < hex.len) : (i += 2) {
+        if (hex[i] == opcode[0] and hex[i + 1] == opcode[1]) return true;
+    }
+    return false;
+}
+
 test "compile P2PKH contract to hex" {
     const source =
         \\const runar = @import("runar");
@@ -205,10 +217,11 @@ test "compile P2PKH contract to hex" {
     try std.testing.expect(hex.len > 0);
 
     // P2PKH script should contain OP_DUP (76), OP_HASH160 (a9),
-    // OP_EQUALVERIFY (88), OP_CHECKSIG (ac) somewhere in the output
-    try std.testing.expect(std.mem.indexOf(u8, hex, "76") != null);
-    try std.testing.expect(std.mem.indexOf(u8, hex, "a9") != null);
-    try std.testing.expect(std.mem.indexOf(u8, hex, "ac") != null);
+    // OP_EQUALVERIFY (88), OP_CHECKSIG (ac) — use byte-aligned checks to
+    // avoid spurious matches inside push data values.
+    try std.testing.expect(hexContainsOpcode(hex, "76")); // OP_DUP
+    try std.testing.expect(hexContainsOpcode(hex, "a9")); // OP_HASH160
+    try std.testing.expect(hexContainsOpcode(hex, "ac")); // OP_CHECKSIG
 }
 
 test "artifact contains source map entries" {

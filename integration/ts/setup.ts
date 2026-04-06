@@ -17,6 +17,11 @@ export default async function setup() {
     process.exit(0);
   }
 
+  const info = await rpcCall('getblockchaininfo');
+  if ((info as { chain: string }).chain !== 'regtest') {
+    throw new Error(`SAFETY: Connected to '${(info as { chain: string }).chain}' network, not regtest!`);
+  }
+
   const height = await getBlockCount();
   const target = 101;
   const needed = target - height;

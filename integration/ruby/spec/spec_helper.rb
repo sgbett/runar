@@ -98,6 +98,9 @@ module IntegrationHelpers
   # @param blocks [Integer] number of blocks to mine
   def mine(blocks)
     rpc_call('generate', blocks)
+  rescue
+    addr = rpc_call('getnewaddress')
+    rpc_call('generatetoaddress', blocks, addr)
   end
 
   # Import an address and send coins to it, then mine a block.
@@ -161,11 +164,13 @@ module IntegrationHelpers
   # Wallet / Signer creation
   # ---------------------------------------------------------------------------
 
-  # Create a random wallet hash with priv_key_hex, pub_key_hex, pub_key_hash.
+  # Create a deterministic wallet hash with priv_key_hex, pub_key_hex, pub_key_hash.
   #
   # @return [Hash] with keys :priv_key_hex, :pub_key_hex, :pub_key_hash
   def create_wallet
-    priv_hex = SecureRandom.hex(32)
+    @@wallet_counter ||= (Process.pid || 1) * 1000
+    @@wallet_counter += 1
+    priv_hex = @@wallet_counter.to_s(16).rjust(64, '0')
     local    = Runar::SDK::LocalSigner.new(priv_hex)
     pub_hex  = local.get_public_key
     pkh      = hash160([pub_hex].pack('H*'))
@@ -528,6 +533,12 @@ RSpec.configure do |config|
   config.before(:suite) do
     unless IntegrationHelpers.node_available?
       warn 'BSV regtest node not available — all integration tests will be skipped'
+    else
+      info = IntegrationHelpers.rpc_call('getblockchaininfo')
+      raise "SAFETY: Connected to #{info['chain']}, not regtest!" unless info['chain'] == 'regtest'
+      # Ensure at least 101 blocks exist for coinbase maturity
+      count = IntegrationHelpers.rpc_call('getblockcount') rescue 0
+      IntegrationHelpers.mine(101 - count) if count < 101
     end
   end
 

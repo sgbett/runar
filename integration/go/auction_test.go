@@ -5,6 +5,7 @@ package integration
 import (
 	"encoding/hex"
 	"testing"
+	"time"
 
 	"runar-integration/helpers"
 
@@ -57,7 +58,10 @@ func TestAuction_Close(t *testing.T) {
 	auctioneer := helpers.NewWallet()
 	bidder := helpers.NewWallet()
 
-	contract, _ := deployAuction(t, auctioneer, bidder, 1000, 0)
+	// Use a real deadline to ensure the contract codegen handles locktime correctly.
+	// Regtest may not enforce locktime, but this validates the script structure.
+	deadline := time.Now().Unix() + 3600 // 1 hour from now
+	contract, _ := deployAuction(t, auctioneer, bidder, 1000, deadline)
 
 	// close(sig) via SDK terminal call — method 1. The close method verifies
 	// checkSig but doesn't addOutput, so we use TerminalOutputs.
@@ -162,7 +166,10 @@ func TestAuction_WrongSigner_Rejected(t *testing.T) {
 	bidder := helpers.NewWallet()
 	attacker := helpers.NewWallet()
 
-	contract, _ := deployAuction(t, auctioneer, bidder, 1000, 0)
+	// Use a real deadline to ensure the contract codegen handles locktime correctly.
+	// Regtest may not enforce locktime, but this validates the script structure.
+	deadline := time.Now().Unix() + 3600 // 1 hour from now
+	contract, _ := deployAuction(t, auctioneer, bidder, 1000, deadline)
 
 	// Get the deployed UTXO via SDK, convert to helper UTXO for raw spending
 	utxo := helpers.SDKUtxoToHelper(contract.GetCurrentUtxo())

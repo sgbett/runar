@@ -975,6 +975,8 @@ fn parse_binary_expression(
         swc::BinaryOp::BitAnd => BinaryOp::BitAnd,
         swc::BinaryOp::BitOr => BinaryOp::BitOr,
         swc::BinaryOp::BitXor => BinaryOp::BitXor,
+        swc::BinaryOp::LShift => BinaryOp::Shl,
+        swc::BinaryOp::RShift => BinaryOp::Shr,
         swc::BinaryOp::EqEq => {
             // Accept == and map to === (same as TS and Go parsers)
             BinaryOp::StrictEq

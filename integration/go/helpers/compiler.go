@@ -683,7 +683,24 @@ func readVI(h string, pos int) (int, int) {
 		hi, _ := strconv.ParseUint(h[pos+4:pos+6], 16, 8)
 		return int(lo) | int(hi)<<8, 6
 	}
-	return 0, 2
+	if fb == 0xfe {
+		b0, _ := strconv.ParseUint(h[pos+2:pos+4], 16, 8)
+		b1, _ := strconv.ParseUint(h[pos+4:pos+6], 16, 8)
+		b2, _ := strconv.ParseUint(h[pos+6:pos+8], 16, 8)
+		b3, _ := strconv.ParseUint(h[pos+8:pos+10], 16, 8)
+		return int(b0) | int(b1)<<8 | int(b2)<<16 | int(b3)<<24, 10
+	}
+	// fb == 0xff: 8-byte little-endian value
+	b0, _ := strconv.ParseUint(h[pos+2:pos+4], 16, 8)
+	b1, _ := strconv.ParseUint(h[pos+4:pos+6], 16, 8)
+	b2, _ := strconv.ParseUint(h[pos+6:pos+8], 16, 8)
+	b3, _ := strconv.ParseUint(h[pos+8:pos+10], 16, 8)
+	b4, _ := strconv.ParseUint(h[pos+10:pos+12], 16, 8)
+	b5, _ := strconv.ParseUint(h[pos+12:pos+14], 16, 8)
+	b6, _ := strconv.ParseUint(h[pos+14:pos+16], 16, 8)
+	b7, _ := strconv.ParseUint(h[pos+16:pos+18], 16, 8)
+	return int(b0) | int(b1)<<8 | int(b2)<<16 | int(b3)<<24 |
+		int(b4)<<32 | int(b5)<<40 | int(b6)<<48 | int(b7)<<56, 18
 }
 
 func sha256Sum(data []byte) []byte {

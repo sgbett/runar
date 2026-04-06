@@ -1189,8 +1189,10 @@ func (ctx *loweringContext) lowerCall(bindingName, funcName string, args []strin
 		ctx.sm.push("")          // left part
 		ctx.sm.push(bindingName) // right part (top)
 	} else if funcName == "len" {
-		ctx.sm.push("")          // original value still present
-		ctx.sm.push(bindingName) // size on top
+		// OP_SIZE leaves original on stack and pushes length on top.
+		// Emit OP_NIP to remove the original value, keeping only the size.
+		ctx.emitOp(StackOp{Op: "opcode", Code: "OP_NIP"})
+		ctx.sm.push(bindingName) // size only
 	} else {
 		ctx.sm.push(bindingName)
 	}

@@ -1175,13 +1175,7 @@ func TestSLHDSA_ScriptExecution(t *testing.T) {
 		return
 	}
 
-	errMsg := execErr.Error()
-	if strings.Contains(errMsg, "false stack entry") {
-		t.Logf("SLH-DSA: script ran to completion, final root comparison false")
-		t.Logf("This may indicate the test signature needs regeneration")
-	} else {
-		t.Fatalf("SLH-DSA script crashed: %v", execErr)
-	}
+	t.Fatalf("SLH-DSA script execution failed: %v", execErr)
 }
 
 func TestSLHDSA_ScriptExecution_TamperedSig(t *testing.T) {

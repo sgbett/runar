@@ -78,10 +78,11 @@ class TestCompiler < Minitest::Test
     artifact = compile_ts_source(source, 'P2PKH.runar.ts')
     assert_equal 'P2PKH', artifact.contract_name
     assert artifact.script.length > 0, "script should be non-empty"
-    # P2PKH script contains OP_DUP (76), OP_HASH160 (a9), OP_CHECKSIG (ac)
-    assert_includes artifact.script.downcase, '76'
-    assert_includes artifact.script.downcase, 'a9'
-    assert_includes artifact.script.downcase, 'ac'
+    # P2PKH script contains OP_DUP, OP_HASH160, OP_CHECKSIG — use ASM to avoid
+    # spurious matches inside push data bytes
+    assert_includes artifact.asm, 'OP_DUP'
+    assert_includes artifact.asm, 'OP_HASH160'
+    assert_includes artifact.asm, 'OP_CHECKSIG'
   end
 
   def test_compile_p2pkh_rb
@@ -154,11 +155,11 @@ class TestCompiler < Minitest::Test
   # ------------------------------------------------------------------
 
   def test_conformance_basic_p2pkh_ts
-    return skip("conformance dir not found") unless File.directory?(CONFORMANCE_DIR)
+    return skip("conformance dir not found — run from repo root: #{CONFORMANCE_DIR}") unless File.directory?(CONFORMANCE_DIR)
 
     ts_path = File.join(CONFORMANCE_DIR, 'basic-p2pkh', 'basic-p2pkh.runar.ts')
     expected_hex = File.read(File.join(CONFORMANCE_DIR, 'basic-p2pkh', 'expected-script.hex')).strip
-    return skip("conformance files not found") unless File.exist?(ts_path)
+    return skip("conformance file not found: #{ts_path}") unless File.exist?(ts_path)
 
     artifact = RunarCompiler.compile_from_source(ts_path, disable_constant_folding: true)
     assert_equal expected_hex.downcase, artifact.script.downcase,
@@ -166,11 +167,11 @@ class TestCompiler < Minitest::Test
   end
 
   def test_conformance_basic_p2pkh_rb
-    return skip("conformance dir not found") unless File.directory?(CONFORMANCE_DIR)
+    return skip("conformance dir not found — run from repo root: #{CONFORMANCE_DIR}") unless File.directory?(CONFORMANCE_DIR)
 
     rb_path = File.join(CONFORMANCE_DIR, 'basic-p2pkh', 'basic-p2pkh.runar.rb')
     expected_hex = File.read(File.join(CONFORMANCE_DIR, 'basic-p2pkh', 'expected-script.hex')).strip
-    return skip("conformance files not found") unless File.exist?(rb_path)
+    return skip("conformance file not found: #{rb_path}") unless File.exist?(rb_path)
 
     artifact = RunarCompiler.compile_from_source(rb_path, disable_constant_folding: true)
     assert_equal expected_hex.downcase, artifact.script.downcase,
@@ -219,11 +220,12 @@ class TestCompiler < Minitest::Test
   CONFORMANCE_TESTS.each do |test_dir, source_file|
     method_name = "test_conformance_#{test_dir.gsub('-', '_')}"
     define_method(method_name) do
-      skip("conformance dir not found") unless File.directory?(CONFORMANCE_DIR)
+      skip("conformance dir not found — run from repo root: #{CONFORMANCE_DIR}") unless File.directory?(CONFORMANCE_DIR)
 
       source_path = File.join(CONFORMANCE_DIR, test_dir, source_file)
       hex_path = File.join(CONFORMANCE_DIR, test_dir, 'expected-script.hex')
-      skip("conformance files not found for #{test_dir}") unless File.exist?(source_path) && File.exist?(hex_path)
+      missing = [source_path, hex_path].reject { |p| File.exist?(p) }
+      skip("conformance files not found for #{test_dir}: #{missing.join(', ')}") unless missing.empty?
 
       expected_hex = File.read(hex_path).strip
       artifact = RunarCompiler.compile_from_source(source_path, disable_constant_folding: true)

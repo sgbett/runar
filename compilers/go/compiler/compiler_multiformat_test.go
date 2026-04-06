@@ -22,7 +22,10 @@ import (
 // Int→bigint, etc.). These tests focus on parse-level correctness.
 // ---------------------------------------------------------------------------
 
-var multiFormats = []string{".runar.ts", ".runar.sol", ".runar.move", ".runar.go", ".runar.rb"}
+var multiFormats = []string{
+	".runar.ts", ".runar.sol", ".runar.move", ".runar.go",
+	".runar.rs", ".runar.py", ".runar.zig", ".runar.rb",
+}
 
 func readConformanceFormat(t *testing.T, testName, ext string) ([]byte, string) {
 	t.Helper()

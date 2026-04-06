@@ -24,6 +24,8 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 
+	helpers.EnsureRegtest()
+
 	// Mine initial blocks so coinbase UTXOs mature (100 block maturity).
 	// On Teranode regtest, GenesisActivationHeight=10000 (hardcoded in go-chaincfg),
 	// so we need height > 10000 for post-Genesis rules. The teranode.sh start script

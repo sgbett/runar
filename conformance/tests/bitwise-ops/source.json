@@ -1,0 +1,5 @@
+{
+  "sources": {
+    ".runar.ts": "bitwise-ops.runar.ts"
+  }
+}

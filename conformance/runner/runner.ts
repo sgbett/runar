@@ -578,7 +578,11 @@ function compareIR(...outputs: (CompilerOutput | undefined)[]): boolean {
     .filter((o): o is CompilerOutput => o !== undefined && o.success && o.irJson !== '')
     .map((o) => o.irJson);
 
-  if (successfulIRs.length < 2) return true; // Nothing to compare
+  if (successfulIRs.length < 2) {
+    if (successfulIRs.length === 0) return true; // No compilers produced IR — not a mismatch
+    console.warn(`  WARNING: only ${successfulIRs.length} compiler(s) produced IR — cannot cross-validate`);
+    return false;
+  }
   return successfulIRs.every((ir) => ir === successfulIRs[0]);
 }
 
@@ -591,7 +595,11 @@ function compareScript(...outputs: (CompilerOutput | undefined)[]): boolean {
     .filter((o): o is CompilerOutput => o !== undefined && o.success && o.scriptHex !== '')
     .map((o) => o.scriptHex.toLowerCase().replace(/\s/g, ''));
 
-  if (successfulHexes.length < 2) return true; // Nothing to compare
+  if (successfulHexes.length < 2) {
+    if (successfulHexes.length === 0) return true; // No compilers produced hex — not a mismatch
+    console.warn(`  WARNING: only ${successfulHexes.length} compiler(s) produced hex — cannot cross-validate`);
+    return false;
+  }
   return successfulHexes.every((hex) => hex === successfulHexes[0]);
 }
 

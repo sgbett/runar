@@ -696,8 +696,8 @@ fn test_chained_rules_12_then_5() {
             // Both are correct optimizer outputs; we just verify no crash.
             let s = value.as_str().unwrap_or("");
             assert!(
-                s == INFINITY_HEX || value.as_str().is_some(),
-                "expected valid constant, got {value}"
+                s == INFINITY_HEX || (s.len() == 128 && s.chars().all(|c| c.is_ascii_hexdigit())),
+                "expected INFINITY or 64-byte hex point, got '{s}'"
             );
         }
         ANFValue::Call { func, .. } => {

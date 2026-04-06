@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"encoding/hex"
 	"fmt"
 	"math/big"
 	"strings"
@@ -340,6 +341,9 @@ func TestEmit_TerminalAssert_NoVerify(t *testing.T) {
 	if !containsSubstring(result.ScriptAsm, "OP_CHECKSIG") {
 		t.Errorf("expected OP_CHECKSIG in terminal-assert P2PKH, got ASM: %s", result.ScriptAsm)
 	}
+	if strings.Contains(result.ScriptAsm, "OP_CHECKSIGVERIFY") {
+		t.Errorf("terminal assert should NOT produce OP_CHECKSIGVERIFY, got: %s", result.ScriptAsm)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -544,6 +548,42 @@ func TestEmit_EmptyPush_EncodesAsOP0(t *testing.T) {
 	// Empty bytes should encode as OP_0 = 0x00
 	if result.ScriptHex != "00" {
 		t.Errorf("empty push should encode as '00' (OP_0), got: %s", result.ScriptHex)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// encodeScriptNumber: Bitcoin Script sign-magnitude boundary values
+// ---------------------------------------------------------------------------
+
+func TestEncodeScriptNumber_Boundaries(t *testing.T) {
+	tests := []struct {
+		name string
+		val  int64
+		// expected is the hex of the raw sign-magnitude bytes returned by
+		// encodeScriptNumber.  Zero returns an empty slice (encoded as OP_0 =
+		// 0x00 by the push layer), so its expected hex is the empty string.
+		hex string
+	}{
+		{"zero", 0, ""},
+		{"one", 1, "01"},
+		{"minus_one", -1, "81"},
+		{"max_1byte_positive", 127, "7f"},
+		{"max_1byte_negative", -127, "ff"},
+		{"needs_2bytes_128", 128, "8000"},
+		{"needs_2bytes_neg128", -128, "8080"},
+		{"max_2bytes", 32767, "ff7f"},
+		{"needs_3bytes", 32768, "008000"},
+		{"max_4bytes", 2147483647, "ffffff7f"},
+		{"needs_5bytes", 2147483648, "0000008000"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := encodeScriptNumber(big.NewInt(tc.val))
+			gotHex := hex.EncodeToString(got)
+			if gotHex != tc.hex {
+				t.Errorf("encodeScriptNumber(%d) = %q, want %q", tc.val, gotHex, tc.hex)
+			}
+		})
 	}
 }
 
@@ -978,4 +1018,40 @@ func TestEmit_SHA256InASM(t *testing.T) {
 	}
 
 	t.Logf("SHA256 contract ASM: %s", result.ScriptAsm)
+}
+
+// ---------------------------------------------------------------------------
+// Test: encodePushData boundary values
+// ---------------------------------------------------------------------------
+
+func TestEncodePushData_Boundaries(t *testing.T) {
+	tests := []struct {
+		name      string
+		dataLen   int
+		wantPrefix string // expected hex prefix of the encoding
+	}{
+		// 75 bytes: direct push (single length byte 0x4b = 75)
+		{"75_bytes_direct", 75, "4b"},
+		// 76 bytes: OP_PUSHDATA1 (0x4c) + length byte 0x4c = 76
+		{"76_bytes_pushdata1", 76, "4c4c"},
+		// 255 bytes: OP_PUSHDATA1 (0x4c) + length byte 0xff = 255
+		{"255_bytes_pushdata1", 255, "4cff"},
+		// 256 bytes: OP_PUSHDATA2 (0x4d) + 2-byte LE length 0x0001 = 256
+		{"256_bytes_pushdata2", 256, "4d0001"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			data := make([]byte, tc.dataLen)
+			for i := range data {
+				data[i] = 0xab
+			}
+			encoded := encodePushData(data)
+			got := hex.EncodeToString(encoded)
+			if !strings.HasPrefix(got, tc.wantPrefix) {
+				t.Errorf("encodePushData(%d bytes) hex prefix = %q, want prefix %q (full hex starts: %s)",
+					tc.dataLen, got[:min(len(got), 20)], tc.wantPrefix, got[:min(len(got), 12)])
+			}
+		})
+	}
 }

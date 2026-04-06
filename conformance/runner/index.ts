@@ -91,7 +91,7 @@ function printHelp(): void {
 Rúnar Conformance Test Runner
 
 Runs Rúnar contract source files through all available compiler implementations
-(TypeScript, Go, Rust, Python, Zig) and compares the outputs byte-for-byte.
+(TypeScript, Go, Rust, Python, Zig, Ruby) and compares the outputs byte-for-byte.
 
 Usage:
   npx tsx conformance/runner/index.ts [options]

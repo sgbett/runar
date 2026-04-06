@@ -906,16 +906,9 @@ class ContractB extends SmartContract {
 	result := ParseSource([]byte(source), "test.runar.ts")
 	// Either the result has errors or returns only the first contract
 	// The key invariant: exactly ONE contract is returned (or there are errors)
-	if result.Contract != nil && len(result.Errors) == 0 {
-		// It returned one without errors — that's acceptable (first wins)
-		// But we log what happened
-		t.Logf("Multiple contract source: returned %s (first wins)", result.Contract.Name)
-	} else if len(result.Errors) > 0 {
-		// Check the error mentions the issue
-		combined := strings.Join(result.ErrorStrings(), " ")
-		t.Logf("Multiple contract source produced error: %s", combined)
+	if len(result.Errors) == 0 && result.Contract != nil {
+		t.Errorf("expected errors for multiple contract classes, but got valid contract with no errors")
 	}
-	// No panic is the key invariant
 }
 
 // ---------------------------------------------------------------------------
@@ -927,9 +920,7 @@ func TestParse_ErrorHasSourceLocation(t *testing.T) {
 	source := `class Foo { }`
 	result := ParseSource([]byte(source), "bad.runar.ts")
 	if len(result.Errors) == 0 {
-		// The Go parser may not error on this specific input — just verify no panic
-		t.Logf("No errors for class without parent")
-		return
+		t.Skipf("no errors produced for this input — cannot test source location")
 	}
 	// If errors are returned, they should be non-empty strings
 	for _, err := range result.Errors {
@@ -957,13 +948,7 @@ class Test extends SmartContract {
 `
 	result := ParseSource([]byte(source), "test.runar.ts")
 	// The Go parser may return a contract or an error for missing constructor
-	if len(result.Errors) > 0 {
-		combined := strings.Join(result.ErrorStrings(), " ")
-		if !strings.Contains(strings.ToLower(combined), "constructor") {
-			t.Logf("Error does not mention constructor: %s", combined)
-		}
-	} else if result.Contract != nil {
-		// Validator will catch this — parse itself may succeed
-		t.Logf("Parser returned contract without constructor error (validator will catch it)")
+	if len(result.Errors) == 0 && result.Contract != nil {
+		t.Errorf("expected error for contract without constructor, but got valid contract")
 	}
 }

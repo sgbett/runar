@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"sync/atomic"
@@ -175,6 +176,24 @@ func GetRawTransaction(txid string) (map[string]interface{}, error) {
 	var tx map[string]interface{}
 	json.Unmarshal(result, &tx)
 	return tx, nil
+}
+
+// EnsureRegtest verifies that the connected Bitcoin node is running on regtest.
+// Calls log.Fatalf if the node is unreachable or reports a different network,
+// preventing accidental transactions on mainnet or testnet.
+func EnsureRegtest() {
+	result, err := RPCCall("getblockchaininfo")
+	if err != nil {
+		log.Fatalf("SAFETY: cannot reach Bitcoin node: %v", err)
+	}
+	var info map[string]interface{}
+	if err := json.Unmarshal(result, &info); err != nil {
+		log.Fatalf("SAFETY: cannot parse getblockchaininfo: %v", err)
+	}
+	chain, _ := info["chain"].(string)
+	if chain != "regtest" {
+		log.Fatalf("SAFETY: Connected to %q network, not regtest! Refusing to run integration tests.", chain)
+	}
 }
 
 // IsNodeAvailable checks if the regtest node is reachable.

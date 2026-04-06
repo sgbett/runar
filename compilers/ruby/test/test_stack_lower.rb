@@ -326,9 +326,9 @@ class TestStackLower < Minitest::Test
 
   def test_p2pkh_script_contains_dup
     artifact = compile_source(P2PKH_SOURCE, "P2PKH.runar.ts")
-    # OP_DUP = 0x76
-    assert_includes artifact.script.downcase, "76",
-                    "P2PKH script should contain OP_DUP (76)"
+    # Use ASM check to avoid spurious matches inside push data bytes
+    assert_includes artifact.asm, "OP_DUP",
+                    "P2PKH script should contain OP_DUP"
   end
 
   # ---------------------------------------------------------------------------

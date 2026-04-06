@@ -31,18 +31,28 @@ fn read_conformance_format(test_name: &str, ext: &str) -> Option<String> {
 
 #[test]
 fn test_parse_dispatch_sol() {
-    let source = read_conformance_format("arithmetic", ".runar.sol");
-    if source.is_none() { return; }
-    let result = parse_source(&source.unwrap(), Some("arithmetic.runar.sol"));
+    let source = match read_conformance_format("arithmetic", ".runar.sol") {
+        Some(s) => s,
+        None => {
+            eprintln!("SKIP: conformance source not found for arithmetic.runar.sol");
+            return;
+        }
+    };
+    let result = parse_source(&source, Some("arithmetic.runar.sol"));
     assert!(result.contract.is_some(), "Solidity parser should produce a contract");
     assert_eq!(result.contract.as_ref().unwrap().name, "Arithmetic");
 }
 
 #[test]
 fn test_parse_dispatch_move() {
-    let source = read_conformance_format("arithmetic", ".runar.move");
-    if source.is_none() { return; }
-    let result = parse_source(&source.unwrap(), Some("arithmetic.runar.move"));
+    let source = match read_conformance_format("arithmetic", ".runar.move") {
+        Some(s) => s,
+        None => {
+            eprintln!("SKIP: conformance source not found for arithmetic.runar.move");
+            return;
+        }
+    };
+    let result = parse_source(&source, Some("arithmetic.runar.move"));
     // Move parser may produce errors on some constructs (known issue)
     if result.contract.is_some() {
         assert_eq!(result.contract.as_ref().unwrap().name, "Arithmetic");
@@ -51,9 +61,14 @@ fn test_parse_dispatch_move() {
 
 #[test]
 fn test_parse_dispatch_rs() {
-    let source = read_conformance_format("arithmetic", ".runar.rs");
-    if source.is_none() { return; }
-    let result = parse_source(&source.unwrap(), Some("arithmetic.runar.rs"));
+    let source = match read_conformance_format("arithmetic", ".runar.rs") {
+        Some(s) => s,
+        None => {
+            eprintln!("SKIP: conformance source not found for arithmetic.runar.rs");
+            return;
+        }
+    };
+    let result = parse_source(&source, Some("arithmetic.runar.rs"));
     if result.contract.is_some() {
         assert_eq!(result.contract.as_ref().unwrap().name, "Arithmetic");
     }
@@ -61,9 +76,14 @@ fn test_parse_dispatch_rs() {
 
 #[test]
 fn test_parse_dispatch_ts() {
-    let source = read_conformance_format("arithmetic", ".runar.ts");
-    if source.is_none() { return; }
-    let result = parse_source(&source.unwrap(), Some("arithmetic.runar.ts"));
+    let source = match read_conformance_format("arithmetic", ".runar.ts") {
+        Some(s) => s,
+        None => {
+            eprintln!("SKIP: conformance source not found for arithmetic.runar.ts");
+            return;
+        }
+    };
+    let result = parse_source(&source, Some("arithmetic.runar.ts"));
     assert!(result.errors.is_empty(), "TS parser should succeed: {:?}", result.errors);
     assert!(result.contract.is_some());
     assert_eq!(result.contract.as_ref().unwrap().name, "Arithmetic");
@@ -75,9 +95,14 @@ fn test_parse_dispatch_ts() {
 
 #[test]
 fn test_parse_sol_arithmetic_structure() {
-    let source = read_conformance_format("arithmetic", ".runar.sol");
-    if source.is_none() { return; }
-    let result = parse_source(&source.unwrap(), Some("arithmetic.runar.sol"));
+    let source = match read_conformance_format("arithmetic", ".runar.sol") {
+        Some(s) => s,
+        None => {
+            eprintln!("SKIP: conformance source not found for arithmetic.runar.sol (structure test)");
+            return;
+        }
+    };
+    let result = parse_source(&source, Some("arithmetic.runar.sol"));
     let contract = result.contract.expect("should parse contract");
 
     assert_eq!(contract.name, "Arithmetic");
@@ -91,9 +116,14 @@ fn test_parse_sol_arithmetic_structure() {
 
 #[test]
 fn test_parse_sol_p2pkh() {
-    let source = read_conformance_format("basic-p2pkh", ".runar.sol");
-    if source.is_none() { return; }
-    let result = parse_source(&source.unwrap(), Some("basic-p2pkh.runar.sol"));
+    let source = match read_conformance_format("basic-p2pkh", ".runar.sol") {
+        Some(s) => s,
+        None => {
+            eprintln!("SKIP: conformance source not found for basic-p2pkh.runar.sol");
+            return;
+        }
+    };
+    let result = parse_source(&source, Some("basic-p2pkh.runar.sol"));
     let contract = result.contract.expect("should parse contract");
 
     assert_eq!(contract.name, "P2PKH");
@@ -106,11 +136,21 @@ fn test_parse_sol_p2pkh() {
 
 #[test]
 fn test_parse_move_arithmetic_structure() {
-    let source = read_conformance_format("arithmetic", ".runar.move");
-    if source.is_none() { return; }
-    let result = parse_source(&source.unwrap(), Some("arithmetic.runar.move"));
-    if result.contract.is_none() { return; } // Move parser may have issues (known)
-    let contract = result.contract.unwrap();
+    let source = match read_conformance_format("arithmetic", ".runar.move") {
+        Some(s) => s,
+        None => {
+            eprintln!("SKIP: conformance source not found for arithmetic.runar.move (structure test)");
+            return;
+        }
+    };
+    let result = parse_source(&source, Some("arithmetic.runar.move"));
+    let contract = match result.contract {
+        Some(c) => c,
+        None => {
+            eprintln!("SKIP: Move parser did not produce a contract for arithmetic.runar.move (known issue)");
+            return;
+        }
+    };
 
     assert_eq!(contract.name, "Arithmetic");
     if !contract.methods.is_empty() {
@@ -120,12 +160,23 @@ fn test_parse_move_arithmetic_structure() {
 
 #[test]
 fn test_parse_move_p2pkh() {
-    let source = read_conformance_format("basic-p2pkh", ".runar.move");
-    if source.is_none() { return; }
-    let result = parse_source(&source.unwrap(), Some("basic-p2pkh.runar.move"));
-    if result.contract.is_none() { return; } // Move parser may have issues (known)
+    let source = match read_conformance_format("basic-p2pkh", ".runar.move") {
+        Some(s) => s,
+        None => {
+            eprintln!("SKIP: conformance source not found for basic-p2pkh.runar.move");
+            return;
+        }
+    };
+    let result = parse_source(&source, Some("basic-p2pkh.runar.move"));
+    let contract = match result.contract {
+        Some(c) => c,
+        None => {
+            eprintln!("SKIP: Move parser did not produce a contract for basic-p2pkh.runar.move (known issue)");
+            return;
+        }
+    };
 
-    assert_eq!(result.contract.unwrap().name, "P2PKH");
+    assert_eq!(contract.name, "P2PKH");
 }
 
 // ---------------------------------------------------------------------------
@@ -140,9 +191,14 @@ fn test_ts_end_to_end_all_conformance() {
     ];
 
     for dir in &test_dirs {
-        let source = read_conformance_format(dir, ".runar.ts");
-        if source.is_none() { continue; }
-        let artifact = compile_from_source_str(&source.unwrap(), Some(&format!("{}.runar.ts", dir)))
+        let source = match read_conformance_format(dir, ".runar.ts") {
+            Some(s) => s,
+            None => {
+                eprintln!("SKIP: conformance source not found for {}.runar.ts", dir);
+                continue;
+            }
+        };
+        let artifact = compile_from_source_str(&source, Some(&format!("{}.runar.ts", dir)))
             .unwrap_or_else(|e| panic!("{}: compilation failed: {}", dir, e));
 
         assert!(!artifact.script.is_empty(), "{}: empty script hex", dir);
@@ -311,9 +367,14 @@ fn test_cross_format_property_consistency() {
     let formats = [".runar.sol", ".runar.move"];
 
     for ext in &formats {
-        let source = read_conformance_format("arithmetic", ext);
-        if source.is_none() { continue; }
-        let result = parse_source(&source.unwrap(), Some(&format!("arithmetic{}", ext)));
+        let source = match read_conformance_format("arithmetic", ext) {
+            Some(s) => s,
+            None => {
+                eprintln!("SKIP: conformance source not found for arithmetic{}", ext);
+                continue;
+            }
+        };
+        let result = parse_source(&source, Some(&format!("arithmetic{}", ext)));
 
         if let Some(contract) = result.contract {
             assert!(!contract.properties.is_empty(),
@@ -331,9 +392,14 @@ fn test_cross_format_method_param_consistency() {
     let formats = [".runar.sol", ".runar.move"];
 
     for ext in &formats {
-        let source = read_conformance_format("arithmetic", ext);
-        if source.is_none() { continue; }
-        let result = parse_source(&source.unwrap(), Some(&format!("arithmetic{}", ext)));
+        let source = match read_conformance_format("arithmetic", ext) {
+            Some(s) => s,
+            None => {
+                eprintln!("SKIP: conformance source not found for arithmetic{}", ext);
+                continue;
+            }
+        };
+        let result = parse_source(&source, Some(&format!("arithmetic{}", ext)));
 
         if let Some(contract) = result.contract {
             assert!(!contract.methods.is_empty(),

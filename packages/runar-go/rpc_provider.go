@@ -29,13 +29,13 @@ type RPCProvider struct {
 }
 
 // NewRPCProvider creates an RPCProvider with the given connection details.
-// The network defaults to "mainnet". AutoMine is disabled.
+// The network defaults to "testnet". AutoMine is disabled.
 func NewRPCProvider(url, user, pass string) *RPCProvider {
 	return &RPCProvider{
 		url:     url,
 		user:    user,
 		pass:    pass,
-		network: "mainnet",
+		network: "testnet",
 		client:  &http.Client{Timeout: 10 * time.Minute},
 	}
 }
@@ -246,9 +246,9 @@ func (p *RPCProvider) GetRawTransaction(txid string) (string, error) {
 	return rawHex, nil
 }
 
-// GetFeeRate returns 1 sat/byte (standard BSV fee rate).
+// GetFeeRate returns 100 sat/KB (standard BSV relay fee, matches TS SDK).
 func (p *RPCProvider) GetFeeRate() (int64, error) {
-	return 1, nil
+	return 100, nil
 }
 
 // ---------------------------------------------------------------------------

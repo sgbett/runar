@@ -420,44 +420,27 @@ test "ANFProgram basic construction" {
     try std.testing.expect(program.contract_name.len > 0);
 }
 
-test "ANFValue TypeScript-matching variant tags" {
-    const variants = [_]ANFValue{
-        .{ .load_param = .{ .name = "x" } },
-        .{ .load_prop = .{ .name = "y" } },
-        .{ .load_const = .{ .value = .{ .integer = 42 } } },
-        .{ .bin_op = .{ .op = "+", .left = "a", .right = "b" } },
-        .{ .unary_op = .{ .op = "!", .operand = "c" } },
-        .{ .call = .{ .func = "hash160", .args = &.{"d"} } },
-        .{ .method_call = .{ .object = "e", .method = "unlock", .args = &.{} } },
-        .{ .assert = .{ .value = "f" } },
-        .{ .update_prop = .{ .name = "counter", .value = "g" } },
-        .{ .get_state_script = {} },
-        .{ .check_preimage = .{ .preimage = "h" } },
-        .{ .deserialize_state = .{ .preimage = "i" } },
-        .{ .add_output = .{ .satoshis = "j", .state_values = &.{}, .preimage = "k" } },
-        .{ .add_raw_output = .{ .satoshis = "l", .script_bytes = "m" } },
-        .{ .array_literal = .{ .elements = &.{ "n", "o" } } },
-    };
-    try std.testing.expectEqual(@as(usize, 15), variants.len);
-}
-
-test "ANFValue legacy variant tags" {
-    const variants = [_]ANFValue{
-        .{ .literal_int = 42 }, .{ .literal_bigint = "99999" }, .{ .literal_bool = true },
-        .{ .literal_bytes = "dead" }, .{ .ref = "t0" }, .{ .property_read = "x" },
-        .{ .property_write = .{ .name = "c", .value_ref = "t1" } },
-        .{ .binary_op = .{ .op = .add, .left = "a", .right = "b" } },
-        .{ .builtin_call = .{ .name = "h", .args = &.{"d"} } },
-        .{ .assert_op = .{ .condition = "c" } }, .{ .nop = {} },
-    };
-    try std.testing.expectEqual(@as(usize, 11), variants.len);
-}
-
-test "StackInstruction backward compatibility" {
-    const instructions = [_]StackInstruction{ .{ .op = .op_dup }, .{ .op = .op_hash160 }, .{ .push_data = &.{ 0xaa, 0xbb } }, .{ .op = .op_equalverify }, .{ .op = .op_checksig }, .{ .push_int = 42 }, .{ .push_bool = true } };
-    try std.testing.expectEqual(@as(usize, 7), instructions.len);
+test "critical opcode byte values match Bitcoin Script spec" {
     try std.testing.expectEqual(@as(u8, 0x76), @intFromEnum(Opcode.op_dup));
     try std.testing.expectEqual(@as(u8, 0xac), @intFromEnum(Opcode.op_checksig));
+    try std.testing.expectEqual(@as(u8, 0xa9), @intFromEnum(Opcode.op_hash160));
+    try std.testing.expectEqual(@as(u8, 0x87), @intFromEnum(Opcode.op_equal));
+    try std.testing.expectEqual(@as(u8, 0x88), @intFromEnum(Opcode.op_equalverify));
+    try std.testing.expectEqual(@as(u8, 0x63), @intFromEnum(Opcode.op_if));
+    try std.testing.expectEqual(@as(u8, 0x67), @intFromEnum(Opcode.op_else));
+    try std.testing.expectEqual(@as(u8, 0x68), @intFromEnum(Opcode.op_endif));
+    try std.testing.expectEqual(@as(u8, 0x6a), @intFromEnum(Opcode.op_return));
+    try std.testing.expectEqual(@as(u8, 0x00), @intFromEnum(Opcode.op_0));
+    try std.testing.expectEqual(@as(u8, 0x51), @intFromEnum(Opcode.op_1));
+    try std.testing.expectEqual(@as(u8, 0xab), @intFromEnum(Opcode.op_codeseparator));
+    try std.testing.expectEqual(@as(u8, 0x69), @intFromEnum(Opcode.op_verify));
+    try std.testing.expectEqual(@as(u8, 0x75), @intFromEnum(Opcode.op_drop));
+    try std.testing.expectEqual(@as(u8, 0x77), @intFromEnum(Opcode.op_nip));
+    try std.testing.expectEqual(@as(u8, 0x7c), @intFromEnum(Opcode.op_swap));
+    try std.testing.expectEqual(@as(u8, 0x93), @intFromEnum(Opcode.op_add));
+    try std.testing.expectEqual(@as(u8, 0x94), @intFromEnum(Opcode.op_sub));
+    try std.testing.expectEqual(@as(u8, 0x7e), @intFromEnum(Opcode.op_cat));
+    try std.testing.expectEqual(@as(u8, 0xa8), @intFromEnum(Opcode.op_sha256));
 }
 
 test "Opcode aliases" {
@@ -498,15 +481,14 @@ test "ConstValue equality" {
     try std.testing.expect((ConstValue{ .string = "a" }).eql(.{ .string = "a" }));
 }
 
-test "StackOp all variant tags" {
-    const ops = [_]StackOp{
-        .{ .push = .{ .integer = 42 } }, .{ .dup = {} }, .{ .swap = {} }, .{ .drop = {} },
-        .{ .nip = {} }, .{ .over = {} }, .{ .rot = {} }, .{ .tuck = {} },
-        .{ .roll = 3 }, .{ .pick = 2 }, .{ .opcode = "OP_ADD" },
-        .{ .@"if" = .{ .then = &.{}, .@"else" = null } },
-        .{ .placeholder = .{ .param_index = 0, .param_name = "x" } },
-    };
-    try std.testing.expectEqual(@as(usize, 13), ops.len);
+test "StackOp union tags are constructible and distinguishable" {
+    const a = StackOp{ .dup = {} };
+    const b = StackOp{ .push = .{ .integer = 42 } };
+    const c = StackOp{ .opcode = "OP_ADD" };
+    try std.testing.expect(std.meta.activeTag(a) == .dup);
+    try std.testing.expect(std.meta.activeTag(b) == .push);
+    try std.testing.expect(std.meta.activeTag(c) == .opcode);
+    try std.testing.expect(std.meta.activeTag(a) != std.meta.activeTag(b));
 }
 
 test "DiagnosticSeverity and CompilerDiagnostic" {

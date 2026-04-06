@@ -88,7 +88,11 @@ def is_node_available() -> bool:
 
 def mine(blocks: int) -> None:
     """Mine blocks on regtest."""
-    rpc_call("generate", blocks)
+    try:
+        rpc_call("generate", blocks)
+    except Exception:
+        addr = rpc_call("getnewaddress")
+        rpc_call("generatetoaddress", blocks, addr)
 
 
 def fund_address(address: str, btc_amount: float = 1.0) -> None:
@@ -470,6 +474,26 @@ def _crt(a1: int, m1: int, a2: int, m2: int) -> int:
 # ---------------------------------------------------------------------------
 # Pytest fixtures
 # ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="session", autouse=True)
+def ensure_blocks():
+    """Ensure at least 101 blocks exist for coinbase maturity."""
+    try:
+        count = rpc_call('getblockcount')
+        if count < 101:
+            mine(101 - count)
+    except Exception:
+        pass  # Node might not be available; per-test skips handle that
+
+
+@pytest.fixture(scope="session", autouse=True)
+def ensure_regtest():
+    """Verify the connected node is on regtest before running any tests."""
+    if not is_node_available():
+        return  # skip_if_no_node will handle per-test skipping
+    info = rpc_call('getblockchaininfo')
+    assert info['chain'] == 'regtest', f"SAFETY: Connected to {info['chain']}, not regtest!"
+
 
 @pytest.fixture(autouse=True)
 def skip_if_no_node():

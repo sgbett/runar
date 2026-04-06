@@ -284,3 +284,133 @@ fn hex_to_bytes(hex: &str) -> Result<Vec<u8>, String> {
 fn bytes_to_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a minimal valid raw transaction hex with one input and one output.
+    /// version(4) + input_count(1) + txid(32) + vout(4) + script_len(1) + sequence(4)
+    ///           + output_count(1) + satoshis(8) + script_len(1) + script(1) + locktime(4)
+    fn minimal_tx_hex() -> String {
+        let mut tx: Vec<u8> = Vec::new();
+        // version = 1
+        tx.extend_from_slice(&1u32.to_le_bytes());
+        // input count = 1
+        tx.push(1);
+        // prev txid (32 zero bytes)
+        tx.extend_from_slice(&[0u8; 32]);
+        // prev output index = 0
+        tx.extend_from_slice(&0u32.to_le_bytes());
+        // scriptSig length = 0
+        tx.push(0);
+        // sequence = 0xffffffff
+        tx.extend_from_slice(&0xffffffffu32.to_le_bytes());
+        // output count = 1
+        tx.push(1);
+        // satoshis = 1000
+        tx.extend_from_slice(&1000u64.to_le_bytes());
+        // output script: OP_1 (one byte)
+        tx.push(1);
+        tx.push(0x51);
+        // locktime = 0
+        tx.extend_from_slice(&0u32.to_le_bytes());
+        tx.iter().map(|b| format!("{:02x}", b)).collect()
+    }
+
+    /// A trivial locking script hex (OP_1 = 0x51).
+    fn minimal_subscript() -> &'static str {
+        "51"
+    }
+
+    #[test]
+    fn test_returns_der_signature() {
+        let tx_hex = minimal_tx_hex();
+        let result = compute_op_push_tx(&tx_hex, 0, minimal_subscript(), 1000);
+        assert!(result.is_ok(), "expected Ok, got: {:?}", result);
+        let (sig_hex, _preimage_hex) = result.unwrap();
+        let sig_bytes = (0..sig_hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&sig_hex[i..i + 2], 16).unwrap())
+            .collect::<Vec<u8>>();
+        assert_eq!(sig_bytes[0], 0x30, "DER signature must start with sequence tag 0x30");
+    }
+
+    #[test]
+    fn test_deterministic() {
+        let tx_hex = minimal_tx_hex();
+        let sig1 = compute_op_push_tx(&tx_hex, 0, minimal_subscript(), 1000).unwrap().0;
+        let sig2 = compute_op_push_tx(&tx_hex, 0, minimal_subscript(), 1000).unwrap().0;
+        assert_eq!(sig1, sig2, "same inputs must produce the same signature");
+    }
+
+    #[test]
+    fn test_preimage_is_nonempty() {
+        let tx_hex = minimal_tx_hex();
+        let (_sig, preimage) = compute_op_push_tx(&tx_hex, 0, minimal_subscript(), 1000).unwrap();
+        assert!(!preimage.is_empty(), "preimage must not be empty");
+        // BIP-143 preimage contains several fixed-length fields; for a minimal tx it is at least 156 bytes = 312 hex chars
+        assert!(preimage.len() >= 312, "preimage too short: {} hex chars", preimage.len());
+    }
+
+    #[test]
+    fn test_sighash_byte_appended() {
+        // SIGHASH_ALL | SIGHASH_FORKID = 0x41
+        let tx_hex = minimal_tx_hex();
+        let (sig_hex, _) = compute_op_push_tx(&tx_hex, 0, minimal_subscript(), 1000).unwrap();
+        let sig_bytes: Vec<u8> = (0..sig_hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&sig_hex[i..i + 2], 16).unwrap())
+            .collect();
+        assert_eq!(*sig_bytes.last().unwrap(), 0x41, "last byte must be SIGHASH_ALL|FORKID (0x41)");
+    }
+
+    #[test]
+    fn test_low_s_enforcement() {
+        let half_n: [u8; 32] = [
+            0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0x5D, 0x57, 0x6E, 0x73, 0x57, 0xA4, 0x50, 0x1D,
+            0xDF, 0xE9, 0x2F, 0x46, 0x68, 0x1B, 0x20, 0xA0,
+        ];
+        for i in 0..20u8 {
+            // Vary the subscript by appending different OP_NOP bytes to change the sighash
+            let subscript = format!("51{:02x}", i);
+            let tx_hex = minimal_tx_hex();
+            let (sig_hex, _) = compute_op_push_tx(&tx_hex, 0, &subscript, 1000).unwrap();
+            let sig_bytes: Vec<u8> = (0..sig_hex.len())
+                .step_by(2)
+                .map(|j| u8::from_str_radix(&sig_hex[j..j + 2], 16).unwrap())
+                .collect();
+            // Parse DER: 0x30 [total_len] 0x02 [r_len] <r> 0x02 [s_len] <s> [sighash]
+            let r_len = sig_bytes[3] as usize;
+            let s_offset = 4 + r_len + 1; // skip tag + len + r + 0x02 tag
+            let s_len = sig_bytes[s_offset] as usize;
+            let s_bytes = &sig_bytes[s_offset + 1..s_offset + 1 + s_len];
+            // Strip leading zero padding byte that DER may prepend for sign bit
+            let s_trimmed = if s_bytes.len() == 33 && s_bytes[0] == 0 { &s_bytes[1..] } else { s_bytes };
+            let mut padded = [0u8; 32];
+            let start = 32usize.saturating_sub(s_trimmed.len());
+            padded[start..].copy_from_slice(s_trimmed);
+            assert!(padded <= half_n, "S exceeds N/2 on iteration {i}");
+        }
+    }
+
+    #[test]
+    fn test_input_index_out_of_range() {
+        let tx_hex = minimal_tx_hex();
+        let result = compute_op_push_tx(&tx_hex, 99, minimal_subscript(), 1000);
+        assert!(result.is_err(), "expected Err for out-of-range input index");
+        let msg = result.unwrap_err();
+        assert!(msg.contains("out of range"), "error message should mention 'out of range': {msg}");
+    }
+
+    #[test]
+    fn test_code_separator_trims_subscript() {
+        let tx_hex = minimal_tx_hex();
+        // subscript "ab51": code_sep_index=0 trims first byte, leaving "51"
+        let (sig_with_sep, _) = compute_op_push_tx_with_code_sep(&tx_hex, 0, "ab51", 1000, 0).unwrap();
+        let (sig_plain, _) = compute_op_push_tx(&tx_hex, 0, "51", 1000).unwrap();
+        assert_eq!(sig_with_sep, sig_plain, "trimmed subscript must produce same signature as plain subscript");
+    }
+}

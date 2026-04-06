@@ -1439,12 +1439,16 @@ fn test_ir_validate_loop_count_exceeds_max() {
     // A count of 1000 will either succeed or fail during stack lowering (depth check).
     // We verify the result is not a panic and produces a consistent response.
     let result = compile_from_ir_str(ir_json);
-    // Either it succeeds or it errors — both are acceptable, just no panic.
-    match &result {
-        Ok(_) => { /* no enforced max in Rust IR loader */ }
+    match result {
+        Ok(_) => {} // Rust compiler allows large loop counts
         Err(e) => {
-            // If it does error, it should be a stack depth or loop-related message
-            let _ = e; // Any error is fine
+            // Rust enforces a stack depth limit (800) rather than a loop count limit;
+            // a loop of 1000 iterations expands to depth 2001 and hits that cap.
+            let msg = format!("{e}");
+            assert!(
+                msg.contains("stack depth") || msg.contains("loop") || msg.contains("exceeds"),
+                "if loop 1000 fails, error should be about stack depth or loop limit, got: {msg}"
+            );
         }
     }
 }
@@ -1769,8 +1773,12 @@ fn test_emit_empty_methods_produces_empty_hex() {
                 artifact.script
             );
         }
-        Err(_) => {
-            // A validation error for no methods is also acceptable
+        Err(e) => {
+            let msg = format!("{e}");
+            assert!(
+                msg.to_lowercase().contains("method") || msg.to_lowercase().contains("empty") || msg.to_lowercase().contains("no public"),
+                "if compilation fails, error should be about missing methods, got: {msg}"
+            );
         }
     }
 }

@@ -4,7 +4,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"math"
 
 	"github.com/bsv-blockchain/go-sdk/transaction"
 	runar "github.com/icellan/runar/packages/runar-go"
@@ -32,7 +31,7 @@ func (p *RPCProvider) GetTransaction(txid string) (*runar.TransactionData, error
 		for _, o := range vout {
 			om, _ := o.(map[string]interface{})
 			valBTC, _ := om["value"].(float64)
-			sats := int64(valBTC * 1e8)
+			sats := parseSatoshis(valBTC)
 			scriptHex := ""
 			if sp, ok := om["scriptPubKey"].(map[string]interface{}); ok {
 				scriptHex, _ = sp["hex"].(string)
@@ -81,7 +80,7 @@ func (p *RPCProvider) GetUtxos(address string) ([]runar.UTXO, error) {
 		utxos = append(utxos, runar.UTXO{
 			Txid:        txid,
 			OutputIndex: int(vout),
-			Satoshis:    int64(math.Round(amount * 1e8)),
+			Satoshis:    parseSatoshis(amount),
 			Script:      scriptPubKey,
 		})
 	}

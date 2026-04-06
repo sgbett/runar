@@ -1,6 +1,7 @@
 package runar
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -2184,6 +2185,62 @@ func TestLocalSigner_DifferentKeysDifferentSigs(t *testing.T) {
 	sig2, _ := signer2.Sign(txHex, 0, "51", 100, nil)
 	if sig1 == sig2 {
 		t.Error("different keys should produce different signatures")
+	}
+}
+
+func TestLocalSigner_ProducesLowS(t *testing.T) {
+	halfN, _ := new(big.Int).SetString("7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0", 16)
+	signer, err := NewLocalSigner("0000000000000000000000000000000000000000000000000000000000000001")
+	if err != nil {
+		t.Fatalf("NewLocalSigner: %v", err)
+	}
+
+	// Base transaction template: version(4) + 1 input(41 bytes) + 1 output + locktime(4)
+	// We vary the satoshis to produce different sighash preimages and thus different signatures.
+	baseTxPrefix := "01000000" + // version 1
+		"01" + // 1 input
+		strings.Repeat("00", 32) + // prevTxid
+		"00000000" + // prevIndex 0
+		"00" + // empty scriptSig
+		"ffffffff" + // sequence
+		"01" // 1 output
+
+	for i := 0; i < 20; i++ {
+		// Encode (100 + i) satoshis as 8-byte little-endian
+		satoshis := int64(100 + i)
+		var satLE [8]byte
+		for j := 0; j < 8; j++ {
+			satLE[j] = byte(satoshis >> (8 * j))
+		}
+		satHex := fmt.Sprintf("%02x%02x%02x%02x%02x%02x%02x%02x",
+			satLE[0], satLE[1], satLE[2], satLE[3],
+			satLE[4], satLE[5], satLE[6], satLE[7])
+		txHex := baseTxPrefix + satHex + "01" + "51" + "00000000"
+
+		sig, err := signer.Sign(txHex, 0, "51", satoshis, nil)
+		if err != nil {
+			t.Fatalf("iteration %d: Sign: %v", i, err)
+		}
+
+		// Decode DER from hex: 30 <len> 02 <rlen> <R> 02 <slen> <S> [hashtype]
+		sigBytes, err := hex.DecodeString(sig)
+		if err != nil {
+			t.Fatalf("iteration %d: invalid hex signature: %v", i, err)
+		}
+		if len(sigBytes) < 6 || sigBytes[0] != 0x30 {
+			t.Fatalf("iteration %d: invalid DER signature (no 0x30 tag)", i)
+		}
+		rLen := int(sigBytes[3])
+		sOffset := 4 + rLen + 1
+		if sOffset >= len(sigBytes) {
+			t.Fatalf("iteration %d: DER too short to contain S", i)
+		}
+		sLen := int(sigBytes[sOffset])
+		sBytes := sigBytes[sOffset+1 : sOffset+1+sLen]
+		s := new(big.Int).SetBytes(sBytes)
+		if s.Cmp(halfN) > 0 {
+			t.Errorf("iteration %d: S value exceeds N/2 (BIP-62 low-S violation)", i)
+		}
 	}
 }
 

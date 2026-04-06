@@ -1517,9 +1517,8 @@ class Bad extends SmartContract {
             // Error is fine; it should mention the property name
             let err = e.to_lowercase();
             assert!(
-                err.contains("nonexistent") || err.contains("property") || err.contains("does not exist") || err.contains("unknown") || !err.is_empty(),
-                "error should mention the property access issue; got: {}",
-                e
+                err.contains("nonexistent") || err.contains("property") || err.contains("does not exist") || err.contains("unknown"),
+                "expected error about nonexistent property, got: {e}"
             );
         }
     }
@@ -1730,9 +1729,7 @@ class WithDefault extends SmartContract {
             assert!(!artifact.script.is_empty(), "script should not be empty");
         }
         Err(e) => {
-            // If property initializers are not yet supported in the Rust parser,
-            // this is acceptable. The test just documents the current behavior.
-            let _ = e; // any parse/compile error is fine
+            panic!("property initializer compilation should succeed, got error: {e}");
         }
     }
 }

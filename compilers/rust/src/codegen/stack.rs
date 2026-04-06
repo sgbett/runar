@@ -1291,8 +1291,10 @@ impl LoweringContext {
             self.sm.push("");
             self.sm.push(binding_name);
         } else if func_name == "len" {
-            self.sm.push("");
-            self.sm.push(binding_name);
+            // OP_SIZE leaves original on stack and pushes length on top.
+            // Emit OP_NIP to remove the original value, keeping only the size.
+            self.emit_op(StackOp::Opcode("OP_NIP".to_string()));
+            self.sm.push(binding_name); // size only
         } else {
             self.sm.push(binding_name);
         }
