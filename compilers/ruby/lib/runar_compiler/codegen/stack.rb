@@ -1296,8 +1296,8 @@ module RunarCompiler::Codegen
         @sm.push("")           # left part
         @sm.push(binding_name) # right part (top)
       elsif func_name == "len"
-        @sm.push("")           # original value still present
-        @sm.push(binding_name) # size on top
+        emit_opcode("OP_NIP")  # remove original value, keep only size
+        @sm.push(binding_name)
       else
         @sm.push(binding_name)
       end

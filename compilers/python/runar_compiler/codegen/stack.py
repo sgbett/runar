@@ -1059,8 +1059,8 @@ class _LoweringContext:
             self.sm.push("")            # left part
             self.sm.push(binding_name)  # right part (top)
         elif func_name == "len":
-            self.sm.push("")            # original value still present
-            self.sm.push(binding_name)  # size on top
+            self.emit_op(StackOp(op="opcode", code="OP_NIP"))  # remove original value, keep only size
+            self.sm.push(binding_name)
         else:
             self.sm.push(binding_name)
 
